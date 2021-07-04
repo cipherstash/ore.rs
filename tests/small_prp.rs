@@ -12,3 +12,4 @@ fn init_prp() {
     assert_eq!(15, prp.inverse(prp.permute(15)));
 }
 
+// TODO: Add tests for the different valid block sizes

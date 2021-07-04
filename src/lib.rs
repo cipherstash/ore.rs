@@ -9,14 +9,11 @@ pub struct Prp {
 
 impl Prp {
     // TODO: Pass the block size as an argument
+    // TODO: Add a guard for the block_size
+    // Should probably use generics for the block size and make it a bit more robust
     pub fn init(key: &[u8]) -> Prp {
         let mut prg = Prng::init(&key);
-        let mut permutation: Vec<usize> = vec![];
-
-        // TODO: Size the vector on create based on domain size of the PRP
-        for i in 0..=255 as usize {
-            permutation.push(i);
-        }
+        let mut permutation: Vec<usize> = (0..=255).collect();
 
         for elem in 1..permutation.len() {
             let j = prg.next_byte();
