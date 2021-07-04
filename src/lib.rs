@@ -1,48 +1,9 @@
 
-mod aes_prg {
-    use aes::{Aes128};
-    use aes::cipher::{
-        BlockEncrypt, NewBlockCipher,
-        generic_array::{GenericArray},
-    };
-
-    pub struct Prng {
-        cipher: Aes128,
-        counter: u8
-    }
-
-    impl Prng {
-        pub fn init(key: &[u8]) -> Prng {
-            let key_array = GenericArray::from_slice(key);
-            let cipher = Aes128::new(&key_array);
-            return Prng { cipher, counter: 0 };
-        }
-
-        /*
-         * Notes:
-         *
-         * use std::mem::transmute;
-           let bytes: [u8; 4] = unsafe { transmute(123u32.to_be()) }; // or .to_le()
-
-           or use https://docs.rs/byteorder/1.4.3/byteorder/
-        */
-
-        pub fn next_byte(&mut self) -> u8 {
-
-            // FIXME: We can't handle if counter > 255
-            let mut data: Vec<u8> = vec![self.counter, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-            let mut block = GenericArray::from_mut_slice(&mut data);
-            self.cipher.encrypt_block(&mut block);
-            self.counter += 1;
-            return block[0];
-        }
-    }
-}
-
-use aes_prg::*;
+pub mod prng;
+use prng::Prng;
 use std::convert::TryFrom;
 
-struct Prp {
+pub struct Prp {
     permutation: Vec<usize>
 }
 
@@ -77,36 +38,6 @@ impl Prp {
      * permutations in the ORE scheme */
     pub fn inverse(&self, input: usize) -> usize {
         self.permutation[input]
-    }
-}
-
-#[cfg(test)]
-mod tests {
-
-    use aes::cipher::{
-        generic_array::arr,
-    };
-    use super::*;
-    use super::aes_prg::*;
-
-    #[test]
-    fn prg_next_byte() {
-        let key = arr![u8; 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-        let mut prg = Prng::init(&key);
-        assert_eq!(219, prg.next_byte());
-        assert_eq!(69, prg.next_byte());
-    }
-
-    #[test]
-    fn init_prp() {
-        let key = arr![u8; 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-        let mut prg = Prng::init(&key);
-        let prp = Prp::init(&mut prg);
-
-        // TODO: Test all numbers in the block
-        println!("15 -> {}", prp.permute(15));
-        println!("75 -> {}", prp.permute(75));
-        assert_eq!(15, prp.inverse(prp.permute(15)));
     }
 }
 
