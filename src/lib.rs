@@ -103,6 +103,9 @@ mod tests {
         let mut prg = Prng::init(&key);
         let prp = Prp::init(&mut prg);
 
+        // TODO: Test all numbers in the block
+        println!("15 -> {}", prp.permute(15));
+        println!("75 -> {}", prp.permute(75));
         assert_eq!(15, prp.inverse(prp.permute(15)));
     }
 }
