@@ -13,8 +13,6 @@ mod aes_prg {
 
     impl Prng {
         pub fn init(key: &[u8]) -> Prng {
-            //let key = arr![u8; 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-            //let key = GenericArray::from_slice(&[0u8; 16]);
             let key_array = GenericArray::from_slice(key);
             let cipher = Aes128::new(&key_array);
             return Prng { cipher, counter: 0 };
@@ -57,7 +55,7 @@ impl Prp {
             permutation.push(i);
         }
 
-        for elem in 1..permutation.len() { // TODO: Use the size
+        for elem in 1..permutation.len() {
             let j = prg.next_byte();
             permutation.swap(elem, usize::try_from(j).unwrap());
         }
@@ -65,15 +63,20 @@ impl Prp {
         Prp { permutation: permutation }
     }
 
+    /* Permutes a number under the Pseudo-Random Permutation.
+     * Permution is worst case a linear search in 2^d (where d is the block size)
+     *
+     * Forward permutations are only used once in the ORE scheme so this is OK
+     * */
     pub fn permute(&self, input: usize) -> usize {
-        self.permutation[input]
+        self.permutation.iter().position(|&x| x == input).unwrap()
     }
 
-    // TODO: The inverse prp is slower (O(d)) but it is used for
-    // each block in the right CT. The forward PRP is only used once
-    // in the left CT
+    /* Performs the inverse permutation. This operation is constant time
+     * and is designed that way because there are d (block size) inverse
+     * permutations in the ORE scheme */
     pub fn inverse(&self, input: usize) -> usize {
-        self.permutation.iter().position(|&x| x == input).unwrap()
+        self.permutation[input]
     }
 }
 
