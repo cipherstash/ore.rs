@@ -3,10 +3,11 @@ use aes::cipher::{
     BlockEncrypt, NewBlockCipher,
     generic_array::{GenericArray},
 };
+use byteorder::{ByteOrder, BigEndian};
 
 pub struct Prng {
     cipher: Aes128,
-    counter: u8
+    counter: u128
 }
 
 impl Prng {
@@ -17,19 +18,13 @@ impl Prng {
     }
 
     /*
-     * Notes:
-     *
-     * use std::mem::transmute;
-     let bytes: [u8; 4] = unsafe { transmute(123u32.to_be()) }; // or .to_le()
-
-     or use https://docs.rs/byteorder/1.4.3/byteorder/
+     * Generates the next byte of the random number sequence
      */
-
     pub fn next_byte(&mut self) -> u8 {
+        let mut buf = [0u8; 16];
+        BigEndian::write_u128(&mut buf, self.counter);
 
-        // FIXME: We can't handle if counter > 255
-        let mut data: Vec<u8> = vec![self.counter, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let mut block = GenericArray::from_mut_slice(&mut data);
+        let mut block = GenericArray::from_mut_slice(&mut buf);
         self.cipher.encrypt_block(&mut block);
         self.counter += 1;
         return block[0];
