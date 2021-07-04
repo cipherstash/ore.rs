@@ -8,7 +8,9 @@ pub struct Prp {
 }
 
 impl Prp {
-    pub fn init(prg: &mut Prng) -> Prp {
+    // TODO: Pass the block size as an argument
+    pub fn init(key: &[u8]) -> Prp {
+        let mut prg = Prng::init(&key);
         let mut permutation: Vec<usize> = vec![];
 
         // TODO: Size the vector on create based on domain size of the PRP
