@@ -3,6 +3,10 @@ pub mod prng;
 use prng::Prng;
 use std::convert::TryFrom;
 
+/*pub struct Prp2<S> {
+    permutation: [u8; S]
+}*/
+
 pub struct Prp {
     permutation: Vec<usize>
 }
