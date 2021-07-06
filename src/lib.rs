@@ -1,46 +1,46 @@
 
-pub mod prng;
-use prng::Prng;
-use std::convert::TryFrom;
+//pub mod prng;
+pub mod prp;
+pub mod prf;
+//use prng::Prng;
+use prp::Prp;
+use prf::Prf;
 
-/*pub struct Prp2<S> {
-    permutation: [u8; S]
-}*/
+use rand;
+use rand::{Rng};
+use rand::os::{OsRng};
 
-pub struct Prp {
-    permutation: Vec<usize>
+pub struct Ore {
+    prf: Prf,
+    prp: Prp,
+    // OsRng uses /dev/urandom but we may want to look at
+    // ChaCha20 rng and HC128
+    rng: OsRng
 }
 
-impl Prp {
-    // TODO: Pass the block size as an argument
-    // TODO: Add a guard for the block_size
-    // Should probably use generics for the block size and make it a bit more robust
-    pub fn init(key: &[u8]) -> Prp {
-        let mut prg = Prng::init(&key);
-        let mut permutation: Vec<usize> = (0..=255).collect();
+impl Ore {
 
-        for elem in 1..permutation.len() {
-            let j = prg.next_byte();
-            permutation.swap(elem, usize::try_from(j).unwrap());
-        }
-
-        Prp { permutation: permutation }
+    pub fn init(prf_key: [u8; 16], prp_key: [u8; 16]) -> Ore {
+      return Ore {
+          prf: Prf::init(&prf_key),
+          prp: Prp::init(&prp_key),
+          rng: OsRng::new().unwrap()
+      }
     }
 
-    /* Permutes a number under the Pseudo-Random Permutation.
-     * Permution is worst case a linear search in 2^d (where d is the block size)
-     *
-     * Forward permutations are only used once in the ORE scheme so this is OK
-     * */
-    pub fn permute(&self, input: usize) -> usize {
-        self.permutation.iter().position(|&x| x == input).unwrap()
+    pub fn encrypt_left(&self, input: u8) -> [u8; 17] {
+        let px: u8 = self.prp.permute(input);
+        let mut output: [u8; 17] = [0u8; 17];
+        self.prf.encrypt(px, &mut output[0..16]);
+        output[16] = px;
+        return output;
     }
 
-    /* Performs the inverse permutation. This operation is constant time
-     * and is designed that way because there are d (block size) inverse
-     * permutations in the ORE scheme */
-    pub fn inverse(&self, input: usize) -> usize {
-        self.permutation[input]
+    pub fn encrypt_right(&mut self, input: u8) -> [u8; 48] {
+        let mut output: [u8; 48] = [0u8; 48];
+        // Generate a 16-byte random nonce
+        self.rng.fill_bytes(&mut output[0..16]);
+
+        return output;
     }
 }
-

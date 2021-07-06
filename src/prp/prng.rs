@@ -1,7 +1,7 @@
-use aes::{Aes128};
+use aes::Aes128;
 use aes::cipher::{
     BlockEncrypt, NewBlockCipher,
-    generic_array::{GenericArray},
+    generic_array::GenericArray,
 };
 use byteorder::{ByteOrder, BigEndian};
 

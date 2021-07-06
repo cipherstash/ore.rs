@@ -1,4 +1,4 @@
-use small_prp::Prp;
+use small_prp::prp::Prp;
 use hex_literal::hex;
 
 #[test]
