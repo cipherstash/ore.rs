@@ -28,7 +28,7 @@ fn encrypt_right() {
     let prp_key: [u8; 16] = hex!("d0d007a5 3f9a6848 83bc1f21 0f6595a3");
     let mut ore = Ore::init(prf_key, prp_key);
 
-    let right: [u8; 48] = ore.encrypt_right(10);
+    let right: [u8; 48] = ore.encrypt_right(170);
   
     assert_eq!(right, hex!("4754573e35422d904e187e411e8a1222a51404b1605604d32a9f0f7dd10b20524a2d866e48342067a3d7aa2361c178f3"));
 }
