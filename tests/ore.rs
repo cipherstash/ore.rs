@@ -40,8 +40,8 @@ fn compare_eq() {
     let prp_key: [u8; 16] = hex!("d0d007a5 3f9a6848 83bc1f21 0f6595a3");
     let mut ore = Ore::init(prf_key, prp_key);
 
-    let a = (ore.encrypt_left(10), ore.encrypt_right(10));
-    let b = (ore.encrypt_left(10), ore.encrypt_right(10));
+    let a = ore.encrypt(10);
+    let b = ore.encrypt(10);
 
     assert_eq!(ore.compare(a, b), 0);
 }
@@ -52,8 +52,8 @@ fn compare_lt() {
     let prp_key: [u8; 16] = hex!("d0d007a5 3f9a6848 83bc1f21 0f6595a3");
     let mut ore = Ore::init(prf_key, prp_key);
 
-    let a = (ore.encrypt_left(10), ore.encrypt_right(10));
-    let b = (ore.encrypt_left(50), ore.encrypt_right(50));
+    let a = ore.encrypt(10);
+    let b = ore.encrypt(50);
 
     assert_eq!(ore.compare(a, b), -1);
 }
@@ -64,8 +64,8 @@ fn compare_gt() {
     let prp_key: [u8; 16] = hex!("d0d007a5 3f9a6848 83bc1f21 0f6595a3");
     let mut ore = Ore::init(prf_key, prp_key);
 
-    let a = (ore.encrypt_left(10), ore.encrypt_right(10));
-    let b = (ore.encrypt_left(50), ore.encrypt_right(50));
+    let a = ore.encrypt(10);
+    let b = ore.encrypt(50);
 
     assert_eq!(ore.compare(b, a), 1);
 }

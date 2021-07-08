@@ -21,6 +21,32 @@ pub struct Ore {
     rng: OsRng
 }
 
+type Left = [u8; 17];
+type Right = [u8; 48];
+
+pub struct CipherText {
+    left: Left,
+    right: Right
+}
+
+type Key = [u8; 16];
+
+trait Initialise {
+    fn init() -> Self;
+}
+
+impl Initialise for Left {
+    fn init() -> Self {
+        [0u8; 17]
+    }
+}
+
+impl Initialise for Right {
+    fn init() -> Self {
+        [0u8; 48]
+    }
+}
+
 fn cmp(a: u8, b: u8) -> u128 {
     if a > b {
         return 1u128;
@@ -31,24 +57,31 @@ fn cmp(a: u8, b: u8) -> u128 {
 
 impl Ore {
 
-    pub fn init(prf_key: [u8; 16], prp_key: [u8; 16]) -> Ore {
+    pub fn init(prf_key: Key, prp_key: Key) -> Ore {
       return Ore {
           prf: Prf::init(&prf_key),
           prp: Prp::init(&prp_key),
-          rng: OsRng::new().unwrap()
+          rng: OsRng::new().unwrap() // TODO: Don't use unwrap
       }
     }
 
-    pub fn encrypt_left(&self, input: u8) -> [u8; 17] {
+    pub fn encrypt(&mut self, input: u8) -> CipherText {
+        CipherText {
+            left: self.encrypt_left(input),
+            right: self.encrypt_right(input)
+        }
+    }
+
+    pub fn encrypt_left(&self, input: u8) -> Left {
         let px: u8 = self.prp.permute(input);
-        let mut output: [u8; 17] = [0u8; 17];
+        let mut output = Left::init();
         self.prf.encrypt(px, &mut output[0..16]);
         output[16] = px;
         return output;
     }
 
-    pub fn encrypt_right(&mut self, input: u8) -> [u8; 48] {
-        let mut output: [u8; 48] = [0u8; 48];
+    pub fn encrypt_right(&mut self, input: u8) -> Right {
+        let mut output = Right::init();
         // Generate a 16-byte random nonce
         self.rng.fill_bytes(&mut output[0..16]);
 
@@ -87,28 +120,28 @@ impl Ore {
         return output;
     }
 
-    pub fn compare(self, a: ([u8; 17], [u8; 48]), b: ([u8; 17], [u8; 48])) -> i8 {
-        if a.0 == b.0 {
+    pub fn compare(self, a: CipherText, b: CipherText) -> i8 {
+        if a.left == b.left {
             return 0;
         }
-        let h: u8 = a.0[16];
+        let h: u8 = a.left[16];
         if h < 128 {
             // TODO: Can we define these slices as macros or a type or something?
             // Even better - define types for left and right and use (inline) functions
             // This is an get_bit function (make it an inline func)
-            let vh = (BigEndian::read_u128(&b.1[16..32]) & (1 << h)) >> h;
+            let vh = (BigEndian::read_u128(&b.right[16..32]) & (1 << h)) >> h;
             println!("In small, vh = {}", vh);
 
-            if hash::hash(&a.0[0..16], &b.1[0..16]) ^ vh == 1 {
+            if hash::hash(&a.left[0..16], &b.right[0..16]) ^ vh == 1 {
                 return 1;
             } else {
                 return -1;
             }
         } else {
-            let vh = (BigEndian::read_u128(&b.1[32..48]) & (1 << h)) >> h;
+            let vh = (BigEndian::read_u128(&b.right[32..48]) & (1 << h)) >> h;
             println!("In large, vh = {}", vh);
 
-            if hash::hash(&a.0[0..16], &b.1[0..16]) ^ vh == 1 {
+            if hash::hash(&a.left[0..16], &b.right[0..16]) ^ vh == 1 {
                 return 1;
             } else {
                 return -1;

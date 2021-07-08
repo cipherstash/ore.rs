@@ -38,6 +38,7 @@ impl Prp { // TODO: Rename to Prp8
      * */
     pub fn permute(&self, input: u8) -> u8 {
         let position: usize = self.permutation.iter().position(|&x| x == input).unwrap();
+        // TODO: Use as
         return u8::try_from(position).unwrap();
     }
 
@@ -45,6 +46,7 @@ impl Prp { // TODO: Rename to Prp8
      * and is designed that way because there are d (block size) inverse
      * permutations in the ORE scheme */
     pub fn inverse(&self, input: u8) -> u8 {
+        // TODO use 'as'
         let index = usize::try_from(input).unwrap();
         return self.permutation[index];
     }
