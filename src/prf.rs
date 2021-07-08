@@ -1,4 +1,4 @@
-use aes::Aes128;
+use aes::{Aes128, Block};
 use aes::cipher::{
     BlockEncrypt, NewBlockCipher,
     generic_array::GenericArray,
@@ -22,6 +22,14 @@ impl Prf {
 
         let mut block = GenericArray::from_mut_slice(output);
         self.cipher.encrypt_block(&mut block);
+    }
+
+    pub fn encrypt_par_block(&self, input: [u8; 8], output: &mut [Block]) {
+        for i in 0..7 {
+            output[i][0] = input[i];
+        }
+        let mut block8 = GenericArray::from_mut_slice(output);
+        self.cipher.encrypt_par_blocks(&mut block8);
     }
 }
 
