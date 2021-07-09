@@ -80,19 +80,28 @@ impl Ore {
         return output;
     }
 
+    // TODO: We need to be very careful that this is constant time
     pub fn encrypt_right(&mut self, input: u8) -> Right {
         let mut output = Right::init();
         // Generate a 16-byte random nonce
         self.rng.fill_bytes(&mut output[0..16]);
 
         let mut word: u128 = 0;
+        /*let prfs: [Key; 128] = (0..=127).map(|i| -> Key {
+            let mut ro_key: Key = [0u8; 16];
+            self.prf.encrypt(i, &mut ro_key);
+            return ro_key;
+        }).collect::<Key>();*/
+
 
         // Low-order word
         for i in 0..=127 {
             let ii = self.prp.inverse(i);
             let indicator: u128 = cmp(ii, input);
             // prf(i) - we could probably do this in blocks of 8 using Aes crate
-            let mut ro_key: [u8; 16] = [0u8; 16];
+            let mut ro_key: Key = [0u8; 16];
+            // TODO: Could we use a stream cipher here like ChaCha?
+            // Where the cipher nonce is actually the binary of [0..255]
             self.prf.encrypt(i, &mut ro_key);
             let h = hash::hash(&ro_key, &output[0..16]);
             let bit: u128 = (indicator ^ h) << i;
@@ -120,6 +129,7 @@ impl Ore {
         return output;
     }
 
+    // TODO: We need to be very careful that this is constant time
     pub fn compare(self, a: CipherText, b: CipherText) -> i8 {
         if a.left == b.left {
             return 0;
