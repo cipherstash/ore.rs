@@ -1,9 +1,7 @@
 
-//pub mod prng;
 pub mod prp;
 pub mod prf;
 mod hash;
-//use prng::Prng;
 use prp::Prp;
 use prf::Prf;
 
@@ -75,7 +73,8 @@ impl Ore {
     pub fn encrypt_left(&self, input: u8) -> Left {
         let px: u8 = self.prp.permute(input);
         let mut output = Left::init();
-        self.prf.encrypt(px, &mut output[0..16]);
+        output[0] = px;
+        self.prf.encrypt(&mut output[0..16]);
         output[16] = px;
         return output;
     }
@@ -87,12 +86,6 @@ impl Ore {
         self.rng.fill_bytes(&mut output[0..16]);
 
         let mut word: u128 = 0;
-        /*let prfs: [Key; 128] = (0..=127).map(|i| -> Key {
-            let mut ro_key: Key = [0u8; 16];
-            self.prf.encrypt(i, &mut ro_key);
-            return ro_key;
-        }).collect::<Key>();*/
-
 
         // Low-order word
         for i in 0..=127 {
@@ -102,7 +95,8 @@ impl Ore {
             let mut ro_key: Key = [0u8; 16];
             // TODO: Could we use a stream cipher here like ChaCha?
             // Where the cipher nonce is actually the binary of [0..255]
-            self.prf.encrypt(i, &mut ro_key);
+            ro_key[0] = i;
+            self.prf.encrypt(&mut ro_key);
             let h = hash::hash(&ro_key, &output[0..16]);
             let bit: u128 = (indicator ^ h) << i;
             word |= bit;
@@ -118,7 +112,8 @@ impl Ore {
             let indicator: u128 = cmp(ii, input);
             // prf(i) - we could probably do this in blocks of 8 using Aes crate
             let mut ro_key: [u8; 16] = [0u8; 16];
-            self.prf.encrypt(i, &mut ro_key);
+            ro_key[0] = i;
+            self.prf.encrypt(&mut ro_key);
             let h = hash::hash(&ro_key, &output[0..16]);
             let bit: u128 = (indicator ^ h) << i;
             word |= bit;

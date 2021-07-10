@@ -15,11 +15,8 @@ impl Prf {
         return Prf { cipher };
     }
 
-    pub fn encrypt(&self, input: u8, output: &mut [u8]) {
-        // FIXME: Do we need to consider padding here?
-        //BigEndian::write_u8(&mut buf, input);
-        output[0] = input;
-
+    /* Encrypts the input block in place */
+    pub fn encrypt(&self, output: &mut [u8]) {
         let mut block = GenericArray::from_mut_slice(output);
         self.cipher.encrypt_block(&mut block);
     }

@@ -7,7 +7,8 @@ fn prf_encrypt() {
     let prf = Prf::init(&key);
 
     let mut output: [u8; 16] = [0u8; 16];
-    prf.encrypt(10, &mut output);
+    output[0] = 10;
+    prf.encrypt(&mut output);
 
     assert_eq!(output, hex!("0d1933062742fe018cfe06e1a81aa001"));
 }
