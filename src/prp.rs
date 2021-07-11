@@ -23,7 +23,7 @@ impl Prp { // TODO: Rename to Prp8
         let mut prg = Prng::init(&key);
         let mut permutation: Vec<u8> = (0..=255).collect();
 
-        for elem in 1..permutation.len() {
+        for elem in 0..permutation.len() {
             let j = prg.next_byte();
             permutation.swap(elem, usize::try_from(j).unwrap());
         }
@@ -52,3 +52,20 @@ impl Prp { // TODO: Rename to Prp8
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hex_literal::hex;
+
+    #[test]
+    fn init_prp() {
+        let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
+        let prp = Prp::init(&key);
+
+        // TODO: Test all numbers in the block (prop tests?)
+        println!("15 -> {}", prp.permute(15));
+        println!("75 -> {}", prp.permute(75));
+        assert_eq!(15, prp.inverse(prp.permute(15)));
+        assert_ne!(0, prp.permute(0));
+    }
+}
