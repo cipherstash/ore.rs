@@ -89,7 +89,7 @@ impl OreLarge {
     }
 
     pub fn encrypt_right(&self, input: u64) -> Right {
-
+        return Right::init();
     }
 
 }

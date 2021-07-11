@@ -8,6 +8,11 @@ pub struct Prf {
     cipher: Aes128
 }
 
+pub fn aes_prf(key: &GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>, block: &mut Block) {
+    let cipher = Aes128::new(key);
+    cipher.encrypt_block(block);
+}
+
 impl Prf {
     pub fn init(key: &[u8]) -> Prf {
         let key_array = GenericArray::from_slice(key);
