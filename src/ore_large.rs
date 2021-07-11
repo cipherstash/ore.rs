@@ -16,10 +16,13 @@ pub struct OreLarge {
     rng: OsRng
 }
 
+const NONCE_SIZE: usize = 16;
 const LEFT_CHUNK_SIZE: usize = 17;
+// block size = 8, 256 bits (1-bit indicator)
+const RIGHT_CHUNK_SIZE: usize = 32;
 
 type Left = [u8; LEFT_CHUNK_SIZE * 8]; // 1 small-domain block times the number of blocks
-type Right = [u8; 48];
+type Right = [u8; NONCE_SIZE + (RIGHT_CHUNK_SIZE * 8)];
 
 pub struct CipherText {
     left: Left,
@@ -40,7 +43,7 @@ impl Initialise for Left {
 
 impl Initialise for Right {
     fn init() -> Self {
-        [0u8; 48]
+        [0u8; NONCE_SIZE + (RIGHT_CHUNK_SIZE * 8)]
     }
 }
 
@@ -53,7 +56,6 @@ fn cmp(a: u8, b: u8) -> u128 {
 }
 
 impl OreLarge {
-
     pub fn init(prf_key: Key, prp_key: Key) -> OreLarge {
       return Self {
           prf: Prf::init(&prf_key),
@@ -88,8 +90,36 @@ impl OreLarge {
         return output;
     }
 
-    pub fn encrypt_right(&self, input: u64) -> Right {
+    pub fn encrypt_right(&mut self, input: u64) -> Right {
+        let mut output = Right::init();
+        // Generate a 16-byte random nonce
+        self.rng.fill_bytes(&mut output[0..NONCE_SIZE]);
 
+        let i = 0;
+        let mut x_prp_key: Key = [0u8; 16];
+        // TODO: Should this start with no prefix at all? (x_{i-1})
+        BigEndian::write_uint(&mut x_prp_key, input, i + 1);
+        // TODO: This should use k2
+        self.prf.encrypt(&mut x_prp_key);
+        let prp = Prp::init(&x_prp_key);
+
+        // low-order word
+        for j in 0..=127 {
+            let js = prp.inverse(j);
+            let indicator: u128 = cmp(ii, input);
+            let mut hash_target: Key = [0u8; 16];
+
+            BigEndian::write_uint(&mut hash_target, input, i + 1);
+            hash_target[i + i] = j;
+
+            self.prf.encrypt(&mut hash_target);
+
+
+        }
+        
+
+
+        return output;
     }
 
 }
