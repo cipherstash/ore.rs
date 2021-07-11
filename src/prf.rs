@@ -8,9 +8,12 @@ pub struct Prf {
     cipher: Aes128
 }
 
-pub fn aes_prf(key: &GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>, block: &mut Block) {
+//pub fn encrypt(key: &GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>, block: &mut Block) {
+pub fn encrypt(key: &GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>, block: &mut [u8]) {
     let cipher = Aes128::new(key);
-    cipher.encrypt_block(block);
+    // FIXME: We really don't want to be calling from_mut_slice as it is super slow!
+    let ga = GenericArray::from_mut_slice(block);
+    cipher.encrypt_block(ga);
 }
 
 impl Prf {
