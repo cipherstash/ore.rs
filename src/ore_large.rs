@@ -156,51 +156,35 @@ impl OreLarge {
      Could we hash the block number as well as the block value?
     */
 
-
-    /* TODO: A better approach here could be to define the left CT as an array
-     * of LeftBlocks. We generate each one in sequence and then just join them
-     * together at the end. This would make it easier to have different block sizes
-     * and different numbers of blocks */
     pub fn encrypt_left(&self, input: u64) -> Left {
         let mut output = Left {
             x: Default::default(),
             f: Default::default()
         };
-           /* LeftBlock { f: Default::default(), x: Default::default() },
-            LeftBlock { f: Default::default(), x: Default::default() },
-            LeftBlock { f: Default::default(), x: Default::default() },
-            LeftBlock { f: Default::default(), x: Default::default() },
-            LeftBlock { f: Default::default(), x: Default::default() },
-            LeftBlock { f: Default::default(), x: Default::default() },
-            LeftBlock { f: Default::default(), x: Default::default() },
-            LeftBlock { f: Default::default(), x: Default::default() },
-        ];*/
         let mut x: [u8; NUM_BLOCKS] = Default::default();
         BigEndian::write_uint(&mut x, input, NUM_BLOCKS);
         let x = x;
 
+        // Build the prefixes
         output.f.iter_mut().enumerate().for_each(|(n, block)| {
             block[0..n].clone_from_slice(&x[0..n]);
         });
 
         prf::encrypt8(&self.k2, &mut output.f);
 
-        // Use iter?
         for n in 0..NUM_BLOCKS {
-            // Set prefix
-            //output.f[n][0..n].clone_from_slice(&x[0..n]);
-            //prf::encrypt(&self.k2, &mut output.f[n]);
+            // Set prefix and create PRP for the block
             let prp = prp::Prp::init(&output.f[n]);
             output.x[n] = prp.permute(x[n]);
 
-            output.f[n] = Default::default(); // Reset the f block (probably inefficient)
+            // Reset the f block (probably inefficient)
+            output.f[n] = Default::default();
             output.f[n][0..n].clone_from_slice(&x[0..n]);
             output.f[n][n] = output.x[n];
             // Include the block number in the value passed to the Random Oracle
             output.f[n][NUM_BLOCKS] = n as u8;
-
-            prf::encrypt(&self.k1, &mut output.f[n]);
         }
+        prf::encrypt8(&self.k1, &mut output.f);
 
         return output;
     }
