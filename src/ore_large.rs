@@ -349,50 +349,76 @@ mod tests {
                     0
                 };
 
-            println!("x = {}, y = {}", x, y);
-
             let a = ore.encrypt(x);
             let b = ore.encrypt(y);
 
             return ret == OreLarge::compare(&a, &b);
         }
+
+        fn compare_equal(x: u64) -> bool {
+            let mut ore = init_ore();
+            let a = ore.encrypt(x);
+            let b = ore.encrypt(x);
+
+            return 0 == OreLarge::compare(&a, &b);
+        }
     }
 
     #[test]
-    #[ignore]
-    fn test_equality() {
+    fn smallest_to_largest() {
         let mut ore = init_ore();
-        let x = (8..20).fake::<u64>();
-        let a = ore.encrypt(x);
-        let b = ore.encrypt(x);
+        let a = ore.encrypt(0);
+        let b = ore.encrypt(18446744073709551615);
+
+        assert_eq!(-1, OreLarge::compare(&a, &b));
+    }
+
+    #[test]
+    fn largest_to_smallest() {
+        let mut ore = init_ore();
+        let a = ore.encrypt(18446744073709551615);
+        let b = ore.encrypt(0);
+
+        assert_eq!(1, OreLarge::compare(&a, &b));
+    }
+
+    #[test]
+    fn smallest_to_smallest() {
+        let mut ore = init_ore();
+        let a = ore.encrypt(0);
+        let b = ore.encrypt(0);
 
         assert_eq!(0, OreLarge::compare(&a, &b));
     }
 
     #[test]
-    fn test_compare() {
+    fn largest_to_largest() {
         let mut ore = init_ore();
-        let x = (0..200).fake::<u64>();
-        let y = (0..200).fake::<u64>();
+        let a = ore.encrypt(18446744073709551615);
+        let b = ore.encrypt(18446744073709551615);
 
-        let ret =
-            if x > y {
-                1
-            } else if x < y {
-                -1
-            } else {
-                0
-            };
-
-        println!("x = {}, y = {}", x, y);
-
-        let a = ore.encrypt(x);
-        let b = ore.encrypt(y);
-
-        assert_eq!(ret, OreLarge::compare(&a, &b));
+        assert_eq!(0, OreLarge::compare(&a, &b));
     }
 
+    #[test]
+    fn comparisons_in_first_block() {
+        let mut ore = init_ore();
+        let a = ore.encrypt(18446744073709551615);
+        let b = ore.encrypt(18446744073709551612);
 
+        assert_eq!(1, OreLarge::compare(&a, &b));
+        assert_eq!(-1, OreLarge::compare(&b, &a));
+    }
+
+    #[test]
+    fn comparisons_in_last_block() {
+        let mut ore = init_ore();
+        let a = ore.encrypt(10);
+        let b = ore.encrypt(73);
+
+        assert_eq!(-1, OreLarge::compare(&a, &b));
+        assert_eq!(1, OreLarge::compare(&b, &a));
+    }
 
     #[test]
     fn set_and_get_bit() {
