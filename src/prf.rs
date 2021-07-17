@@ -15,7 +15,7 @@ pub fn encrypt(key: &GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>, bloc
 }
 
 // TODO: Make some type aliases!
-pub fn encrypt8(key: &GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>, blocks: &mut GenericArray<GenericArray<u8, <Aes128 as BlockCipher>::BlockSize>, <Aes128 as BlockCipher>::ParBlocks>) {
+pub fn encrypt8(key: &GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>, blocks: &mut [GenericArray<u8, U16>]) {
     let cipher = Aes128::new(key);
     cipher.encrypt_blocks(blocks);
 }
