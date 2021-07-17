@@ -13,6 +13,9 @@ pub struct Prp {
     permutation: Vec<u8>
 }
 
+// TODO: Review https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle
+// We probably want to use Sattolo's Algorithm because if PRP(x) = x that could reveal information
+// in the ORE scheme (e.g. if the first k bytes of the plaintext are the same).
 impl Prp { // TODO: Rename to Prp8
     // TODO: Pass the block size as an argument
     // TODO: Add a guard for the block_size

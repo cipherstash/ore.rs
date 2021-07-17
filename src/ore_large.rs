@@ -1,4 +1,9 @@
 
+/*
+ *
+ * Block ORE Implemenation
+ */
+
 use crate::prp;
 use crate::prf;
 use crate::hash;
@@ -179,6 +184,8 @@ impl OreLarge {
             output[n].f = Default::default(); // Reset the f block (probably inefficient)
             output[n].f[0..n].clone_from_slice(&x[0..n]);
             output[n].f[n] = output[n].x;
+            // Include the block number in the value passed to the Random Oracle
+            output[n].f[NUM_BLOCKS] = n as u8;
 
             prf::encrypt(&self.k1, &mut output[n].f);
         }
@@ -218,6 +225,7 @@ impl OreLarge {
                 // the output of F in H(F(k1, y|i-1||j), r)
                 ro_key[0..n].clone_from_slice(&x[0..n]);
                 ro_key[n] = j;
+                ro_key[NUM_BLOCKS] = n as u8;
 
                 prf::encrypt(&self.k1, &mut ro_key);
 
