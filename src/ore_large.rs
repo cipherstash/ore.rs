@@ -18,7 +18,7 @@ use byteorder::{ByteOrder, BigEndian};
 
 use aes::cipher::{
     consts::U16,
-    NewBlockCipher,
+    NewBlockCipher, BlockCipher,
     generic_array::GenericArray,
 };
 use aes::{Aes128};
@@ -35,7 +35,7 @@ const NUM_BLOCKS: usize = 8;
 
 // TODO: Don't need GenericArray in Rust 1.51.0
 // See https://blog.rust-lang.org/2021/03/25/Rust-1.51.0.html
-#[derive(Debug)]
+/*#[derive(Debug)]
 pub struct LeftBlock {
     // The output of the PRF
     f: GenericArray<u8, U16>,
@@ -43,7 +43,13 @@ pub struct LeftBlock {
     x: u8
 }
 
-pub type Left = [LeftBlock; 8];
+pub type Left = [LeftBlock; 8];*/
+
+#[derive(Debug)]
+pub struct Left {
+    f: GenericArray<GenericArray<u8, <Aes128 as BlockCipher>::BlockSize>, <Aes128 as BlockCipher>::ParBlocks>,
+    x: [u8; 8]
+}
 
 #[derive(Debug)]
 pub struct Right {
@@ -122,9 +128,9 @@ impl OreBlock8 {
 }
 
 
-fn left_eq(a: &LeftBlock, b: &LeftBlock) -> bool {
+/*fn left_eq(a: &LeftBlock, b: &LeftBlock) -> bool {
     a.x == b.x && a.f == b.f
-}
+}*/
 
 // TODO: This is just the Encryptor - use an "Encryption" trait
 impl OreLarge {
@@ -156,7 +162,11 @@ impl OreLarge {
      * together at the end. This would make it easier to have different block sizes
      * and different numbers of blocks */
     pub fn encrypt_left(&self, input: u64) -> Left {
-        let mut output: Left = [
+        let mut output = Left {
+            x: Default::default(),
+            f: Default::default()
+        };
+           /* LeftBlock { f: Default::default(), x: Default::default() },
             LeftBlock { f: Default::default(), x: Default::default() },
             LeftBlock { f: Default::default(), x: Default::default() },
             LeftBlock { f: Default::default(), x: Default::default() },
@@ -164,30 +174,32 @@ impl OreLarge {
             LeftBlock { f: Default::default(), x: Default::default() },
             LeftBlock { f: Default::default(), x: Default::default() },
             LeftBlock { f: Default::default(), x: Default::default() },
-            LeftBlock { f: Default::default(), x: Default::default() },
-        ];
+        ];*/
         let mut x: [u8; NUM_BLOCKS] = Default::default();
         BigEndian::write_uint(&mut x, input, NUM_BLOCKS);
         let x = x;
 
+        output.f.iter_mut().enumerate().for_each(|(n, block)| {
+            block[0..n].clone_from_slice(&x[0..n]);
+        });
+
+        prf::encrypt8(&self.k2, &mut output.f);
+
         // Use iter?
         for n in 0..NUM_BLOCKS {
             // Set prefix
-            // Optimisation note: all blocks with the same prefix are going to have
-            // the same PRP - no need to generate again (though checking may be just as expensive!)
-            // Just see if the current prefix is the same as the last
-            output[n].f[0..n].clone_from_slice(&x[0..n]);
-            prf::encrypt(&self.k2, &mut output[n].f);
-            let prp = prp::Prp::init(&output[n].f);
-            output[n].x = prp.permute(x[n]);
+            //output.f[n][0..n].clone_from_slice(&x[0..n]);
+            //prf::encrypt(&self.k2, &mut output.f[n]);
+            let prp = prp::Prp::init(&output.f[n]);
+            output.x[n] = prp.permute(x[n]);
 
-            output[n].f = Default::default(); // Reset the f block (probably inefficient)
-            output[n].f[0..n].clone_from_slice(&x[0..n]);
-            output[n].f[n] = output[n].x;
+            output.f[n] = Default::default(); // Reset the f block (probably inefficient)
+            output.f[n][0..n].clone_from_slice(&x[0..n]);
+            output.f[n][n] = output.x[n];
             // Include the block number in the value passed to the Random Oracle
-            output[n].f[NUM_BLOCKS] = n as u8;
+            output.f[n][NUM_BLOCKS] = n as u8;
 
-            prf::encrypt(&self.k1, &mut output[n].f);
+            prf::encrypt(&self.k1, &mut output.f[n]);
         }
 
         return output;
@@ -253,7 +265,7 @@ impl OreLarge {
 
         // TODO: Surely this could be done with iterators?
         for n in 0..NUM_BLOCKS {
-            if !left_eq(&a.left[n], &b.left[n]) {
+            if &a.left.x[n] != &b.left.x[n] || &a.left.f[n] != &b.left.f[n] {
                 is_equal = false;
                 l = n;
                 break;
@@ -264,9 +276,9 @@ impl OreLarge {
             return 0;
         }
 
-        let h = hash::hash(&a.left[l].f, &b.right.nonce);
+        let h = hash::hash(&a.left.f[l], &b.right.nonce);
         // Test the set and get bit functions
-        let test = b.right.data[l].get_bit(a.left[l].x) ^ h;
+        let test = b.right.data[l].get_bit(a.left.x[l]) ^ h;
         if test == 1 {
             return 1;
         }

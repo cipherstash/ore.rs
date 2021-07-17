@@ -20,3 +20,7 @@ rand_chacha = "0.3.1"
 [[bench]]
 name = "large_domain"
 harness = false
+
+[[bench]]
+name = "prng"
+harness = false

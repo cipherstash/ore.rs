@@ -16,5 +16,6 @@ fn main() {
     //let ct4 = ore.encrypt(7061644215716937728);
     //let ct4 = ore.encrypt(7133701809754865663);
     let ct5 = ore.encrypt(7);
+    println!("OUT = {:?}", ct5);
     //println!("COMPARE = {} should be 1", OreLarge::compare(&ct4, &ct5));
 }
