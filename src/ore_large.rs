@@ -8,13 +8,11 @@ use rand::Rng;
 use rand::os::{OsRng};
 use byteorder::{ByteOrder, BigEndian};
 
-use std::fmt;
-
 // This could probably be a re-export
 //use aes::cipher::generic_array::arr;
 
 use aes::cipher::{
-    consts::{U8, U16, U32},
+    consts::U16,
     NewBlockCipher,
     generic_array::GenericArray,
 };
@@ -29,10 +27,6 @@ pub struct OreLarge {
 }
 
 const NUM_BLOCKS: usize = 8;
-const NONCE_SIZE: usize = 16;
-const LEFT_CHUNK_SIZE: usize = 17;
-// block size = 8, 256 bits (1-bit indicator)
-const RIGHT_CHUNK_SIZE: usize = 32;
 
 // TODO: Don't need GenericArray in Rust 1.51.0
 // See https://blog.rust-lang.org/2021/03/25/Rust-1.51.0.html
@@ -74,22 +68,6 @@ pub struct CipherText {
 
 pub type Key = GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>;
 
-trait Initialise {
-    fn init() -> Self;
-}
-
-/*impl Initialise for Left {
-    fn init() -> Self {
-        [0u8; LEFT_CHUNK_SIZE * 8]
-    }
-}*/
-
-/*impl Initialise for Right {
-    fn init() -> Self {
-        [0u8; NONCE_SIZE + (RIGHT_CHUNK_SIZE * 8)]
-    }
-}*/
-
 fn cmp(a: u8, b: u8) -> u8 {
     if a > b {
         return 1u8;
@@ -130,28 +108,14 @@ impl OreBlock8 {
     pub fn get_bit(&self, position: u8) -> u8 {
         if position < 128 {
             let mask: u128 = 1 << position;
-            println!("mask = {}", mask);
             return ((self.low & mask) >> position) as u8;
         } else {
             let mask: u128 = 1 << (position - 128);
             return ((self.high & mask) >> (position - 128)) as u8;
         }
     }
-
-    #[inline]
-    pub fn from(input: &[u8]) -> Self {
-        Self {
-            low: BigEndian::read_u128(&input[0..16]),
-            high: BigEndian::read_u128(&input[16..32])
-        }
-    }
-
-    /*pub fn write_to(&self, &mut output: &[u8]) {
-        // TODO: panic if slice is too small (or can we check at compile time?)
-        BigEndian::write_u128(&mut output[0..16], block.low);
-        BigEndian::write_u128(&mut output[16..32], block.low);
-    }*/
 }
+
 
 fn left_eq(a: &LeftBlock, b: &LeftBlock) -> bool {
     a.x == b.x && a.f == b.f
@@ -201,8 +165,6 @@ impl OreLarge {
         BigEndian::write_uint(&mut x, input, NUM_BLOCKS);
         let x = x;
 
-        println!("x raw (left) = {:?}", x);
-
         // Use iter?
         for n in 0..NUM_BLOCKS {
             // Set prefix
@@ -239,7 +201,7 @@ impl OreLarge {
         let x = x;
 
 
-        let mut buf: GenericArray<u8, U16> = Default::default();
+        let mut buf: GenericArray<u8, U16>;
 
         for n in 0..NUM_BLOCKS {
             // Set prefix (same as the left side)
@@ -294,31 +256,12 @@ impl OreLarge {
             return 0;
         }
 
-        // FIXME: h is inconsistent across calls
-        // This could be the right encryption that's broken or even the PRP
-        // TODO: Check that the hash key is correct
         let h = hash::hash(&a.left[l].f, &b.right.nonce);
-        // TODO: Try with a static nonce
         // Test the set and get bit functions
-        //println!("a.left = {:?}", a.left);
         let test = b.right.data[l].get_bit(a.left[l].x) ^ h;
-        //println!("block = {:?}, get_bit({}) = {}", b.right.data[l], a.left[l].x, b.right.data[l].get_bit(a.left[l].x));
-        //println!("l = {}, test = {}, h = {}, a.left[l].x = {}", l, test, h, a.left[l].x);
         if test == 1 {
             return 1;
         }
-
-        /*
-
-        let ki: &[u8] = &a.left[position_left..(position_left + 16)];
-        let hi: u8 = a.left[position_left + 16];
-        let vi = OreBlock8::from(&b.right[position_right..(position_right + RIGHT_CHUNK_SIZE)]);
-        let h = hash::hash(ki, nonce);
-
-        if (vi.get_bit(hi) ^ h) == 1 {
-            println!("DO WE GET HERE");
-            return 1;
-        }*/
 
         return -1;
     }
@@ -328,7 +271,6 @@ impl OreLarge {
 mod tests {
     use super::*;
     use aes::cipher::generic_array::arr;
-    use fake::{Fake};
 
     fn init_ore() -> OreLarge {
         let prf_key: Key = arr![u8; 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f];
