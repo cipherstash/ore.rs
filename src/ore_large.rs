@@ -53,7 +53,8 @@ pub struct Left {
 
 #[derive(Debug)]
 pub struct Right {
-    nonce: [u8; 16],
+    //nonce: [u8; 16],
+    nonce: GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>,
     data: [OreBlock8; 8]
 }
 
@@ -206,14 +207,37 @@ impl OreLarge {
             }
             prf::encrypt8(&self.k1, &mut ro_keys);
 
+            /* TODO: This seems to work but it is technically using the nonce as the key
+             * (instead of using it as the plaintext). This appears to be how the original
+             * ORE implementation does it but it feels a bit wonky to me. Should check with David.
+             * It is useful though because the AES crate makes it easy to encrypt groups of 8
+             * plaintexts under the same key. We really want the ability to encrypt the same
+             * plaintext (i.e. the nonce) under different keys but this may be an acceptable
+             * approximation.
+             *
+             * If not, we will probably need to implement our own parallel encrypt using intrisics
+             * like in the AES crate: https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/ni/aes128.rs#L26
+             */
+            for i in 0..32 {
+                let offset = i * 8;
+                prf::encrypt8(&right.nonce, &mut ro_keys[offset..(offset + 8)]);
+            }
+
             for j in 0..=255 {
                 let jstar = prp.inverse(j);
                 let indicator = cmp(jstar, x[n]);
-                let h = hash::hash(&ro_keys[j as usize], &right.nonce);
+                //let mut hash_output: GenericArray<u8, U16> = Default::default();
+
+                //hash_output.clone_from_slice(&right.nonce);
+
+                //prf::encrypt(&ro_keys[j as usize], &mut hash_output);
+                let h = ro_keys[j as usize][0] & 1u8;
                 right.data[n].set_bit(j, indicator ^ h);
             }
         }
         prf::encrypt8(&self.k1, &mut left.f);
+
+        // TODO: Do we need to do any zeroing? See https://lib.rs/crates/zeroize
 
         return CipherText { left: left, right: right };
     }
@@ -244,7 +268,8 @@ impl OreLarge {
             return 0;
         }
 
-        let h = hash::hash(&a.left.f[l], &b.right.nonce);
+        //let h = hash::hash(&a.left.f[l], &b.right.nonce);
+        let h = hash::hash(&b.right.nonce, &a.left.f[l]);
         // Test the set and get bit functions
         let test = b.right.data[l].get_bit(a.left.x[l]) ^ h;
         if test == 1 {
