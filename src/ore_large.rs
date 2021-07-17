@@ -17,7 +17,7 @@ use byteorder::{ByteOrder, BigEndian};
 //use aes::cipher::generic_array::arr;
 
 use aes::cipher::{
-    consts::U16,
+    consts::{U16, U256},
     NewBlockCipher, BlockCipher,
     generic_array::GenericArray,
 };
@@ -57,25 +57,11 @@ pub struct Right {
     data: [OreBlock8; 8]
 }
 
-//type Left = [u8; LEFT_CHUNK_SIZE * 8]; // 1 small-domain block times the number of blocks
-//type Right = [u8; NONCE_SIZE + (RIGHT_CHUNK_SIZE * 8)];
-
 #[derive(Debug)]
 pub struct CipherText {
     left: Left,
     right: Right
 }
-
-/*impl fmt::Display for CipherText {
-    // This trait requires `fmt` with this exact signature.
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // Write strictly the first element into the supplied output
-        // stream: `f`. Returns `fmt::Result` which indicates whether the
-        // operation succeeded or failed. Note that `write!` uses syntax which
-        // is very similar to `println!`.
-        write!(f, "L<{:?}>, R<{:?}>", self.left, self.right)
-    }
-}*/
 
 pub type Key = GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>;
 
@@ -127,11 +113,6 @@ impl OreBlock8 {
     }
 }
 
-
-/*fn left_eq(a: &LeftBlock, b: &LeftBlock) -> bool {
-    a.x == b.x && a.f == b.f
-}*/
-
 // TODO: This is just the Encryptor - use an "Encryption" trait
 impl OreLarge {
     pub fn init(prf_key: Key, prp_key: Key) -> OreLarge {
@@ -142,20 +123,6 @@ impl OreLarge {
       }
     }
     
-    /* A potential problem. If there several blocks are identical we leak some information:
-     *
-     * LEFT prefix A: [53, 183, 207, 218, 185, 250, 90, 8, 245, 5, 161, 13, 57, 167, 194, 87], 0 => 105
-       LEFT prefix A: [117, 119, 218, 93, 233, 78, 71, 194, 13, 107, 168, 213, 157, 80, 187, 32], 0 => 105
-        LEFT prefix A: [166, 67, 156, 11, 162, 163, 89, 213, 192, 248, 91, 248, 151, 9, 190, 190], 0 => 105
-        LEFT prefix A: [241, 21, 60, 59, 59, 17, 39, 105, 0, 115, 168, 129, 253, 80, 3, 221], 0 => 105
-        LEFT prefix A: [21, 113, 57, 247, 39, 201, 129, 107, 19, 128, 129, 104, 71, 79, 185, 233], 0 => 105
-        LEFT prefix A: [133, 106, 71, 146, 120, 225, 33, 219, 157, 2, 175, 250, 153, 107, 28, 121], 20 => 224
-        LEFT prefix A: [252, 207, 10, 171, 40, 206, 232, 138, 249, 55, 143, 50, 40, 4, 223, 4], 125 => 77
-        LEFT prefix A: [30, 56, 1, 20, 214, 174, 213, 63, 207, 6, 76, 178, 172, 246, 224, 232], 217 => 187
-
-     Could we hash the block number as well as the block value?
-    */
-
     pub fn encrypt_left(&self, input: u64) -> Left {
         let mut output = Left {
             x: Default::default(),
@@ -189,57 +156,74 @@ impl OreLarge {
         return output;
     }
 
-    pub fn encrypt_right(&mut self, input: u64) -> Right {
-        let mut output = Right {
+    pub fn encrypt(&mut self, input: u64) -> CipherText {
+        let mut right = Right {
             nonce: Default::default(),
             data: [Default::default(); 8]
         };
-        // Generate a 16-byte random nonce
-        self.rng.fill_bytes(&mut output.nonce);
 
-        // Split the input into bytes
+        let mut left = Left {
+            x: Default::default(),
+            f: Default::default()
+        };
+
+        // Generate a 16-byte random nonce
+        self.rng.fill_bytes(&mut right.nonce);
+
         let mut x: [u8; NUM_BLOCKS] = Default::default();
         BigEndian::write_uint(&mut x, input, NUM_BLOCKS);
-        // Ensure x can't be mutated
         let x = x;
 
+        // Build the prefixes
+        left.f.iter_mut().enumerate().for_each(|(n, block)| {
+            block[0..n].clone_from_slice(&x[0..n]);
+        });
 
-        let mut buf: GenericArray<u8, U16>;
+        prf::encrypt8(&self.k2, &mut left.f);
 
         for n in 0..NUM_BLOCKS {
-            // Set prefix (same as the left side)
-            buf = Default::default();
-            buf[0..n].clone_from_slice(&x[0..n]);
-            prf::encrypt(&self.k2, &mut buf);
-            let prp = prp::Prp::init(&buf);
+            // Set prefix and create PRP for the block
+            let prp = prp::Prp::init(&left.f[n]);
+            left.x[n] = prp.permute(x[n]);
+
+            // Reset the f block (probably inefficient)
+            left.f[n] = Default::default();
+            left.f[n][0..n].clone_from_slice(&x[0..n]);
+            left.f[n][n] = left.x[n];
+            // Include the block number in the value passed to the Random Oracle
+            left.f[n][NUM_BLOCKS] = n as u8;
+
+            //let mut ro_keys: [GenericArray<u8, U16>; 256] = [Default::default(); 256];
+
+            let mut ro_keys: GenericArray<GenericArray<u8, <Aes128 as BlockCipher>::BlockSize>, U256> = Default::default();
+            for j in 0..=255 {
+                //let mut ro_key: GenericArray<u8, U16> = Default::default();
+                // Intermediate Random-Oracle key
+                // the output of F in H(F(k1, y|i-1||j), r)
+                ro_keys[j][0..n].clone_from_slice(&x[0..n]);
+                ro_keys[j][n] = j as u8;
+                ro_keys[j][NUM_BLOCKS] = n as u8;
+            }
+            prf::encrypt8(&self.k1, &mut ro_keys);
 
             for j in 0..=255 {
                 let jstar = prp.inverse(j);
                 let indicator = cmp(jstar, x[n]);
-                let mut ro_key: GenericArray<u8, U16> = Default::default();
-                // Intermediate Random-Oracle key
-                // the output of F in H(F(k1, y|i-1||j), r)
-                ro_key[0..n].clone_from_slice(&x[0..n]);
-                ro_key[n] = j;
-                ro_key[NUM_BLOCKS] = n as u8;
-
-                prf::encrypt(&self.k1, &mut ro_key);
-
-                let h = hash::hash(&ro_key, &output.nonce);
-                output.data[n].set_bit(j, indicator ^ h);
+                let h = hash::hash(&ro_keys[j as usize], &right.nonce);
+                right.data[n].set_bit(j, indicator ^ h);
             }
-
         }
+        prf::encrypt8(&self.k1, &mut left.f);
 
-        return output;
+        return CipherText { left: left, right: right };
     }
 
-    pub fn encrypt(&mut self, input: u64) -> CipherText {
+    /*pub fn encrypt(&mut self, input: u64) -> CipherText {
         CipherText {
             left: self.encrypt_left(input),
             right: self.encrypt_right(input)
         }
-    }
+    }*/
 
     pub fn compare(a: &CipherText, b: &CipherText) -> i8 {
         // TODO: Make sure that this is constant time
