@@ -8,42 +8,54 @@ use byteorder::{ByteOrder, BigEndian};
 
 pub struct Prng {
     cipher: Aes128,
-    counter: u128,
-    data: GenericArray<u8, U16>,
-    ptr: usize
+    data: [GenericArray<u8, U16>; 16],
+    ptr: (usize, usize)
 }
 
+/* 
+ * To aid in performance this PRNG can only generate 256 random numbers
+ * before it panics. Should _only_ be used inside the PRP.
+ * FIXME: Roll this into the PRP implementation so it can't be abused!
+ */
 impl Prng {
     pub fn init(key: &[u8]) -> Prng {
         let key_array = GenericArray::from_slice(key);
         let cipher = Aes128::new(&key_array);
         let mut prng = Prng {
             cipher,
-            counter: 0,
             data: Default::default(),
-            ptr: 0
+            ptr: (0, 0)
         };
         prng.generate();
         return prng;
     }
 
-    fn generate(&mut self) {
-        self.ptr = 0;
-        BigEndian::write_u128(&mut self.data, self.counter);
-        self.cipher.encrypt_block(&mut self.data);
-        self.counter += 1;
-    }
-
     /*
-     * Generates the next byte of the random number sequence
+     * Generates the next byte of the random number sequence.
      */
     pub fn next_byte(&mut self) -> u8 {
-        if self.ptr >= 16 { // Use the BlockSize from AES
-            self.generate();
-        }
-        let value: u8 = self.data[self.ptr];
-        self.ptr += 1;
+        let value: u8 = self.data[self.ptr.0][self.ptr.1];
+        self.inc_ptr();
         return value;
+    }
+
+    fn generate(&mut self) {
+        self.ptr = (0, 0);
+        for i in 0..16 {
+            self.data[i][0] = i as u8;
+        }
+        self.cipher.encrypt_blocks(&mut self.data[0..8]);
+        self.cipher.encrypt_blocks(&mut self.data[8..16]);
+    }
+
+    #[inline]
+    fn inc_ptr(&mut self) {
+        if self.ptr.1 < 15 {
+            self.ptr.1 += 1;
+        } else {
+            self.ptr.1 = 0;
+            self.ptr.0 += 1;
+        }
     }
 }
 
@@ -59,16 +71,10 @@ mod tests {
         let mut prg = Prng::init(&key);
         assert_eq!(198, prg.next_byte());
         assert_eq!(161, prg.next_byte());
-        assert_eq!(1, prg.counter);
-        assert_eq!(2, prg.ptr);
 
-        for _i in 3..=17 {
+        for _i in 3..=255 {
           prg.next_byte();
         }
-        assert_eq!(2, prg.counter);
-        assert_eq!(1, prg.ptr);
-
-
-
+        assert_eq!((15, 15), prg.ptr);
     }
 }
