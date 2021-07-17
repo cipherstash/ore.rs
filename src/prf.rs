@@ -1,6 +1,7 @@
 use aes::{Aes128, Block};
 use aes::cipher::{
-    BlockEncrypt, NewBlockCipher,
+    consts::U16,
+    BlockEncrypt, NewBlockCipher, BlockCipher,
     generic_array::GenericArray,
 };
 
@@ -8,12 +9,15 @@ pub struct Prf {
     cipher: Aes128
 }
 
-//pub fn encrypt(key: &GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>, block: &mut Block) {
-pub fn encrypt(key: &GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>, block: &mut [u8]) {
+pub fn encrypt(key: &GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>, block: &mut GenericArray<u8, U16>) {
     let cipher = Aes128::new(key);
-    // FIXME: We really don't want to be calling from_mut_slice as it is super slow!
-    let ga = GenericArray::from_mut_slice(block);
-    cipher.encrypt_block(ga);
+    cipher.encrypt_block(block);
+}
+
+// TODO: Make some type aliases!
+pub fn encrypt8(key: &GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>, blocks: &mut GenericArray<GenericArray<u8, <Aes128 as BlockCipher>::BlockSize>, <Aes128 as BlockCipher>::ParBlocks>) {
+    let cipher = Aes128::new(key);
+    cipher.encrypt_blocks(blocks);
 }
 
 impl Prf {
