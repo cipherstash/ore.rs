@@ -19,7 +19,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     let prp_key = arr![u8; 0xd0, 0xd0, 0x07, 0xa5, 0x3f, 0x9a, 0x68, 0x48, 0x83, 0xbc, 0x1f, 0x21, 0x0f, 0x65, 0x95, 0xa3];
     let mut ore = OreLarge::init(prf_key, prp_key);
 
-    //c.bench_function("ore_large8", |b| b.iter(|| do_encrypt(black_box(&mut ore))));
+    c.bench_function("ore_large8", |b| b.iter(|| do_encrypt(black_box(&mut ore))));
     c.bench_function("ore_large8_left", |b| b.iter(|| do_encrypt_left(black_box(&mut ore))));
 }
 
