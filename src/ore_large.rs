@@ -35,7 +35,8 @@ const NUM_BLOCKS: usize = 8;
 
 #[derive(Debug)]
 pub struct Left {
-    f: GenericArray<GenericArray<u8, <Aes128 as BlockCipher>::BlockSize>, <Aes128 as BlockCipher>::ParBlocks>,
+    //f: GenericArray<GenericArray<u8, <Aes128 as BlockCipher>::BlockSize>, <Aes128 as BlockCipher>::ParBlocks>,
+    f: [u8; 128], // Blocksize * ORE blocks (16 * 8)
     x: [u8; 8]
 }
 
@@ -115,32 +116,45 @@ impl OreLarge {
     pub fn encrypt_left(&self, input: u64) -> Left {
         let mut output = Left {
             x: Default::default(),
-            f: Default::default()
+            f: [0u8; 128]
         };
         let mut x: [u8; NUM_BLOCKS] = Default::default();
         BigEndian::write_uint(&mut x, input, NUM_BLOCKS);
         let x = x;
 
         // Build the prefixes
-        output.f.iter_mut().enumerate().for_each(|(n, block)| {
+        /*output.f.iter_mut().enumerate().for_each(|(n, block)| {
+            block[0..n].clone_from_slice(&x[0..n]);
+        });*/
+
+        output.f.chunks_mut(16).enumerate().for_each(|(n, block)| {
             block[0..n].clone_from_slice(&x[0..n]);
         });
 
-        prf::encrypt8(&self.k2, &mut output.f);
+        prf::encrypt_all(&self.k2, &mut output.f);
 
+        // TODO: Use chunks?
         for n in 0..NUM_BLOCKS {
+            let position = n * 16;
             // Set prefix and create PRP for the block
-            let prp = prp::Prp::init(&output.f[n]);
+            let prp = prp::Prp::init(&output.f[position..(position + 16)]);
             output.x[n] = prp.permute(x[n]);
-
-            // Reset the f block (probably inefficient)
-            output.f[n] = Default::default();
-            output.f[n][0..n].clone_from_slice(&x[0..n]);
-            output.f[n][n] = output.x[n];
-            // Include the block number in the value passed to the Random Oracle
-            output.f[n][NUM_BLOCKS] = n as u8;
         }
-        prf::encrypt8(&self.k1, &mut output.f);
+
+        // Reset the f block
+        // TODO: Should we use Zeroize? Might be OK because we are returning the value (do some
+        // research)
+        output.f.iter_mut().for_each(|x| *x = 0);
+
+        // TODO: Use chunks?
+        for n in 0..NUM_BLOCKS {
+            let position = n * 16;
+            output.f[position..(position + n)].clone_from_slice(&x[0..n]);
+            output.f[position + n] = output.x[n];
+            // Include the block number in the value passed to the Random Oracle
+            output.f[position + NUM_BLOCKS] = n as u8;
+        }
+        prf::encrypt_all(&self.k1, &mut output.f);
 
         return output;
     }
@@ -153,7 +167,7 @@ impl OreLarge {
 
         let mut left = Left {
             x: Default::default(),
-            f: Default::default()
+            f: [0u8; 128]
         };
 
         // Generate a 16-byte random nonce
@@ -164,15 +178,18 @@ impl OreLarge {
         let x = x;
 
         // Build the prefixes
-        left.f.iter_mut().enumerate().for_each(|(n, block)| {
+        /*left.f.iter_mut().enumerate().for_each(|(n, block)| {
+            block[0..n].clone_from_slice(&x[0..n]);
+        });*/
+        left.f.chunks_mut(16).enumerate().for_each(|(n, block)| {
             block[0..n].clone_from_slice(&x[0..n]);
         });
 
-        prf::encrypt8(&self.k2, &mut left.f);
+        prf::encrypt_all(&self.k2, &mut left.f);
 
         for n in 0..NUM_BLOCKS {
             // Set prefix and create PRP for the block
-            let prp = prp::Prp::init(&left.f[n]);
+            /*let prp = prp::Prp::init(&left.f[n]);
             left.x[n] = prp.permute(x[n]);
 
             // Reset the f block (probably inefficient)
@@ -180,7 +197,21 @@ impl OreLarge {
             left.f[n][0..n].clone_from_slice(&x[0..n]);
             left.f[n][n] = left.x[n];
             // Include the block number in the value passed to the Random Oracle
-            left.f[n][NUM_BLOCKS] = n as u8;
+            left.f[n][NUM_BLOCKS] = n as u8;*/
+
+            let position = n * 16;
+            // Set prefix and create PRP for the block
+            let prp = prp::Prp::init(&left.f[position..(position + 16)]);
+            left.x[n] = prp.permute(x[n]);
+
+            // Reset the f block
+            // TODO: We don't actually need to reset the whole thing - just from n onwards
+            left.f[position..(position + 16)].iter_mut().for_each(|x| *x = 0);
+            left.f[position..(position + n)].clone_from_slice(&x[0..n]);
+            left.f[position + n] = left.x[n];
+            // Include the block number in the value passed to the Random Oracle
+            left.f[position + NUM_BLOCKS] = n as u8;
+
 
             let mut ro_keys = [0u8; 16 * 256];
 
@@ -215,7 +246,7 @@ impl OreLarge {
                 right.data[n].set_bit(j, indicator ^ h);
             }
         }
-        prf::encrypt8(&self.k1, &mut left.f);
+        prf::encrypt_all(&self.k1, &mut left.f);
 
         // TODO: Do we need to do any zeroing? See https://lib.rs/crates/zeroize
 
@@ -230,7 +261,8 @@ impl OreLarge {
 
         // TODO: Surely this could be done with iterators?
         for n in 0..NUM_BLOCKS {
-            if &a.left.x[n] != &b.left.x[n] || &a.left.f[n] != &b.left.f[n] {
+            let position = n * 16;
+            if &a.left.x[n] != &b.left.x[n] || &a.left.f[position..(position + 16)] != &b.left.f[position..(position + 16)] {
                 is_equal = false;
                 l = n;
                 break;
@@ -241,8 +273,7 @@ impl OreLarge {
             return 0;
         }
 
-        //let h = hash::hash(&a.left.f[l], &b.right.nonce);
-        let h = hash::hash(&b.right.nonce, &a.left.f[l]);
+        let h = hash::hash(&b.right.nonce, &a.left.f[(l * 16)..((l * 16) + 16)]);
         // Test the set and get bit functions
         let test = b.right.data[l].get_bit(a.left.x[l]) ^ h;
         if test == 1 {

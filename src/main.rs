@@ -33,15 +33,14 @@ fn main() {
     let prp_key = arr![u8; 0xd0, 0xd0, 0x07, 0xa5, 0x3f, 0x9a, 0x68, 0x48, 0x83, 0xbc, 0x1f, 0x21, 0x0f, 0x65, 0x95, 0xa3];
 
     let mut ore = OreLarge::init(prf_key, prp_key);
+
     /*let ct2 = ore.encrypt(18);
     let ct3 = ore.encrypt(15);
     println!("COMPARE = {} should be 1", OreLarge::compare(&ct2, &ct3));*/
 
-    println!("------");
-
     //let ct4 = ore.encrypt(7061644215716937728);
     //let ct4 = ore.encrypt(7133701809754865663);
-    let ct5 = ore.encrypt(7);
+    //let ct5 = ore.encrypt(7);
 
     /*let iv = hex!("f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff");
     let plaintext = b"Hello world!";
