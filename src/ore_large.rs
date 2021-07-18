@@ -13,9 +13,6 @@ use rand::Rng;
 use rand::os::{OsRng};
 use byteorder::{ByteOrder, BigEndian};
 
-// This could probably be a re-export
-//use aes::cipher::generic_array::arr;
-
 use aes::cipher::{
     consts::{U16, U256},
     NewBlockCipher, BlockCipher,
@@ -35,15 +32,6 @@ const NUM_BLOCKS: usize = 8;
 
 // TODO: Don't need GenericArray in Rust 1.51.0
 // See https://blog.rust-lang.org/2021/03/25/Rust-1.51.0.html
-/*#[derive(Debug)]
-pub struct LeftBlock {
-    // The output of the PRF
-    f: GenericArray<u8, U16>,
-    // The output of the PRP
-    x: u8
-}
-
-pub type Left = [LeftBlock; 8];*/
 
 #[derive(Debug)]
 pub struct Left {
@@ -194,18 +182,17 @@ impl OreLarge {
             // Include the block number in the value passed to the Random Oracle
             left.f[n][NUM_BLOCKS] = n as u8;
 
-            //let mut ro_keys: [GenericArray<u8, U16>; 256] = [Default::default(); 256];
+            let mut ro_keys = [0u8; 16 * 256];
 
-            let mut ro_keys: GenericArray<GenericArray<u8, <Aes128 as BlockCipher>::BlockSize>, U256> = Default::default();
             for j in 0..=255 {
-                //let mut ro_key: GenericArray<u8, U16> = Default::default();
-                // Intermediate Random-Oracle key
+                let offset = j * 16;
                 // the output of F in H(F(k1, y|i-1||j), r)
-                ro_keys[j][0..n].clone_from_slice(&x[0..n]);
-                ro_keys[j][n] = j as u8;
-                ro_keys[j][NUM_BLOCKS] = n as u8;
+                ro_keys[offset..(offset + n)].clone_from_slice(&x[0..n]);
+                ro_keys[offset + n] = j as u8;
+                ro_keys[offset + NUM_BLOCKS] = n as u8;
             }
-            prf::encrypt8(&self.k1, &mut ro_keys);
+
+            prf::encrypt_all(&self.k1, &mut ro_keys);
 
             /* TODO: This seems to work but it is technically using the nonce as the key
              * (instead of using it as the plaintext). This appears to be how the original
@@ -218,20 +205,13 @@ impl OreLarge {
              * If not, we will probably need to implement our own parallel encrypt using intrisics
              * like in the AES crate: https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/ni/aes128.rs#L26
              */
-            for i in 0..32 {
-                let offset = i * 8;
-                prf::encrypt8(&right.nonce, &mut ro_keys[offset..(offset + 8)]);
-            }
+            prf::encrypt_all(&right.nonce, &mut ro_keys);
 
             for j in 0..=255 {
                 let jstar = prp.inverse(j);
                 let indicator = cmp(jstar, x[n]);
-                //let mut hash_output: GenericArray<u8, U16> = Default::default();
-
-                //hash_output.clone_from_slice(&right.nonce);
-
-                //prf::encrypt(&ro_keys[j as usize], &mut hash_output);
-                let h = ro_keys[j as usize][0] & 1u8;
+                let offset: usize = (j as usize) * 16;
+                let h = ro_keys[offset as usize] & 1u8;
                 right.data[n].set_bit(j, indicator ^ h);
             }
         }
@@ -241,13 +221,6 @@ impl OreLarge {
 
         return CipherText { left: left, right: right };
     }
-
-    /*pub fn encrypt(&mut self, input: u64) -> CipherText {
-        CipherText {
-            left: self.encrypt_left(input),
-            right: self.encrypt_right(input)
-        }
-    }*/
 
     pub fn compare(a: &CipherText, b: &CipherText) -> i8 {
         // TODO: Make sure that this is constant time
