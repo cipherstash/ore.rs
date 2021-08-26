@@ -212,6 +212,9 @@ impl OreLarge {
             // Include the block number in the value passed to the Random Oracle
             left.f[position + NUM_BLOCKS] = n as u8;
 
+            // TODO: The first block or RO keys will be the same for every encryption
+            // because there is no plaintext prefix for the first block
+            // This means we can generate the first 16 keys in a setup step
 
             let mut ro_keys = [0u8; 16 * 256];
 
