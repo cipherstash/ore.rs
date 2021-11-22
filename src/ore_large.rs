@@ -1,156 +1,397 @@
 
-use small_prp::prp::Prp;
-use small_prp::prf::Prf;
+/*
+ *
+ * Block ORE Implemenation
+ */
+
+use crate::prp;
+use crate::prf;
+use crate::hash;
 
 use rand;
-use rand::{Rng};
+use rand::Rng;
 use rand::os::{OsRng};
-
 use byteorder::{ByteOrder, BigEndian};
 
+use aes::cipher::{
+    consts::{U16, U256},
+    NewBlockCipher, BlockCipher,
+    generic_array::GenericArray,
+};
+use aes::{Aes128};
+
 pub struct OreLarge {
-    prf: Prf,
-    prp: Prp,
+    k1: Key,
+    k2: Key,
     // OsRng uses /dev/urandom but we may want to look at
     // ChaCha20 rng and HC128
     rng: OsRng
 }
 
-const NONCE_SIZE: usize = 16;
-const LEFT_CHUNK_SIZE: usize = 17;
-// block size = 8, 256 bits (1-bit indicator)
-const RIGHT_CHUNK_SIZE: usize = 32;
+const NUM_BLOCKS: usize = 8;
 
-type Left = [u8; LEFT_CHUNK_SIZE * 8]; // 1 small-domain block times the number of blocks
-type Right = [u8; NONCE_SIZE + (RIGHT_CHUNK_SIZE * 8)];
+// TODO: Don't need GenericArray in Rust 1.51.0
+// See https://blog.rust-lang.org/2021/03/25/Rust-1.51.0.html
 
+#[derive(Debug)]
+pub struct Left {
+    //f: GenericArray<GenericArray<u8, <Aes128 as BlockCipher>::BlockSize>, <Aes128 as BlockCipher>::ParBlocks>,
+    f: [u8; 128], // Blocksize * ORE blocks (16 * 8)
+    x: [u8; 8]
+}
+
+#[derive(Debug)]
+pub struct Right {
+    //nonce: [u8; 16],
+    nonce: GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>,
+    data: [OreBlock8; 8]
+}
+
+#[derive(Debug)]
 pub struct CipherText {
     left: Left,
     right: Right
 }
 
-type Key = [u8; 16];
+pub type Key = GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>;
 
-trait Initialise {
-    fn init() -> Self;
-}
-
-impl Initialise for Left {
-    fn init() -> Self {
-        [0u8; LEFT_CHUNK_SIZE * 8]
-    }
-}
-
-impl Initialise for Right {
-    fn init() -> Self {
-        [0u8; NONCE_SIZE + (RIGHT_CHUNK_SIZE * 8)]
-    }
-}
-
-fn cmp(a: u8, b: u8) -> u128 {
+fn cmp(a: u8, b: u8) -> u8 {
     if a > b {
-        return 1u128;
+        return 1u8;
     } else {
-        return 0u128;
+        return 0u8;
     }
 }
 
+
+/* An ORE block for k=8
+ * |N| = 2^k */
+// TODO: We might be able to use an __m256 for this
+#[derive(Debug)]
+#[derive(Default)]
+#[derive(Copy)]
+#[derive(Clone)]
+struct OreBlock8 {
+    low: u128,
+    high: u128
+}
+
+// TODO: Make this a trait
+impl OreBlock8 {
+    // TODO: This should really just take a bool or we define an unset_bit fn, too
+    // TODO: Return a Result<type>
+    #[inline]
+    pub fn set_bit(&mut self, position: u8, value: u8) {
+        if position < 128 {
+          let bit: u128 = (value as u128) << position;
+          self.low |= bit;
+        } else {
+          let bit: u128 = (value as u128) << (position - 128);
+          self.high |= bit;
+        }
+    }
+
+    #[inline]
+    pub fn get_bit(&self, position: u8) -> u8 {
+        if position < 128 {
+            let mask: u128 = 1 << position;
+            return ((self.low & mask) >> position) as u8;
+        } else {
+            let mask: u128 = 1 << (position - 128);
+            return ((self.high & mask) >> (position - 128)) as u8;
+        }
+    }
+}
+
+// TODO: This is just the Encryptor - use an "Encryption" trait
 impl OreLarge {
     pub fn init(prf_key: Key, prp_key: Key) -> OreLarge {
       return Self {
-          prf: Prf::init(&prf_key),
-          prp: Prp::init(&prp_key),
+          k1: prf_key,
+          k2: prp_key,
           rng: OsRng::new().unwrap() // TODO: Don't use unwrap
       }
     }
-
+    
     pub fn encrypt_left(&self, input: u64) -> Left {
-        let mut x_prp_key: Key = [0u8; 16];
-        let mut output = Left::init();
+        let mut output = Left {
+            x: Default::default(),
+            f: [0u8; 128]
+        };
+        let mut x: [u8; NUM_BLOCKS] = Default::default();
+        BigEndian::write_uint(&mut x, input, NUM_BLOCKS);
+        let x = x;
 
-        for n in 0..7 {
-            BigEndian::write_uint(&mut x_prp_key, input, n + 1);
-            let xi: u8 = x_prp_key[n];
-            // TODO: This prf should be k2
-            self.prf.encrypt(&mut x_prp_key);
+        // Build the prefixes
+        /*output.f.iter_mut().enumerate().for_each(|(n, block)| {
+            block[0..n].clone_from_slice(&x[0..n]);
+        });*/
 
-            let position = n * LEFT_CHUNK_SIZE;
-            //let mut chunk = left_chunk(&mut output, n); // FIXME: Not sure why this doesn't work
-            BigEndian::write_uint(&mut output[position..(position + LEFT_CHUNK_SIZE)], input, n + 1);
+        output.f.chunks_mut(16).enumerate().for_each(|(n, block)| {
+            block[0..n].clone_from_slice(&x[0..n]);
+        });
 
-            let prp = Prp::init(&x_prp_key);
-            let xip = prp.permute(xi);
-            // ui = (F(k1, x_{i-1} || xip) xip)
-            output[position + n + 1] = xip;
-            output[position + LEFT_CHUNK_SIZE] = xip;
-            // TODO: this prf should be k1
-            self.prf.encrypt(&mut output[position..n + 1]);
+        prf::encrypt_all(&self.k2, &mut output.f);
+
+        // TODO: Use chunks?
+        for n in 0..NUM_BLOCKS {
+            let position = n * 16;
+            // Set prefix and create PRP for the block
+            let prp = prp::Prp::init(&output.f[position..(position + 16)]);
+            output.x[n] = prp.permute(x[n]);
         }
+
+        // Reset the f block
+        // TODO: Should we use Zeroize? Might be OK because we are returning the value (do some
+        // research)
+        output.f.iter_mut().for_each(|x| *x = 0);
+
+        // TODO: Use chunks?
+        for n in 0..NUM_BLOCKS {
+            let position = n * 16;
+            output.f[position..(position + n)].clone_from_slice(&x[0..n]);
+            output.f[position + n] = output.x[n];
+            // Include the block number in the value passed to the Random Oracle
+            output.f[position + NUM_BLOCKS] = n as u8;
+        }
+        prf::encrypt_all(&self.k1, &mut output.f);
 
         return output;
     }
 
-    pub fn encrypt_right(&mut self, input: u64) -> Right {
-        let mut output = Right::init();
+    pub fn encrypt(&mut self, input: u64) -> CipherText {
+        let mut right = Right {
+            nonce: Default::default(),
+            data: [Default::default(); 8]
+        };
+
+        let mut left = Left {
+            x: Default::default(),
+            f: [0u8; 128]
+        };
+
         // Generate a 16-byte random nonce
-        self.rng.fill_bytes(&mut output[0..NONCE_SIZE]);
+        self.rng.fill_bytes(&mut right.nonce);
 
-        let i = 0;
-        let mut x_prp_key: Key = [0u8; 16];
-        // TODO: Should this start with no prefix at all? (x_{i-1})
-        BigEndian::write_uint(&mut x_prp_key, input, i + 1);
-        // TODO: This should use k2
-        self.prf.encrypt(&mut x_prp_key);
-        let prp = Prp::init(&x_prp_key);
+        let mut x: [u8; NUM_BLOCKS] = Default::default();
+        BigEndian::write_uint(&mut x, input, NUM_BLOCKS);
+        let x = x;
 
-        // low-order word
-        for j in 0..=127 {
-            let js = prp.inverse(j);
-            let indicator: u128 = cmp(ii, input);
-            let mut hash_target: Key = [0u8; 16];
+        // Build the prefixes
+        /*left.f.iter_mut().enumerate().for_each(|(n, block)| {
+            block[0..n].clone_from_slice(&x[0..n]);
+        });*/
+        left.f.chunks_mut(16).enumerate().for_each(|(n, block)| {
+            block[0..n].clone_from_slice(&x[0..n]);
+        });
 
-            BigEndian::write_uint(&mut hash_target, input, i + 1);
-            hash_target[i + i] = j;
+        prf::encrypt_all(&self.k2, &mut left.f);
 
-            self.prf.encrypt(&mut hash_target);
+        for n in 0..NUM_BLOCKS {
+            // Set prefix and create PRP for the block
+            /*let prp = prp::Prp::init(&left.f[n]);
+            left.x[n] = prp.permute(x[n]);
 
+            // Reset the f block (probably inefficient)
+            left.f[n] = Default::default();
+            left.f[n][0..n].clone_from_slice(&x[0..n]);
+            left.f[n][n] = left.x[n];
+            // Include the block number in the value passed to the Random Oracle
+            left.f[n][NUM_BLOCKS] = n as u8;*/
 
+            let position = n * 16;
+            // Set prefix and create PRP for the block
+            let prp = prp::Prp::init(&left.f[position..(position + 16)]);
+            left.x[n] = prp.permute(x[n]);
+
+            // Reset the f block
+            // TODO: We don't actually need to reset the whole thing - just from n onwards
+            left.f[position..(position + 16)].iter_mut().for_each(|x| *x = 0);
+            left.f[position..(position + n)].clone_from_slice(&x[0..n]);
+            left.f[position + n] = left.x[n];
+            // Include the block number in the value passed to the Random Oracle
+            left.f[position + NUM_BLOCKS] = n as u8;
+
+            // TODO: The first block or RO keys will be the same for every encryption
+            // because there is no plaintext prefix for the first block
+            // This means we can generate the first 16 keys in a setup step
+
+            let mut ro_keys = [0u8; 16 * 256];
+
+            for j in 0..=255 {
+                let offset = j * 16;
+                // the output of F in H(F(k1, y|i-1||j), r)
+                ro_keys[offset..(offset + n)].clone_from_slice(&x[0..n]);
+                ro_keys[offset + n] = j as u8;
+                ro_keys[offset + NUM_BLOCKS] = n as u8;
+            }
+
+            prf::encrypt_all(&self.k1, &mut ro_keys);
+
+            /* TODO: This seems to work but it is technically using the nonce as the key
+             * (instead of using it as the plaintext). This appears to be how the original
+             * ORE implementation does it but it feels a bit wonky to me. Should check with David.
+             * It is useful though because the AES crate makes it easy to encrypt groups of 8
+             * plaintexts under the same key. We really want the ability to encrypt the same
+             * plaintext (i.e. the nonce) under different keys but this may be an acceptable
+             * approximation.
+             *
+             * If not, we will probably need to implement our own parallel encrypt using intrisics
+             * like in the AES crate: https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/ni/aes128.rs#L26
+             */
+            prf::encrypt_all(&right.nonce, &mut ro_keys);
+
+            for j in 0..=255 {
+                let jstar = prp.inverse(j);
+                let indicator = cmp(jstar, x[n]);
+                let offset: usize = (j as usize) * 16;
+                let h = ro_keys[offset as usize] & 1u8;
+                right.data[n].set_bit(j, indicator ^ h);
+            }
         }
-        
+        prf::encrypt_all(&self.k1, &mut left.f);
 
+        // TODO: Do we need to do any zeroing? See https://lib.rs/crates/zeroize
 
-        return output;
+        return CipherText { left: left, right: right };
     }
 
-}
+    pub fn compare(a: &CipherText, b: &CipherText) -> i8 {
+        // TODO: Make sure that this is constant time
 
-#[inline]
-fn left_chunk(left: &Left, index: usize) -> &[u8] {
-    let position = index * LEFT_CHUNK_SIZE;
-    return &left[position..(position + LEFT_CHUNK_SIZE)];
+        let mut is_equal = true;
+        let mut l = 0; // Unequal block
+
+        // TODO: Surely this could be done with iterators?
+        for n in 0..NUM_BLOCKS {
+            let position = n * 16;
+            if &a.left.x[n] != &b.left.x[n] || &a.left.f[position..(position + 16)] != &b.left.f[position..(position + 16)] {
+                is_equal = false;
+                l = n;
+                break;
+            }
+        }
+
+        if is_equal {
+            return 0;
+        }
+
+        let h = hash::hash(&b.right.nonce, &a.left.f[(l * 16)..((l * 16) + 16)]);
+        // Test the set and get bit functions
+        let test = b.right.data[l].get_bit(a.left.x[l]) ^ h;
+        if test == 1 {
+            return 1;
+        }
+
+        return -1;
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aes::cipher::generic_array::arr;
+
+    fn init_ore() -> OreLarge {
+        let prf_key: Key = arr![u8; 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f];
+        let prp_key: Key = arr![u8; 0xd0, 0xd0, 0x07, 0xa5, 0x3f, 0x9a, 0x68, 0x48, 0x83, 0xbc, 0x1f, 0x21, 0x0f, 0x65, 0x95, 0xa3];
+        return OreLarge::init(prf_key, prp_key);
+    }
+
+    quickcheck! {
+        fn compare(x: u64, y: u64) -> bool {
+            let mut ore = init_ore();
+
+            let ret =
+                if x > y {
+                    1
+                } else if x < y {
+                    -1
+                } else {
+                    0
+                };
+
+            let a = ore.encrypt(x);
+            let b = ore.encrypt(y);
+
+            return ret == OreLarge::compare(&a, &b);
+        }
+
+        fn compare_equal(x: u64) -> bool {
+            let mut ore = init_ore();
+            let a = ore.encrypt(x);
+            let b = ore.encrypt(x);
+
+            return 0 == OreLarge::compare(&a, &b);
+        }
+    }
 
     #[test]
-    fn test_left_chunk() {
-        let left: Left = [
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
-            3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
-            4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
-            5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
-            6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-            7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7
-        ];
+    fn smallest_to_largest() {
+        let mut ore = init_ore();
+        let a = ore.encrypt(0);
+        let b = ore.encrypt(18446744073709551615);
 
-        assert_eq!(left_chunk(&left, 0), [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-        assert_eq!(left_chunk(&left, 1), [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
-        assert_eq!(left_chunk(&left, 7), [7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7]);
-        // TODO: How should we handle this?
-        //assert_eq!(left_chunk(&left, 8), []);
+        assert_eq!(-1, OreLarge::compare(&a, &b));
+    }
+
+    #[test]
+    fn largest_to_smallest() {
+        let mut ore = init_ore();
+        let a = ore.encrypt(18446744073709551615);
+        let b = ore.encrypt(0);
+
+        assert_eq!(1, OreLarge::compare(&a, &b));
+    }
+
+    #[test]
+    fn smallest_to_smallest() {
+        let mut ore = init_ore();
+        let a = ore.encrypt(0);
+        let b = ore.encrypt(0);
+
+        assert_eq!(0, OreLarge::compare(&a, &b));
+    }
+
+    #[test]
+    fn largest_to_largest() {
+        let mut ore = init_ore();
+        let a = ore.encrypt(18446744073709551615);
+        let b = ore.encrypt(18446744073709551615);
+
+        assert_eq!(0, OreLarge::compare(&a, &b));
+    }
+
+    #[test]
+    fn comparisons_in_first_block() {
+        let mut ore = init_ore();
+        let a = ore.encrypt(18446744073709551615);
+        let b = ore.encrypt(18446744073709551612);
+
+        assert_eq!(1, OreLarge::compare(&a, &b));
+        assert_eq!(-1, OreLarge::compare(&b, &a));
+    }
+
+    #[test]
+    fn comparisons_in_last_block() {
+        let mut ore = init_ore();
+        let a = ore.encrypt(10);
+        let b = ore.encrypt(73);
+
+        assert_eq!(-1, OreLarge::compare(&a, &b));
+        assert_eq!(1, OreLarge::compare(&b, &a));
+    }
+
+    #[test]
+    fn set_and_get_bit() {
+        let mut block: OreBlock8 = Default::default();
+        block.set_bit(17, 1);
+        assert_eq!(block.get_bit(17), 1);
+
+        block.set_bit(180, 1);
+        assert_eq!(block.get_bit(180), 1);
+
+        block.set_bit(255, 1);
+        assert_eq!(block.get_bit(255), 1);
     }
 }
