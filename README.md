@@ -35,6 +35,30 @@ Pseudo Random Function using AES encryptions.
 
 Large domain (up to `2^64-1`) Block ORE with a single bit indicator function.
 
+## Build, Test and Bench
+
+To build, run:
+
+```
+cargo build
+```
+
+To test, run:
+
+```
+cargo test
+```
+
+To run the benchmarks, run:
+
+```
+cargo bench
+```
+
+Example benchmark results below:
+
+![Benchmark](bench.png)
+
 ## TODO
 
 * Constant time analysis to ensure that encryption or comparison time does not vary with input size
