@@ -16,6 +16,19 @@ pub struct Prp {
 // TODO: Review https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle
 // We probably want to use Sattolo's Algorithm because if PRP(x) = x that could reveal information
 // in the ORE scheme (e.g. if the first k bytes of the plaintext are the same).
+/* 
+ * Implements a Pseudo-Random Permutation using a Knuth Shuffle and a PRNG based on a deterministic
+ * key (using repeated encryptions of a block cipher).
+ *
+ * Initialising the PRP generates a `Vector<u8>` of length 256 and randomises the index
+ * of each value in the vector using the shuffle.
+ *
+ * Permutions require an O(n) search of the vector to find the index of a given value which is
+ * output as the permuted value.
+ *
+ * Inverse permutations are constant time look ups of the value at a given index. Inverse
+ * permutations are made faster this way because they are called more frequently in ORE.
+ */
 impl Prp { // TODO: Rename to Prp8
     // TODO: Pass the block size as an argument
     // TODO: Add a guard for the block_size
