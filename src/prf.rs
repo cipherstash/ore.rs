@@ -1,16 +1,50 @@
 use aes::{Aes128, Block};
 use aes::cipher::{
-    BlockEncrypt, NewBlockCipher,
-    generic_array::GenericArray,
+    consts::{U8, U16},
+    BlockEncrypt, NewBlockCipher, BlockCipher,
+    generic_array::{GenericArray, ArrayLength},
 };
+use block_modes::{BlockMode, Ecb};
+use block_modes::block_padding::NoPadding; // TODO: Probs better to do ZeroPadding but check performance
+
+type Aes128Ecb = Ecb<Aes128, NoPadding>;
+type BlockSize = <Aes128 as BlockCipher>::BlockSize;
 
 pub struct Prf {
     cipher: Aes128
 }
 
-pub fn aes_prf(key: &GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>, block: &mut Block) {
+fn to_blocks<N>(data: &mut [u8]) -> &mut [GenericArray<u8, N>]
+where
+    N: ArrayLength<u8>,
+{
+    use core::slice;
+    let n = N::to_usize();
+    debug_assert!(data.len() % n == 0);
+
+    #[allow(unsafe_code)]
+    unsafe {
+        slice::from_raw_parts_mut(data.as_ptr() as *mut GenericArray<u8, N>, data.len() / n)
+    }
+}
+
+pub fn encrypt(key: &GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>, block: &mut GenericArray<u8, U16>) {
     let cipher = Aes128::new(key);
     cipher.encrypt_block(block);
+}
+
+pub fn encrypt_all(key: &GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>, data: &mut [u8]) {
+    // TODO: Don't use unwrap
+    //let mut cipher = Aes128Ecb::new_from_slices(&key).unwrap();
+    let cipher = Aes128::new(key);
+    let mut blocks = to_blocks::<BlockSize>(&mut data[..]);
+    let ciphertext = cipher.encrypt_blocks(&mut blocks);
+}
+
+// TODO: Make some type aliases!
+pub fn encrypt8(key: &GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>, blocks: &mut [GenericArray<u8, U16>]) {
+    let cipher = Aes128::new(key);
+    cipher.encrypt_blocks(blocks);
 }
 
 impl Prf {

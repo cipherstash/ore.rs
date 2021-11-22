@@ -13,6 +13,22 @@ pub struct Prp {
     permutation: Vec<u8>
 }
 
+// TODO: Review https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle
+// We probably want to use Sattolo's Algorithm because if PRP(x) = x that could reveal information
+// in the ORE scheme (e.g. if the first k bytes of the plaintext are the same).
+/* 
+ * Implements a Pseudo-Random Permutation using a Knuth Shuffle and a PRNG based on a deterministic
+ * key (using repeated encryptions of a block cipher).
+ *
+ * Initialising the PRP generates a `Vector<u8>` of length 256 and randomises the index
+ * of each value in the vector using the shuffle.
+ *
+ * Permutions require an O(n) search of the vector to find the index of a given value which is
+ * output as the permuted value.
+ *
+ * Inverse permutations are constant time look ups of the value at a given index. Inverse
+ * permutations are made faster this way because they are called more frequently in ORE.
+ */
 impl Prp { // TODO: Rename to Prp8
     // TODO: Pass the block size as an argument
     // TODO: Add a guard for the block_size
@@ -23,7 +39,7 @@ impl Prp { // TODO: Rename to Prp8
         let mut prg = Prng::init(&key);
         let mut permutation: Vec<u8> = (0..=255).collect();
 
-        for elem in 1..permutation.len() {
+        for elem in 0..permutation.len() {
             let j = prg.next_byte();
             permutation.swap(elem, usize::try_from(j).unwrap());
         }
@@ -52,3 +68,20 @@ impl Prp { // TODO: Rename to Prp8
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hex_literal::hex;
+
+    #[test]
+    fn init_prp() {
+        let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
+        let prp = Prp::init(&key);
+
+        // TODO: Test all numbers in the block (prop tests?)
+        println!("15 -> {}", prp.permute(15));
+        println!("75 -> {}", prp.permute(75));
+        assert_eq!(15, prp.inverse(prp.permute(15)));
+        assert_ne!(0, prp.permute(0));
+    }
+}
