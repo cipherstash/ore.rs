@@ -134,6 +134,7 @@ impl OreLarge {
         prf::encrypt_all(&self.k2, &mut output.f);
 
         // TODO: Use chunks?
+        // TODO: Don't use the 16 magic number!
         for n in 0..NUM_BLOCKS {
             let position = n * 16;
             // Set prefix and create PRP for the block
