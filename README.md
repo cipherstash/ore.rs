@@ -65,4 +65,4 @@ Example benchmark results below:
 * Analysis of PRNG used to seed the Knuth shuffle - we may need more bits to ensure sufficient entropy
 * Extraction of encrypt and compare traits to handle different block sizes and domain sizes
 * Zeroing and careful cleaning up of memory where appropriate
-* Elimination of warnings
+* Support longer AES keys for the PRF and hash (if possible)
