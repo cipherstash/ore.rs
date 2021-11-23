@@ -4,7 +4,6 @@ use aes::cipher::{
     BlockEncrypt, NewBlockCipher,
     generic_array::GenericArray,
 };
-use byteorder::{ByteOrder, BigEndian};
 
 pub struct Prng {
     cipher: Aes128,
