@@ -14,8 +14,7 @@ use rand::os::{OsRng};
 use byteorder::{ByteOrder, BigEndian};
 
 use aes::cipher::{
-    consts::{U16, U256},
-    NewBlockCipher, BlockCipher,
+    NewBlockCipher,
     generic_array::GenericArray,
 };
 use aes::{Aes128};
