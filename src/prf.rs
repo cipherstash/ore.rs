@@ -1,13 +1,10 @@
 use aes::{Aes128, Block};
 use aes::cipher::{
-    consts::{U8, U16},
+    consts::U16,
     BlockEncrypt, NewBlockCipher, BlockCipher,
     generic_array::{GenericArray, ArrayLength},
 };
-use block_modes::{BlockMode, Ecb};
-use block_modes::block_padding::NoPadding; // TODO: Probs better to do ZeroPadding but check performance
 
-type Aes128Ecb = Ecb<Aes128, NoPadding>;
 type BlockSize = <Aes128 as BlockCipher>::BlockSize;
 
 pub struct Prf {
@@ -38,7 +35,7 @@ pub fn encrypt_all(key: &GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>, 
     //let mut cipher = Aes128Ecb::new_from_slices(&key).unwrap();
     let cipher = Aes128::new(key);
     let mut blocks = to_blocks::<BlockSize>(&mut data[..]);
-    let ciphertext = cipher.encrypt_blocks(&mut blocks);
+    cipher.encrypt_blocks(&mut blocks);
 }
 
 // TODO: Make some type aliases!
