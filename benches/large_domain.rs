@@ -1,28 +1,26 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hex_literal::hex;
-
-use small_prp::ore_large::{CipherText, OreLarge};
-use aes::cipher::generic_array::arr;
+use small_prp::ore_large::{CipherText, OREAES128};
 
 #[inline]
-fn do_encrypt(ore: &mut OreLarge) {
+fn do_encrypt(ore: &mut OREAES128) {
   ore.encrypt(25);
 }
 
 #[inline]
-fn do_encrypt_left(ore: &mut OreLarge) {
+fn do_encrypt_left(ore: &mut OREAES128) {
   ore.encrypt_left(25);
 }
 
 #[inline]
 fn do_compare(a: &CipherText, b: &CipherText) {
-    OreLarge::compare(a, b);
+    OREAES128::compare(a, b);
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let prf_key = arr![u8; 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f];
-    let prp_key = arr![u8; 0xd0, 0xd0, 0x07, 0xa5, 0x3f, 0x9a, 0x68, 0x48, 0x83, 0xbc, 0x1f, 0x21, 0x0f, 0x65, 0x95, 0xa3];
-    let mut ore = OreLarge::init(prf_key, prp_key);
+    let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
+    let k2: [u8; 16] = hex!("d0d007a5 3f9a6848 83bc1f21 0f6595a3");
+    let mut ore = OREAES128::init(&k1, &k2);
     let x = ore.encrypt(100);
     let y = ore.encrypt(100983939290192);
 

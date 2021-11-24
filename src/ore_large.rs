@@ -5,7 +5,7 @@
  */
 
 use crate::prp;
-use crate::prf;
+use crate::prf::{PRF, AES128PRF};
 use crate::hash;
 
 use rand;
@@ -17,11 +17,13 @@ use aes::cipher::{
     NewBlockCipher,
     generic_array::GenericArray,
 };
-use aes::{Aes128};
+use aes::Aes128;
 
-pub struct OreLarge {
-    k1: Key,
-    k2: Key,
+// TODO: Move this and the impl to its own file
+#[derive(Debug)]
+pub struct OREAES128 { // TODO: OREAES128<8, 8> (k, d)
+    prf1: AES128PRF,
+    prf2: AES128PRF,
     // OsRng uses /dev/urandom but we may want to look at
     // ChaCha20 rng and HC128
     rng: OsRng
@@ -34,9 +36,17 @@ const NUM_BLOCKS: usize = 8;
 
 #[derive(Debug)]
 pub struct Left {
-    //f: GenericArray<GenericArray<u8, <Aes128 as BlockCipher>::BlockSize>, <Aes128 as BlockCipher>::ParBlocks>,
     f: [u8; 128], // Blocksize * ORE blocks (16 * 8)
     x: [u8; 8]
+}
+
+// TODO: Replace Left and Right with the generic types
+// the Left should be an array of OreLeftBlock like we did for Right
+#[derive(Debug)]
+pub struct RightNew<const BLOCKS: usize> {
+    //nonce: [u8; 16],
+    nonce: GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>,
+    data: [OreBlock8; BLOCKS]
 }
 
 #[derive(Debug)]
@@ -52,8 +62,6 @@ pub struct CipherText {
     right: Right
 }
 
-pub type Key = GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>;
-
 fn cmp(a: u8, b: u8) -> u8 {
     if a > b {
         return 1u8;
@@ -61,7 +69,6 @@ fn cmp(a: u8, b: u8) -> u8 {
         return 0u8;
     }
 }
-
 
 /* An ORE block for k=8
  * |N| = 2^k */
@@ -102,16 +109,16 @@ impl OreBlock8 {
     }
 }
 
-// TODO: This is just the Encryptor - use an "Encryption" trait
-impl OreLarge {
-    pub fn init(prf_key: Key, prp_key: Key) -> OreLarge {
-      return Self {
-          k1: prf_key,
-          k2: prp_key,
-          rng: OsRng::new().unwrap() // TODO: Don't use unwrap
-      }
+impl OREAES128 {
+    pub fn init(k1: &[u8], k2: &[u8]) -> OREAES128 {
+        // TODO: Can the PRP be initialized in the init function, too?
+        return OREAES128 {
+            prf1: PRF::new(k1),
+            prf2: PRF::new(k2),
+            rng: OsRng::new().unwrap() // TODO: Don't use unwrap
+        }
     }
-    
+
     pub fn encrypt_left(&self, input: u64) -> Left {
         let mut output = Left {
             x: Default::default(),
@@ -122,15 +129,11 @@ impl OreLarge {
         let x = x;
 
         // Build the prefixes
-        /*output.f.iter_mut().enumerate().for_each(|(n, block)| {
-            block[0..n].clone_from_slice(&x[0..n]);
-        });*/
-
         output.f.chunks_mut(16).enumerate().for_each(|(n, block)| {
             block[0..n].clone_from_slice(&x[0..n]);
         });
 
-        prf::encrypt_all(&self.k2, &mut output.f);
+        self.prf2.encrypt_all(&mut output.f);
 
         // TODO: Use chunks?
         // TODO: Don't use the 16 magic number!
@@ -154,7 +157,7 @@ impl OreLarge {
             // Include the block number in the value passed to the Random Oracle
             output.f[position + NUM_BLOCKS] = n as u8;
         }
-        prf::encrypt_all(&self.k1, &mut output.f);
+        self.prf1.encrypt_all(&mut output.f);
 
         return output;
     }
@@ -178,27 +181,14 @@ impl OreLarge {
         let x = x;
 
         // Build the prefixes
-        /*left.f.iter_mut().enumerate().for_each(|(n, block)| {
-            block[0..n].clone_from_slice(&x[0..n]);
-        });*/
         left.f.chunks_mut(16).enumerate().for_each(|(n, block)| {
             block[0..n].clone_from_slice(&x[0..n]);
         });
 
-        prf::encrypt_all(&self.k2, &mut left.f);
+        self.prf2.encrypt_all(&mut left.f);
 
         for n in 0..NUM_BLOCKS {
             // Set prefix and create PRP for the block
-            /*let prp = prp::Prp::init(&left.f[n]);
-            left.x[n] = prp.permute(x[n]);
-
-            // Reset the f block (probably inefficient)
-            left.f[n] = Default::default();
-            left.f[n][0..n].clone_from_slice(&x[0..n]);
-            left.f[n][n] = left.x[n];
-            // Include the block number in the value passed to the Random Oracle
-            left.f[n][NUM_BLOCKS] = n as u8;*/
-
             let position = n * 16;
             // Set prefix and create PRP for the block
             let prp = prp::Prp::init(&left.f[position..(position + 16)]);
@@ -226,7 +216,7 @@ impl OreLarge {
                 ro_keys[offset + NUM_BLOCKS] = n as u8;
             }
 
-            prf::encrypt_all(&self.k1, &mut ro_keys);
+            self.prf1.encrypt_all(&mut ro_keys);
 
             /* TODO: This seems to work but it is technically using the nonce as the key
              * (instead of using it as the plaintext). This appears to be how the original
@@ -239,7 +229,9 @@ impl OreLarge {
              * If not, we will probably need to implement our own parallel encrypt using intrisics
              * like in the AES crate: https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/ni/aes128.rs#L26
              */
-            prf::encrypt_all(&right.nonce, &mut ro_keys);
+            let p: AES128PRF = PRF::new(&right.nonce);
+            p.encrypt_all(&mut ro_keys);
+
 
             for j in 0..=255 {
                 let jstar = prp.inverse(j);
@@ -249,7 +241,8 @@ impl OreLarge {
                 right.data[n].set_bit(j, indicator ^ h);
             }
         }
-        prf::encrypt_all(&self.k1, &mut left.f);
+        //prf::encrypt_all(&self.k1, &mut left.f);
+        self.prf1.encrypt_all(&mut left.f);
 
         // TODO: Do we need to do any zeroing? See https://lib.rs/crates/zeroize
 
@@ -290,16 +283,19 @@ impl OreLarge {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aes::cipher::generic_array::arr;
+    use hex_literal::hex;
 
-    fn init_ore() -> OreLarge {
-        let prf_key: Key = arr![u8; 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f];
-        let prp_key: Key = arr![u8; 0xd0, 0xd0, 0x07, 0xa5, 0x3f, 0x9a, 0x68, 0x48, 0x83, 0xbc, 0x1f, 0x21, 0x0f, 0x65, 0x95, 0xa3];
-        return OreLarge::init(prf_key, prp_key);
+    fn init_ore() -> OREAES128 {
+        let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
+        let k2: [u8; 16] = hex!("d0d007a5 3f9a6848 83bc1f21 0f6595a3");
+
+        return OREAES128::init(&k1, &k2);
     }
 
     quickcheck! {
         fn compare(x: u64, y: u64) -> bool {
+            // TODO: This should possibly not be mutable (I think it is now because the PRP must
+            // have mutable state
             let mut ore = init_ore();
 
             let ret =
@@ -314,7 +310,7 @@ mod tests {
             let a = ore.encrypt(x);
             let b = ore.encrypt(y);
 
-            return ret == OreLarge::compare(&a, &b);
+            return ret == OREAES128::compare(&a, &b);
         }
 
         fn compare_equal(x: u64) -> bool {
@@ -322,7 +318,7 @@ mod tests {
             let a = ore.encrypt(x);
             let b = ore.encrypt(x);
 
-            return 0 == OreLarge::compare(&a, &b);
+            return 0 == OREAES128::compare(&a, &b);
         }
     }
 
@@ -332,7 +328,7 @@ mod tests {
         let a = ore.encrypt(0);
         let b = ore.encrypt(18446744073709551615);
 
-        assert_eq!(-1, OreLarge::compare(&a, &b));
+        assert_eq!(-1, OREAES128::compare(&a, &b));
     }
 
     #[test]
@@ -341,7 +337,7 @@ mod tests {
         let a = ore.encrypt(18446744073709551615);
         let b = ore.encrypt(0);
 
-        assert_eq!(1, OreLarge::compare(&a, &b));
+        assert_eq!(1, OREAES128::compare(&a, &b));
     }
 
     #[test]
@@ -350,7 +346,7 @@ mod tests {
         let a = ore.encrypt(0);
         let b = ore.encrypt(0);
 
-        assert_eq!(0, OreLarge::compare(&a, &b));
+        assert_eq!(0, OREAES128::compare(&a, &b));
     }
 
     #[test]
@@ -359,7 +355,7 @@ mod tests {
         let a = ore.encrypt(18446744073709551615);
         let b = ore.encrypt(18446744073709551615);
 
-        assert_eq!(0, OreLarge::compare(&a, &b));
+        assert_eq!(0, OREAES128::compare(&a, &b));
     }
 
     #[test]
@@ -368,8 +364,8 @@ mod tests {
         let a = ore.encrypt(18446744073709551615);
         let b = ore.encrypt(18446744073709551612);
 
-        assert_eq!(1, OreLarge::compare(&a, &b));
-        assert_eq!(-1, OreLarge::compare(&b, &a));
+        assert_eq!(1, OREAES128::compare(&a, &b));
+        assert_eq!(-1, OREAES128::compare(&b, &a));
     }
 
     #[test]
@@ -378,8 +374,8 @@ mod tests {
         let a = ore.encrypt(10);
         let b = ore.encrypt(73);
 
-        assert_eq!(-1, OreLarge::compare(&a, &b));
-        assert_eq!(1, OreLarge::compare(&b, &a));
+        assert_eq!(-1, OREAES128::compare(&a, &b));
+        assert_eq!(1, OREAES128::compare(&b, &a));
     }
 
     #[test]
