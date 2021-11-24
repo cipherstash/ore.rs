@@ -43,3 +43,53 @@ where
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hex_literal::hex;
+
+    fn init_prf() -> AES128PRF {
+        let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
+        return PRF::new(&key);
+    }
+
+    #[test]
+    fn prf_test_single_block() {
+        let mut input: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0eaa");
+        let prf = init_prf();
+
+        prf.encrypt_all(&mut input);
+        assert_eq!(input, [183, 103, 151, 211, 249, 253, 170, 135, 117, 243, 131, 50, 27, 15, 170, 59]);
+    }
+
+    #[test]
+    fn prf_test_2_blocks() {
+        let mut input: [u8; 32] = hex!("00010203 04050607 08090a0b 0c0d0eaa 04050607 08090a0b 0c0d0eaa ffdd61aa");
+        let prf = init_prf();
+
+        prf.encrypt_all(&mut input);
+        assert_eq!(input, [
+                   183, 103, 151, 211, 249, 253, 170, 135, 117, 243, 131, 50, 27, 15, 170, 59,
+                   100, 192, 41, 108, 208, 245, 146, 251, 188, 245, 156, 28, 33, 210, 70, 50
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "assertion failed")]
+    fn prf_test_input_too_small() {
+        let mut input: [u8; 12] = hex!("00010203 04050607 08090a0b");
+        let prf = init_prf();
+
+        prf.encrypt_all(&mut input);
+    }
+
+    #[test]
+    #[should_panic(expected = "assertion failed")]
+    fn prf_test_input_not_multiple_of_block_size() {
+        let mut input: [u8; 17] = hex!("00010203 04050607 08090a0b ffaadd11 ff");
+        let prf = init_prf();
+
+        prf.encrypt_all(&mut input);
+    }
+}
+ 
