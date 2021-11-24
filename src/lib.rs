@@ -7,10 +7,11 @@
 mod primitives;
 use crate::primitives::{
     PRF,
-    prf::AES128PRF
+    Hash,
+    prf::AES128PRF,
+    hash::AES128Hash
 };
 pub mod prp; // FIXME: This probably shouldn't be public (it is now for the benchmark)
-mod hash;
 
 #[cfg(test)]
 #[macro_use]
@@ -277,7 +278,9 @@ impl OREAES128 {
             return 0;
         }
 
-        let h = hash::hash(&b.right.nonce, &a.left.f[(l * 16)..((l * 16) + 16)]);
+        let hash: AES128Hash = Hash::new(&b.right.nonce);
+        let h = hash.hash(&a.left.f[(l * 16)..((l * 16) + 16)]);
+
         // Test the set and get bit functions
         let test = b.right.data[l].get_bit(a.left.x[l]) ^ h;
         if test == 1 {
