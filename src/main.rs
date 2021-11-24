@@ -1,5 +1,5 @@
 
-use small_prp::OREAES128;
+use ore::OREAES128;
 use hex_literal::hex;
 
 //use aes::Aes128;
