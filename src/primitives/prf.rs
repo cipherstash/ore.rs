@@ -1,3 +1,5 @@
+
+use crate::PRF;
 use aes::Aes128;
 use aes::cipher::{
     BlockEncrypt, NewBlockCipher, BlockCipher,
@@ -5,11 +7,6 @@ use aes::cipher::{
 };
 
 type BlockSize = <Aes128 as BlockCipher>::BlockSize;
-
-pub trait PRF {
-    fn new(key: &[u8]) -> Self;
-    fn encrypt_all(&self, data: &mut [u8]);
-}
 
 #[derive(Debug)]
 pub struct AES128PRF {
