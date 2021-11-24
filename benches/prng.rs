@@ -1,7 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hex_literal::hex;
 
-use small_prp::prp::prng::Prng;
+use ore::prp::prng::Prng;
 use aes::cipher::generic_array::arr;
 
 #[inline]
