@@ -8,6 +8,7 @@ mod primitives;
 use crate::primitives::{
     PRF,
     Hash,
+    PRP,
     prf::AES128PRF,
     hash::AES128Hash
 };
