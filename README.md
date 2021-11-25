@@ -59,6 +59,19 @@ Example benchmark results below:
 
 ![Benchmark](bench.png)
 
+## ARMv8 and M1 Support
+
+ARMv8 and M1 Macs work out of the box but will default to AES in software which is around 4x slower than AES-NI
+(at least on the test machine using an Intel i7 8700K).
+
+To take advantage of hardware AES using NEON Intrinsics on ARM, you need to use Rust nightly.
+
+```
+asdf install rust nightly
+asdf local rust nightly
+cargo +nightly bench
+```
+
 ## TODO
 
 * Constant time analysis to ensure that encryption or comparison time does not vary with input size
