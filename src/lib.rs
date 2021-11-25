@@ -10,9 +10,9 @@ use crate::primitives::{
     Hash,
     PRP,
     prf::AES128PRF,
-    hash::AES128Hash
+    hash::AES128Hash,
+    prp::KnuthShufflePRP
 };
-pub mod prp; // FIXME: This probably shouldn't be public (it is now for the benchmark)
 
 #[cfg(test)]
 #[macro_use]
@@ -150,7 +150,7 @@ impl OREAES128 {
         for n in 0..NUM_BLOCKS {
             let position = n * 16;
             // Set prefix and create PRP for the block
-            let prp = prp::Prp::init(&output.f[position..(position + 16)]);
+            let prp: KnuthShufflePRP<u8, 256> = PRP::new(&output.f[position..(position + 16)]);
             output.x[n] = prp.permute(x[n]);
         }
 
@@ -201,7 +201,7 @@ impl OREAES128 {
             // Set prefix and create PRP for the block
             let position = n * 16;
             // Set prefix and create PRP for the block
-            let prp = prp::Prp::init(&left.f[position..(position + 16)]);
+            let prp: KnuthShufflePRP<u8, 256> = PRP::new(&left.f[position..(position + 16)]);
             left.x[n] = prp.permute(x[n]);
 
             // Reset the f block
@@ -244,7 +244,7 @@ impl OREAES128 {
 
 
             for j in 0..=255 {
-                let jstar = prp.inverse(j);
+                let jstar = prp.invert(j);
                 let indicator = cmp(jstar, x[n]);
                 let offset: usize = (j as usize) * 16;
                 let h = ro_keys[offset as usize] & 1u8;

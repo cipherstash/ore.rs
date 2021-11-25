@@ -1,6 +1,7 @@
 
+mod prng;
 use crate::PRP;
-use crate::prp::prng::Prng; // TODO: Move this
+use crate::primitives::prp::prng::Prng;
 use std::convert::TryFrom;
 
 pub struct KnuthShufflePRP<T, const N: usize> {
