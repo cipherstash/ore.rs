@@ -74,10 +74,14 @@ impl OreBlock8 {
 #[derive(Debug, Clone)]
 pub struct OREError;
 
-pub trait ORE {
-    fn init(k1: &[u8], k2: &[u8], seed: &SEED64) -> Self;
+// TODO: make input generic
+// Make cmp type generic
+// Make num blocks and block size/type generic
+pub trait ORE: Sized {
+    fn init(k1: &[u8], k2: &[u8], seed: &SEED64) -> Result<Self, OREError>;
     fn encrypt_left(&self, input: u64) -> Result<Left, OREError>;
     fn encrypt(&mut self, input: u64) -> Result<CipherText, OREError>;
+
     // TODO: This could probably do dynamic dispatch depending on the type
     fn compare(a: &CipherText, b: &CipherText) -> i8;
 }

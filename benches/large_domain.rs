@@ -4,12 +4,12 @@ use ore::{ORE, CipherText, bit2::OREAES128};
 
 #[inline]
 fn do_encrypt(ore: &mut OREAES128) {
-  ore.encrypt(25);
+  ore.encrypt(25).unwrap();
 }
 
 #[inline]
 fn do_encrypt_left(ore: &mut OREAES128) {
-  ore.encrypt_left(25);
+  ore.encrypt_left(25).unwrap();
 }
 
 #[inline]
@@ -22,7 +22,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     let k2 = hex!("d0d007a5 3f9a6848 83bc1f21 0f6595a3");
     let seed = hex!("d0d007a5 3f9a6848");
 
-    let mut ore: OREAES128 = ORE::init(&k1, &k2, &seed);
+    let mut ore: OREAES128 = ORE::init(&k1, &k2, &seed).unwrap();
     let x = ore.encrypt(100).unwrap();
     let y = ore.encrypt(100983939290192).unwrap();
 

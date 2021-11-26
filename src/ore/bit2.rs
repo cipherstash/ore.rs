@@ -55,14 +55,14 @@ fn cmp(a: u8, b: u8) -> u8 {
 //
 
 impl ORE for OREAES128 {
-    fn init(k1: &[u8], k2: &[u8], seed: &SEED64) -> OREAES128 {
+    fn init(k1: &[u8], k2: &[u8], seed: &SEED64) -> Result<OREAES128, OREError> {
         // TODO: Can the PRP be initialized in the init function, too?
-        return OREAES128 {
+        return Ok(OREAES128 {
             prf1: PRF::new(k1),
             prf2: PRF::new(k2),
-            rng: OsRng::new().unwrap(), // TODO: Don't use unwrap
+            rng: OsRng::new().map_err(|_| OREError)?,
             prp_seed: *seed
-        }
+        })
     }
 
     fn encrypt_left(&self, input: u64) -> Result<Left, OREError> {
@@ -192,8 +192,6 @@ impl ORE for OREAES128 {
     }
 
     fn compare(a: &CipherText, b: &CipherText) -> i8 {
-        // TODO: Make sure that this is constant time
-
         let mut is_equal = true;
         let mut l = 0; // Unequal block
 
@@ -203,6 +201,7 @@ impl ORE for OREAES128 {
             if &a.left.x[n] != &b.left.x[n] || &a.left.f[position..(position + 16)] != &b.left.f[position..(position + 16)] {
                 is_equal = false;
                 l = n;
+                // TODO: Make sure that this is constant time (i.e. don't break)
                 break;
             }
         }
@@ -239,7 +238,7 @@ mod tests {
         rng.fill_bytes(&mut k1);
         rng.fill_bytes(&mut k2);
 
-        return OREAES128::init(&k1, &k2, &seed);
+        return ORE::init(&k1, &k2, &seed).unwrap();
     }
 
     quickcheck! {
