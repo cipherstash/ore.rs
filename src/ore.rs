@@ -37,10 +37,7 @@ pub struct CipherText {
 /* An ORE block for k=8
  * |N| = 2^k */
 // TODO: We might be able to use an __m256 for this
-#[derive(Debug)]
-#[derive(Default)]
-#[derive(Copy)]
-#[derive(Clone)]
+#[derive(Debug, Default, Copy, Clone)]
 pub struct OreBlock8 {
     low: u128,
     high: u128
