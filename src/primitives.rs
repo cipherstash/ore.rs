@@ -21,7 +21,6 @@ pub trait Hash {
     fn hash_all(&self, input: &[u8], output: &mut [u8]);
 }
 
-// TODO: Can these move inside the trait?
 #[derive(Debug, Clone)]
 pub struct PRPError;
 pub type PRPResult<T> = Result<T, PRPError>;
