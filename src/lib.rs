@@ -15,10 +15,6 @@ use crate::primitives::{
     prp::KnuthShufflePRP
 };
 
-#[cfg(test)]
-#[macro_use]
-extern crate quickcheck;
-
 use rand;
 use rand::Rng;
 use rand::os::{OsRng};
@@ -291,24 +287,29 @@ impl OREAES128 {
 }
 
 #[cfg(test)]
+#[macro_use]
+extern crate quickcheck;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use hex_literal::hex;
 
     fn init_ore() -> OREAES128 {
-        let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-        let k2: [u8; 16] = hex!("d0d007a5 3f9a6848 83bc1f21 0f6595a3");
+        let mut k1: [u8; 16] = Default::default();
+        let mut k2: [u8; 16] = Default::default();
 
-        // TODO: Randomize these for every test run
-        let seed = hex!("00010203 04050607");
+        let mut rng = OsRng::new().unwrap();
+        let mut seed: [u8; 8] = [0; 8];
+
+        rng.fill_bytes(&mut seed);
+        rng.fill_bytes(&mut k1);
+        rng.fill_bytes(&mut k2);
 
         return OREAES128::init(&k1, &k2, &seed);
     }
 
     quickcheck! {
         fn compare(x: u64, y: u64) -> bool {
-            // TODO: This should possibly not be mutable (I think it is now because the PRP must
-            // have mutable state
             let mut ore = init_ore();
 
             let ret =
