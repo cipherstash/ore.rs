@@ -6,6 +6,7 @@
 
 pub use crate::ore::{
     ORE,
+    OREError,
     Left,
     Right,
     CipherText,
@@ -64,7 +65,7 @@ impl ORE for OREAES128 {
         }
     }
 
-    fn encrypt_left(&self, input: u64) -> Left {
+    fn encrypt_left(&self, input: u64) -> Result<Left, OREError> {
         let mut output = Left {
             x: Default::default(),
             f: [0u8; 128]
@@ -84,8 +85,8 @@ impl ORE for OREAES128 {
         for n in 0..NUM_BLOCKS {
             let position = n * 16;
             // Set prefix and create PRP for the block
-            let prp: KnuthShufflePRP<u8, 256> = PRP::new(&output.f[position..(position + 16)], &self.prp_seed).unwrap(); // TODO: Don't use unwrap
-            output.x[n] = prp.permute(x[n]).unwrap(); // TODO: Don't use unwrap
+            let prp: KnuthShufflePRP<u8, 256> = PRP::new(&output.f[position..(position + 16)], &self.prp_seed).map_err(|_| OREError)?;
+            output.x[n] = prp.permute(x[n]).map_err(|_| OREError)?;
         }
 
         // Reset the f block
@@ -103,10 +104,10 @@ impl ORE for OREAES128 {
         }
         self.prf1.encrypt_all(&mut output.f);
 
-        return output;
+        return Ok(output);
     }
 
-    fn encrypt(&mut self, input: u64) -> CipherText {
+    fn encrypt(&mut self, input: u64) -> Result<CipherText, OREError> {
         let mut right = Right {
             nonce: Default::default(),
             data: [Default::default(); 8]
@@ -133,8 +134,8 @@ impl ORE for OREAES128 {
             // Set prefix and create PRP for the block
             let position = n * 16;
             // Set prefix and create PRP for the block
-            let prp: KnuthShufflePRP<u8, 256> = PRP::new(&left.f[position..(position + 16)], &self.prp_seed).unwrap(); // TODO: Don't use unwrap
-            left.x[n] = prp.permute(x[n]).unwrap(); // TODO: Don't use unwrap
+            let prp: KnuthShufflePRP<u8, 256> = PRP::new(&left.f[position..(position + 16)], &self.prp_seed).map_err(|_| OREError)?;
+            left.x[n] = prp.permute(x[n]).map_err(|_| OREError)?;
 
             // Reset the f block
             // TODO: We don't actually need to reset the whole thing - just from n onwards
@@ -174,9 +175,8 @@ impl ORE for OREAES128 {
             let p: AES128PRF = PRF::new(&right.nonce);
             p.encrypt_all(&mut ro_keys);
 
-
             for j in 0..=255 {
-                let jstar = prp.invert(j).unwrap(); // TODO: Don't use unwrap
+                let jstar = prp.invert(j).map_err(|_| OREError)?;
                 let indicator = cmp(jstar, x[n]);
                 let offset: usize = (j as usize) * 16;
                 let h = ro_keys[offset as usize] & 1u8;
@@ -188,7 +188,7 @@ impl ORE for OREAES128 {
 
         // TODO: Do we need to do any zeroing? See https://lib.rs/crates/zeroize
 
-        return CipherText { left: left, right: right };
+        return Ok(CipherText { left: left, right: right });
     }
 
     fn compare(a: &CipherText, b: &CipherText) -> i8 {
@@ -255,16 +255,16 @@ mod tests {
                     0
                 };
 
-            let a = ore.encrypt(x);
-            let b = ore.encrypt(y);
+            let a = ore.encrypt(x).unwrap();
+            let b = ore.encrypt(y).unwrap();
 
             return ret == OREAES128::compare(&a, &b);
         }
 
         fn compare_equal(x: u64) -> bool {
             let mut ore = init_ore();
-            let a = ore.encrypt(x);
-            let b = ore.encrypt(x);
+            let a = ore.encrypt(x).unwrap();
+            let b = ore.encrypt(x).unwrap();
 
             return 0 == OREAES128::compare(&a, &b);
         }
@@ -273,8 +273,8 @@ mod tests {
     #[test]
     fn smallest_to_largest() {
         let mut ore = init_ore();
-        let a = ore.encrypt(0);
-        let b = ore.encrypt(18446744073709551615);
+        let a = ore.encrypt(0).unwrap();
+        let b = ore.encrypt(18446744073709551615).unwrap();
 
         assert_eq!(-1, OREAES128::compare(&a, &b));
     }
@@ -282,8 +282,8 @@ mod tests {
     #[test]
     fn largest_to_smallest() {
         let mut ore = init_ore();
-        let a = ore.encrypt(18446744073709551615);
-        let b = ore.encrypt(0);
+        let a = ore.encrypt(18446744073709551615).unwrap();
+        let b = ore.encrypt(0).unwrap();
 
         assert_eq!(1, OREAES128::compare(&a, &b));
     }
@@ -291,8 +291,8 @@ mod tests {
     #[test]
     fn smallest_to_smallest() {
         let mut ore = init_ore();
-        let a = ore.encrypt(0);
-        let b = ore.encrypt(0);
+        let a = ore.encrypt(0).unwrap();
+        let b = ore.encrypt(0).unwrap();
 
         assert_eq!(0, OREAES128::compare(&a, &b));
     }
@@ -300,8 +300,8 @@ mod tests {
     #[test]
     fn largest_to_largest() {
         let mut ore = init_ore();
-        let a = ore.encrypt(18446744073709551615);
-        let b = ore.encrypt(18446744073709551615);
+        let a = ore.encrypt(18446744073709551615).unwrap();
+        let b = ore.encrypt(18446744073709551615).unwrap();
 
         assert_eq!(0, OREAES128::compare(&a, &b));
     }
@@ -309,8 +309,8 @@ mod tests {
     #[test]
     fn comparisons_in_first_block() {
         let mut ore = init_ore();
-        let a = ore.encrypt(18446744073709551615);
-        let b = ore.encrypt(18446744073709551612);
+        let a = ore.encrypt(18446744073709551615).unwrap();
+        let b = ore.encrypt(18446744073709551612).unwrap();
 
         assert_eq!(1, OREAES128::compare(&a, &b));
         assert_eq!(-1, OREAES128::compare(&b, &a));
@@ -319,8 +319,8 @@ mod tests {
     #[test]
     fn comparisons_in_last_block() {
         let mut ore = init_ore();
-        let a = ore.encrypt(10);
-        let b = ore.encrypt(73);
+        let a = ore.encrypt(10).unwrap();
+        let b = ore.encrypt(73).unwrap();
 
         assert_eq!(-1, OREAES128::compare(&a, &b));
         assert_eq!(1, OREAES128::compare(&b, &a));
