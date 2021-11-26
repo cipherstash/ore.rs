@@ -37,10 +37,7 @@ pub struct CipherText {
 /* An ORE block for k=8
  * |N| = 2^k */
 // TODO: We might be able to use an __m256 for this
-#[derive(Debug)]
-#[derive(Default)]
-#[derive(Copy)]
-#[derive(Clone)]
+#[derive(Debug, Default, Copy, Clone)]
 pub struct OreBlock8 {
     low: u128,
     high: u128
@@ -73,10 +70,19 @@ impl OreBlock8 {
     }
 }
 
-pub trait ORE {
-    fn init(k1: &[u8], k2: &[u8], seed: &SEED64) -> Self;
-    fn encrypt_left(&self, input: u64) -> Left;
-    fn encrypt(&mut self, input: u64) -> CipherText;
+
+#[derive(Debug, Clone)]
+pub struct OREError;
+
+// TODO: make input generic
+// Make cmp type generic
+// Make num blocks and block size/type generic
+pub trait ORE: Sized {
+    fn init(k1: &[u8], k2: &[u8], seed: &SEED64) -> Result<Self, OREError>;
+    fn encrypt_left(&self, input: u64) -> Result<Left, OREError>;
+    fn encrypt(&mut self, input: u64) -> Result<CipherText, OREError>;
+
     // TODO: This could probably do dynamic dispatch depending on the type
     fn compare(a: &CipherText, b: &CipherText) -> i8;
 }
+
