@@ -1,3 +1,4 @@
+use crate::SEED64;
 use aes::Aes128;
 use aes::cipher::{
     consts::U16,
@@ -9,7 +10,7 @@ pub struct Prng {
     cipher: Aes128,
     data: [GenericArray<u8, U16>; 16],
     ptr: (usize, usize),
-    seed: [u8; 8]
+    seed: SEED64
 }
 
 /* 
@@ -18,7 +19,7 @@ pub struct Prng {
  */
 // TODO: Rename this
 impl Prng {
-    pub fn init(key: &[u8], seed: &[u8; 8]) -> Prng {
+    pub fn init(key: &[u8], seed: &SEED64) -> Prng {
         let key_array = GenericArray::from_slice(key);
         let cipher = Aes128::new(&key_array);
         let mut prng = Prng {
@@ -77,7 +78,7 @@ mod tests {
 
     fn init_prng() -> Prng {
         let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-        let seed: [u8; 8] = hex!("00010203 04050607");
+        let seed: SEED64 = hex!("00010203 04050607");
 
         return Prng::init(&key, &seed);
     }

@@ -30,8 +30,9 @@ fn main() {
 
     let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
     let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
+    let seed = hex!("00010203 04050607");
 
-    let mut ore = OREAES128::init(&k1, &k2);
+    let mut ore = OREAES128::init(&k1, &k2, &seed);
     println!("ORE = {:?}", ore.encrypt(25));
 
     /*let ct2 = ore.encrypt(18);

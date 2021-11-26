@@ -1,21 +1,22 @@
 
-mod prng;
-use crate::PRP;
+pub mod prng;
+use crate::{PRP, SEED64};
 use crate::primitives::prp::prng::Prng;
 use std::convert::TryFrom;
 
 pub struct KnuthShufflePRP<T, const N: usize> {
-    permutation: [T; N]
+    permutation: Vec<T>
 }
 
 impl PRP<u8> for KnuthShufflePRP<u8, 256> {
-    fn new(key: &[u8]) -> Self {
-        let mut prg = Prng::init(&key);
-        let mut permutation: [u8; 256] = [0; 256];
-
-        for i in 0..=255 {
-            permutation[i] = i as u8;
-        }
+    /*
+     * Initialize an 8-bit (256 element) PRP using a KnuthShuffle
+     * and a 64-bit random seed
+     */
+    fn new(key: &[u8], seed: &SEED64) -> Self {
+        //let seed: [u8; 8] = [0, 1, 2, 3, 4, 5, 6, 7];
+        let mut prg = Prng::init(&key, &seed);
+        let mut permutation: Vec<u8> = (0..=255).collect();
 
         for elem in 0..permutation.len() {
             let j = prg.next_byte();
@@ -55,7 +56,8 @@ mod tests {
 
     fn init_prp() -> KnuthShufflePRP<u8, 256> {
         let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0eaa");
-        return PRP::new(&key);
+        let seed: [u8; 8] = hex!("00010203 04050607");
+        return PRP::new(&key, &seed);
     }
 
     #[test]

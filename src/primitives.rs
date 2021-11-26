@@ -3,6 +3,11 @@ pub mod prf;
 pub mod hash;
 pub mod prp;
 
+/*
+ * Represents a 64-bit (8-byte) random seed.
+ */
+pub type SEED64 = [u8; 8];
+
 pub trait PRF {
     // TODO: Use a PRFKey trait as the argument here
     fn new(key: &[u8]) -> Self;
@@ -17,7 +22,7 @@ pub trait Hash {
 }
 
 pub trait PRP<T> {
-    fn new(key: &[u8]) -> Self;
+    fn new(key: &[u8], seed: &SEED64) -> Self;
     fn permute(&self, data: T) -> T;
     fn invert(&self, data: T) -> T;
 }
