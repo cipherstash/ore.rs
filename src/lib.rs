@@ -1,9 +1,14 @@
 
-pub mod prp;
-pub mod prf;
-pub mod hash;
-pub mod ore_large;
+mod ore;
+mod primitives;
+pub use crate::ore::{
+    ORE,
+    CipherText,
+    bit2
+};
+
 
 #[cfg(test)]
 #[macro_use]
 extern crate quickcheck;
+

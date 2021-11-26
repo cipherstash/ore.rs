@@ -1,23 +1,29 @@
 
 /*
  *
- * Block ORE Implemenation
+ * Block ORE Implemenation using a 2-bit indicator function
  */
 
-use crate::prp;
-use crate::prf::{PRF, AES128PRF};
-use crate::hash;
+pub use crate::ore::{
+    ORE,
+    Left,
+    Right,
+    CipherText,
+    OreBlock8
+};
+use crate::primitives::{
+    PRF,
+    Hash,
+    PRP,
+    SEED64,
+    prf::AES128PRF,
+    hash::AES128Hash,
+    prp::KnuthShufflePRP
+};
 
 use rand;
 use rand::Rng;
 use rand::os::{OsRng};
-use byteorder::{ByteOrder, BigEndian};
-
-use aes::cipher::{
-    NewBlockCipher,
-    generic_array::GenericArray,
-};
-use aes::Aes128;
 
 // TODO: Move this and the impl to its own file
 #[derive(Debug)]
@@ -26,41 +32,11 @@ pub struct OREAES128 { // TODO: OREAES128<8, 8> (k, d)
     prf2: AES128PRF,
     // OsRng uses /dev/urandom but we may want to look at
     // ChaCha20 rng and HC128
-    rng: OsRng
+    rng: OsRng,
+    prp_seed: SEED64
 }
 
 const NUM_BLOCKS: usize = 8;
-
-// TODO: Don't need GenericArray in Rust 1.51.0
-// See https://blog.rust-lang.org/2021/03/25/Rust-1.51.0.html
-
-#[derive(Debug)]
-pub struct Left {
-    f: [u8; 128], // Blocksize * ORE blocks (16 * 8)
-    x: [u8; 8]
-}
-
-// TODO: Replace Left and Right with the generic types
-// the Left should be an array of OreLeftBlock like we did for Right
-#[derive(Debug)]
-pub struct RightNew<const BLOCKS: usize> {
-    //nonce: [u8; 16],
-    nonce: GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>,
-    data: [OreBlock8; BLOCKS]
-}
-
-#[derive(Debug)]
-pub struct Right {
-    //nonce: [u8; 16],
-    nonce: GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>,
-    data: [OreBlock8; 8]
-}
-
-#[derive(Debug)]
-pub struct CipherText {
-    left: Left,
-    right: Right
-}
 
 fn cmp(a: u8, b: u8) -> u8 {
     if a > b {
@@ -70,65 +46,33 @@ fn cmp(a: u8, b: u8) -> u8 {
     }
 }
 
-/* An ORE block for k=8
- * |N| = 2^k */
-// TODO: We might be able to use an __m256 for this
-#[derive(Debug)]
-#[derive(Default)]
-#[derive(Copy)]
-#[derive(Clone)]
-struct OreBlock8 {
-    low: u128,
-    high: u128
-}
+// TODO: Next steps
+// * Make the Left and Right generic
+// * Use a block type for Left as well as right? (possibly more work)
+// * Add marshall and unmarshall functions to get consistent binary formats
+// * Move this first implementation to ore/AES128ORE (consistent naming)
+//
 
-// TODO: Make this a trait
-impl OreBlock8 {
-    // TODO: This should really just take a bool or we define an unset_bit fn, too
-    // TODO: Return a Result<type>
-    #[inline]
-    pub fn set_bit(&mut self, position: u8, value: u8) {
-        if position < 128 {
-          let bit: u128 = (value as u128) << position;
-          self.low |= bit;
-        } else {
-          let bit: u128 = (value as u128) << (position - 128);
-          self.high |= bit;
-        }
-    }
-
-    #[inline]
-    pub fn get_bit(&self, position: u8) -> u8 {
-        if position < 128 {
-            let mask: u128 = 1 << position;
-            return ((self.low & mask) >> position) as u8;
-        } else {
-            let mask: u128 = 1 << (position - 128);
-            return ((self.high & mask) >> (position - 128)) as u8;
-        }
-    }
-}
-
-impl OREAES128 {
-    pub fn init(k1: &[u8], k2: &[u8]) -> OREAES128 {
+impl ORE for OREAES128 {
+    fn init(k1: &[u8], k2: &[u8], seed: &SEED64) -> OREAES128 {
         // TODO: Can the PRP be initialized in the init function, too?
         return OREAES128 {
             prf1: PRF::new(k1),
             prf2: PRF::new(k2),
-            rng: OsRng::new().unwrap() // TODO: Don't use unwrap
+            rng: OsRng::new().unwrap(), // TODO: Don't use unwrap
+            prp_seed: *seed
         }
     }
 
-    pub fn encrypt_left(&self, input: u64) -> Left {
+    fn encrypt_left(&self, input: u64) -> Left {
         let mut output = Left {
             x: Default::default(),
             f: [0u8; 128]
         };
-        let mut x: [u8; NUM_BLOCKS] = Default::default();
-        BigEndian::write_uint(&mut x, input, NUM_BLOCKS);
-        let x = x;
+        let x: [u8; NUM_BLOCKS] = input.to_be_bytes();
 
         // Build the prefixes
+        // TODO: Don't modify struct values directly - use a function on a "Left" trait
         output.f.chunks_mut(16).enumerate().for_each(|(n, block)| {
             block[0..n].clone_from_slice(&x[0..n]);
         });
@@ -140,7 +84,7 @@ impl OREAES128 {
         for n in 0..NUM_BLOCKS {
             let position = n * 16;
             // Set prefix and create PRP for the block
-            let prp = prp::Prp::init(&output.f[position..(position + 16)]);
+            let prp: KnuthShufflePRP<u8, 256> = PRP::new(&output.f[position..(position + 16)], &self.prp_seed);
             output.x[n] = prp.permute(x[n]);
         }
 
@@ -162,7 +106,7 @@ impl OREAES128 {
         return output;
     }
 
-    pub fn encrypt(&mut self, input: u64) -> CipherText {
+    fn encrypt(&mut self, input: u64) -> CipherText {
         let mut right = Right {
             nonce: Default::default(),
             data: [Default::default(); 8]
@@ -176,9 +120,7 @@ impl OREAES128 {
         // Generate a 16-byte random nonce
         self.rng.fill_bytes(&mut right.nonce);
 
-        let mut x: [u8; NUM_BLOCKS] = Default::default();
-        BigEndian::write_uint(&mut x, input, NUM_BLOCKS);
-        let x = x;
+        let x: [u8; NUM_BLOCKS] = input.to_be_bytes();
 
         // Build the prefixes
         left.f.chunks_mut(16).enumerate().for_each(|(n, block)| {
@@ -191,7 +133,7 @@ impl OREAES128 {
             // Set prefix and create PRP for the block
             let position = n * 16;
             // Set prefix and create PRP for the block
-            let prp = prp::Prp::init(&left.f[position..(position + 16)]);
+            let prp: KnuthShufflePRP<u8, 256> = PRP::new(&left.f[position..(position + 16)], &self.prp_seed);
             left.x[n] = prp.permute(x[n]);
 
             // Reset the f block
@@ -234,7 +176,7 @@ impl OREAES128 {
 
 
             for j in 0..=255 {
-                let jstar = prp.inverse(j);
+                let jstar = prp.invert(j);
                 let indicator = cmp(jstar, x[n]);
                 let offset: usize = (j as usize) * 16;
                 let h = ro_keys[offset as usize] & 1u8;
@@ -249,7 +191,7 @@ impl OREAES128 {
         return CipherText { left: left, right: right };
     }
 
-    pub fn compare(a: &CipherText, b: &CipherText) -> i8 {
+    fn compare(a: &CipherText, b: &CipherText) -> i8 {
         // TODO: Make sure that this is constant time
 
         let mut is_equal = true;
@@ -269,7 +211,9 @@ impl OREAES128 {
             return 0;
         }
 
-        let h = hash::hash(&b.right.nonce, &a.left.f[(l * 16)..((l * 16) + 16)]);
+        let hash: AES128Hash = Hash::new(&b.right.nonce);
+        let h = hash.hash(&a.left.f[(l * 16)..((l * 16) + 16)]);
+
         // Test the set and get bit functions
         let test = b.right.data[l].get_bit(a.left.x[l]) ^ h;
         if test == 1 {
@@ -283,19 +227,23 @@ impl OREAES128 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hex_literal::hex;
 
     fn init_ore() -> OREAES128 {
-        let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-        let k2: [u8; 16] = hex!("d0d007a5 3f9a6848 83bc1f21 0f6595a3");
+        let mut k1: [u8; 16] = Default::default();
+        let mut k2: [u8; 16] = Default::default();
 
-        return OREAES128::init(&k1, &k2);
+        let mut rng = OsRng::new().unwrap();
+        let mut seed: [u8; 8] = [0; 8];
+
+        rng.fill_bytes(&mut seed);
+        rng.fill_bytes(&mut k1);
+        rng.fill_bytes(&mut k2);
+
+        return OREAES128::init(&k1, &k2, &seed);
     }
 
     quickcheck! {
         fn compare(x: u64, y: u64) -> bool {
-            // TODO: This should possibly not be mutable (I think it is now because the PRP must
-            // have mutable state
             let mut ore = init_ore();
 
             let ret =
