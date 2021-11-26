@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hex_literal::hex;
-use small_prp::ore_large::{CipherText, OREAES128};
+use ore::{ORE, CipherText, bit2::OREAES128};
 
 #[inline]
 fn do_encrypt(ore: &mut OREAES128) {
@@ -18,9 +18,11 @@ fn do_compare(a: &CipherText, b: &CipherText) {
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-    let k2: [u8; 16] = hex!("d0d007a5 3f9a6848 83bc1f21 0f6595a3");
-    let mut ore = OREAES128::init(&k1, &k2);
+    let k1 = hex!("00010203 04050607 08090a0b 0c0d0e0f");
+    let k2 = hex!("d0d007a5 3f9a6848 83bc1f21 0f6595a3");
+    let seed = hex!("d0d007a5 3f9a6848");
+
+    let mut ore: OREAES128 = ORE::init(&k1, &k2, &seed);
     let x = ore.encrypt(100);
     let y = ore.encrypt(100983939290192);
 
