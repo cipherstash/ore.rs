@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hex_literal::hex;
-use ore::{ORE, CipherText, OREAES128};
+use ore::{ORE, CipherText, bit2::OREAES128};
 
 #[inline]
 fn do_encrypt(ore: &mut OREAES128) {
