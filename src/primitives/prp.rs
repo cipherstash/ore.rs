@@ -13,16 +13,16 @@ impl PRP<u8> for KnuthShufflePRP<u8, 256> {
      * Initialize an 8-bit (256 element) PRP using a KnuthShuffle
      * and a 64-bit random seed
      */
-    fn new(key: &[u8], seed: &SEED64) -> Self {
-        let mut prg = AES128PRNG::init(&key, &seed);
+    fn new(key: &[u8], seed: &SEED64) -> PRPResult<Self> {
+        let mut prg = AES128PRNG::init(&key, &seed); // TODO: Use Result type here, too
         let mut permutation: Vec<u8> = (0..=255).collect();
 
         for elem in 0..permutation.len() {
             let j = prg.next_byte();
-            permutation.swap(elem, usize::try_from(j).unwrap());
+            permutation.swap(elem, usize::try_from(j).map_err(|_| PRPError)?);
         }
 
-        return Self { permutation: permutation }
+        return Ok(Self { permutation: permutation });
     }
 
     /*
@@ -58,7 +58,7 @@ mod tests {
     use super::*;
     use hex_literal::hex;
 
-    fn init_prp() -> KnuthShufflePRP<u8, 256> {
+    fn init_prp() -> PRPResult<KnuthShufflePRP<u8, 256>> {
         let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0eaa");
         let seed: [u8; 8] = hex!("00010203 04050607");
         return PRP::new(&key, &seed);
@@ -66,7 +66,7 @@ mod tests {
 
     #[test]
     fn test_invert() -> Result<(), PRPError> {
-        let prp = init_prp();
+        let prp = init_prp()?;
 
         for i in 0..255 {
             assert_eq!(i, prp.invert(prp.permute(i)?)?);
