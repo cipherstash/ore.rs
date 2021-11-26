@@ -23,8 +23,8 @@ fn criterion_benchmark(c: &mut Criterion) {
     let seed = hex!("d0d007a5 3f9a6848");
 
     let mut ore: OREAES128 = ORE::init(&k1, &k2, &seed);
-    let x = ore.encrypt(100);
-    let y = ore.encrypt(100983939290192);
+    let x = ore.encrypt(100).unwrap();
+    let y = ore.encrypt(100983939290192).unwrap();
 
     c.bench_function("ore_large8", |b| b.iter(|| do_encrypt(black_box(&mut ore))));
     c.bench_function("ore_large8_left", |b| b.iter(|| do_encrypt_left(black_box(&mut ore))));
