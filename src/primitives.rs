@@ -21,8 +21,12 @@ pub trait Hash {
     fn hash_all(&self, input: &[u8], output: &mut [u8]);
 }
 
+#[derive(Debug, Clone)]
+pub struct PRPError;
+pub type PRPResult<T> = Result<T, PRPError>;
+
 pub trait PRP<T> {
     fn new(key: &[u8], seed: &SEED64) -> Self;
-    fn permute(&self, data: T) -> T;
-    fn invert(&self, data: T) -> T;
+    fn permute(&self, data: T) -> PRPResult<T>;
+    fn invert(&self, data: T) -> PRPResult<T>;
 }

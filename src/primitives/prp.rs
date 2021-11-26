@@ -1,6 +1,6 @@
 
 pub mod prng;
-use crate::primitives::{PRP, SEED64};
+use crate::primitives::{PRP, PRPResult, PRPError, SEED64};
 use crate::primitives::prp::prng::AES128PRNG;
 use std::convert::TryFrom;
 
@@ -31,20 +31,25 @@ impl PRP<u8> for KnuthShufflePRP<u8, 256> {
      *
      * Forward permutations are only used once in the ORE scheme so this is OK
      */
-    fn permute(&self, input: u8) -> u8 {
-        // TODO: Don't use unwrap
-        let position: usize = self.permutation.iter().position(|&x| x == input).unwrap();
-        // TODO: Use as
-        return u8::try_from(position).unwrap();
+    fn permute(&self, input: u8) -> PRPResult<u8> {
+        let u = self.permutation
+            .iter()
+            .position(|&x| x == input)
+            .ok_or(PRPError)?;
+
+        return u8::try_from(u).map_err(|_| PRPError);
     }
 
     /* Performs the inverse permutation. This operation is constant time
      * and is designed that way because there are d (block size) inverse
      * permutations in the ORE scheme */
-    fn invert(&self, input: u8) -> u8 {
-        // TODO use 'as'
-        let index = usize::try_from(input).unwrap();
-        return self.permutation[index];
+    fn invert(&self, input: u8) -> PRPResult<u8> {
+        let index = usize::try_from(input).map_err(|_| PRPError)?;
+
+        return match self.permutation.get(index) {
+            Some(i) => Ok(*i),
+            None    => Err(PRPError)
+        }
     }
 }
 
@@ -60,12 +65,14 @@ mod tests {
     }
 
     #[test]
-    fn test_invert() {
+    fn test_invert() -> Result<(), PRPError> {
         let prp = init_prp();
 
         for i in 0..255 {
-          assert_eq!(i, prp.invert(prp.permute(i)));
+            assert_eq!(i, prp.invert(prp.permute(i)?)?);
         }
+
+        Ok(())
     }
 }
 

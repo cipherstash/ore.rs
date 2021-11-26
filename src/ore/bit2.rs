@@ -85,7 +85,7 @@ impl ORE for OREAES128 {
             let position = n * 16;
             // Set prefix and create PRP for the block
             let prp: KnuthShufflePRP<u8, 256> = PRP::new(&output.f[position..(position + 16)], &self.prp_seed);
-            output.x[n] = prp.permute(x[n]);
+            output.x[n] = prp.permute(x[n]).unwrap(); // TODO: Don't use unwrap
         }
 
         // Reset the f block
@@ -134,7 +134,7 @@ impl ORE for OREAES128 {
             let position = n * 16;
             // Set prefix and create PRP for the block
             let prp: KnuthShufflePRP<u8, 256> = PRP::new(&left.f[position..(position + 16)], &self.prp_seed);
-            left.x[n] = prp.permute(x[n]);
+            left.x[n] = prp.permute(x[n]).unwrap(); // TODO: Don't use unwrap
 
             // Reset the f block
             // TODO: We don't actually need to reset the whole thing - just from n onwards
@@ -176,7 +176,7 @@ impl ORE for OREAES128 {
 
 
             for j in 0..=255 {
-                let jstar = prp.invert(j);
+                let jstar = prp.invert(j).unwrap(); // TODO: Don't use unwrap
                 let indicator = cmp(jstar, x[n]);
                 let offset: usize = (j as usize) * 16;
                 let h = ro_keys[offset as usize] & 1u8;
