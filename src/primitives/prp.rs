@@ -1,7 +1,7 @@
 
 pub mod prng;
 use crate::{PRP, SEED64};
-use crate::primitives::prp::prng::Prng;
+use crate::primitives::prp::prng::AES128PRNG;
 use std::convert::TryFrom;
 
 pub struct KnuthShufflePRP<T, const N: usize> {
@@ -14,8 +14,7 @@ impl PRP<u8> for KnuthShufflePRP<u8, 256> {
      * and a 64-bit random seed
      */
     fn new(key: &[u8], seed: &SEED64) -> Self {
-        //let seed: [u8; 8] = [0, 1, 2, 3, 4, 5, 6, 7];
-        let mut prg = Prng::init(&key, &seed);
+        let mut prg = AES128PRNG::init(&key, &seed);
         let mut permutation: Vec<u8> = (0..=255).collect();
 
         for elem in 0..permutation.len() {

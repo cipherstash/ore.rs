@@ -6,7 +6,7 @@ use aes::cipher::{
     generic_array::GenericArray,
 };
 
-pub struct Prng {
+pub struct AES128PRNG {
     cipher: Aes128,
     data: [GenericArray<u8, U16>; 16],
     ptr: (usize, usize),
@@ -17,12 +17,11 @@ pub struct Prng {
  * To aid in performance this PRNG can only generate 256 random numbers
  * before it panics. Should _only_ be used inside the PRP.
  */
-// TODO: Rename this
-impl Prng {
-    pub fn init(key: &[u8], seed: &SEED64) -> Prng {
+impl AES128PRNG {
+    pub fn init(key: &[u8], seed: &SEED64) -> Self {
         let key_array = GenericArray::from_slice(key);
         let cipher = Aes128::new(&key_array);
-        let mut prng = Prng {
+        let mut prng = Self {
             cipher,
             data: Default::default(),
             ptr: (0, 0),
@@ -76,11 +75,11 @@ mod tests {
     use super::*;
     use hex_literal::hex;
 
-    fn init_prng() -> Prng {
+    fn init_prng() -> AES128PRNG {
         let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
         let seed: SEED64 = hex!("00010203 04050607");
 
-        return Prng::init(&key, &seed);
+        return AES128PRNG::init(&key, &seed);
     }
 
     #[test]
