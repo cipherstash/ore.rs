@@ -54,8 +54,8 @@ fn cmp(a: u8, b: u8) -> u8 {
 // * Move this first implementation to ore/AES128ORE (consistent naming)
 //
 
-impl ORE for OREAES128 {
-    fn init(k1: &[u8], k2: &[u8], seed: &SEED64) -> Result<OREAES128, OREError> {
+impl ORE<u64> for OREAES128 {
+    fn init(k1: &[u8], k2: &[u8], seed: &SEED64) -> Result<Self, OREError> {
         // TODO: Can the PRP be initialized in the init function, too?
         return Ok(OREAES128 {
             prf1: PRF::new(k1),
