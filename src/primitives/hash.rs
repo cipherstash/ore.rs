@@ -1,5 +1,5 @@
 
-use crate::Hash;
+use crate::primitives::Hash;
 use aes::Aes128;
 use aes::cipher::{
     BlockEncrypt, NewBlockCipher,

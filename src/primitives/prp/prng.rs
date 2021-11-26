@@ -1,4 +1,4 @@
-use crate::SEED64;
+use crate::primitives::SEED64;
 use aes::Aes128;
 use aes::cipher::{
     consts::U16,

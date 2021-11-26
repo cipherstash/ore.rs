@@ -1,5 +1,5 @@
 
-use crate::PRF;
+use crate::primitives::PRF;
 use aes::Aes128;
 use aes::cipher::{
     BlockEncrypt, NewBlockCipher, BlockCipher,

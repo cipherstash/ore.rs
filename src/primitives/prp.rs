@@ -1,6 +1,6 @@
 
 pub mod prng;
-use crate::{PRP, SEED64};
+use crate::primitives::{PRP, SEED64};
 use crate::primitives::prp::prng::AES128PRNG;
 use std::convert::TryFrom;
 
