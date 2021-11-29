@@ -2,8 +2,9 @@
 mod ore;
 mod primitives;
 pub use crate::ore::{
-    ORE,
     CipherText,
+    ORECipher,
+    OREEncrypt,
     bit2
 };
 
