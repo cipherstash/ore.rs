@@ -5,7 +5,6 @@
  */
 
 pub use crate::ore::{
-    ORE,
     OREError,
     Left,
     Right,
@@ -30,7 +29,7 @@ use rand::os::{OsRng};
 
 // TODO: Move this and the impl to its own file
 #[derive(Debug)]
-pub struct OREAES128 { // TODO: OREAES128<8, 8> (k, d)
+pub struct OREAES128 {
     prf1: AES128PRF,
     prf2: AES128PRF,
     // OsRng uses /dev/urandom but we may want to look at
@@ -84,7 +83,6 @@ impl ORECipher for OREAES128 {
             x: Default::default(),
             f: [0u8; 128]
         };
-        //let x: [u8; NUM_BLOCKS] = input.to_be_bytes();
 
         // Build the prefixes
         // TODO: Don't modify struct values directly - use a function on a "Left" trait
@@ -96,7 +94,7 @@ impl ORECipher for OREAES128 {
 
         // TODO: Use chunks?
         // TODO: Don't use the 16 magic number!
-        for n in 0..NUM_BLOCKS {
+        for n in 0..x.len() {
             let position = n * 16;
             // Set prefix and create PRP for the block
             let prp: KnuthShufflePRP<u8, 256> = PRP::new(&output.f[position..(position + 16)], &self.prp_seed).map_err(|_| OREError)?;
@@ -109,12 +107,12 @@ impl ORECipher for OREAES128 {
         output.f.iter_mut().for_each(|x| *x = 0);
 
         // TODO: Use chunks?
-        for n in 0..NUM_BLOCKS {
+        for n in 0..x.len() {
             let position = n * 16;
             output.f[position..(position + n)].clone_from_slice(&x[0..n]);
             output.f[position + n] = output.x[n];
             // Include the block number in the value passed to the Random Oracle
-            output.f[position + NUM_BLOCKS] = n as u8;
+            output.f[position + x.len()] = n as u8;
         }
         self.prf1.encrypt_all(&mut output.f);
 
@@ -136,8 +134,6 @@ impl ORECipher for OREAES128 {
         // Generate a 16-byte random nonce
         self.rng.fill_bytes(&mut right.nonce);
 
-        //let x: [u8; NUM_BLOCKS] = input.to_be_bytes();
-
         // Build the prefixes
         left.f.chunks_mut(16).enumerate().for_each(|(n, block)| {
             block[0..n].clone_from_slice(&x[0..n]);
@@ -145,7 +141,7 @@ impl ORECipher for OREAES128 {
 
         self.prf2.encrypt_all(&mut left.f);
 
-        for n in 0..NUM_BLOCKS {
+        for n in 0..x.len() {
             // Set prefix and create PRP for the block
             let position = n * 16;
             // Set prefix and create PRP for the block
@@ -158,7 +154,7 @@ impl ORECipher for OREAES128 {
             left.f[position..(position + n)].clone_from_slice(&x[0..n]);
             left.f[position + n] = left.x[n];
             // Include the block number in the value passed to the Random Oracle
-            left.f[position + NUM_BLOCKS] = n as u8;
+            left.f[position + x.len()] = n as u8;
 
             // TODO: The first block or RO keys will be the same for every encryption
             // because there is no plaintext prefix for the first block
@@ -171,7 +167,7 @@ impl ORECipher for OREAES128 {
                 // the output of F in H(F(k1, y|i-1||j), r)
                 ro_keys[offset..(offset + n)].clone_from_slice(&x[0..n]);
                 ro_keys[offset + n] = j as u8;
-                ro_keys[offset + NUM_BLOCKS] = n as u8;
+                ro_keys[offset + x.len()] = n as u8;
             }
 
             self.prf1.encrypt_all(&mut ro_keys);
@@ -275,7 +271,7 @@ mod tests {
             let a = x.encrypt(&mut ore).unwrap();
             let b = y.encrypt(&mut ore).unwrap();
 
-            return match(x.cmp(&y)) {
+            return match x.cmp(&y) {
                 Ordering::Greater => a > b,
                 Ordering::Less    => a < b,
                 Ordering::Equal   => a == b
