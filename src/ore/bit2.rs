@@ -28,7 +28,6 @@ use rand;
 use rand::Rng;
 use rand::os::{OsRng};
 
-// TODO: Move this and the impl to its own file
 #[derive(Debug)]
 pub struct OREAES128 {
     prf1: AES128PRF,
@@ -44,18 +43,6 @@ fn cmp(a: u8, b: u8) -> u8 {
         return 1u8;
     } else {
         return 0u8;
-    }
-}
-
-impl<const N: usize> PartialOrd for CipherText<N> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        return self.cmp(other);
-    }
-}
-
-impl<const N: usize> PartialEq for CipherText<N> {
-    fn eq(&self, other: &Self) -> bool {
-        return self.eq(other);
     }
 }
 
@@ -118,7 +105,6 @@ impl ORECipher for OREAES128 {
     }
 
     fn encrypt<const N: usize>(&mut self, x: &PlainText<N>) -> Result<CipherText<N>, OREError> {
-        // TODO: Replace with generic form
         let mut right = Right {
             nonce: Default::default(),
             data: [Default::default(); N]
@@ -201,16 +187,17 @@ impl ORECipher for OREAES128 {
     }
 }
 
+// TODO: This implementation is for the OREAES128 implementation
+// but its for the global CipherText type
 impl<const N: usize> CipherText<N> {
-    fn eq(&self, b: &Self) -> bool {
+    pub fn eq(&self, b: &Self) -> bool {
         return match self.cmp(b) {
             Some(Ordering::Equal) => true,
             _ => false
         }
     }
 
-
-    fn cmp(&self, b: &CipherText<N>) -> Option<Ordering> {
+    pub fn cmp(&self, b: &CipherText<N>) -> Option<Ordering> {
         let mut is_equal = true;
         let mut l = 0; // Unequal block
 
