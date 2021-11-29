@@ -99,12 +99,12 @@ impl OREEncrypt for u64 {
     type FullOutput = CipherText<8>;
 
     fn encrypt_left<T: ORECipher>(&self, cipher: &mut T) -> Result<Self::LeftOutput, OREError> {
-        let bytes: PlainText<8> = self.to_be_bytes();
+        let bytes = self.to_be_bytes();
         return cipher.encrypt_left(&bytes);
     }
 
     fn encrypt<T: ORECipher>(&self, cipher: &mut T) -> Result<Self::FullOutput, OREError> {
-        let bytes: PlainText<8> = self.to_be_bytes();
+        let bytes = self.to_be_bytes();
         return cipher.encrypt(&bytes);
     }
 }
@@ -114,12 +114,12 @@ impl OREEncrypt for u32 {
     type FullOutput = CipherText<4>;
 
     fn encrypt_left<T: ORECipher>(&self, cipher: &mut T) -> Result<Self::LeftOutput, OREError> {
-        let bytes: [u8; 4] = self.to_be_bytes();
+        let bytes = self.to_be_bytes();
         return cipher.encrypt_left(&bytes);
     }
 
     fn encrypt<T: ORECipher>(&self, cipher: &mut T) -> Result<Self::FullOutput, OREError> {
-        let bytes: PlainText<4> = self.to_be_bytes();
+        let bytes = self.to_be_bytes();
         return cipher.encrypt(&bytes);
     }
 }
