@@ -109,19 +109,18 @@ impl OREEncrypt for u64 {
     }
 }
 
-/*
- * TODO: This won't work yet as we need to genericise `Left`
 impl OREEncrypt for u32 {
-    type Output = CipherText<4>;
+    type LeftOutput = Left<4>;
+    type FullOutput = CipherText<4>;
 
-    fn encrypt_left(&self, cipher: &mut impl ORECipher) -> Result<Left, OREError> {
+    fn encrypt_left<T: ORECipher>(&self, cipher: &mut T) -> Result<Self::LeftOutput, OREError> {
         let bytes: [u8; 4] = self.to_be_bytes();
         return cipher.encrypt_left(&bytes);
     }
 
-    fn encrypt<T: ORECipher>(&self, cipher: &mut T) -> Result<Self::Output, OREError> {
+    fn encrypt<T: ORECipher>(&self, cipher: &mut T) -> Result<Self::FullOutput, OREError> {
         let bytes: PlainText<4> = self.to_be_bytes();
         return cipher.encrypt(&bytes);
     }
-}*/
+}
 

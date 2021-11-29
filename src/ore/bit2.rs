@@ -88,7 +88,6 @@ impl ORECipher for OREAES128 {
         // TODO: Should we use Zeroize? We don't actually need to clear sensitive data here, we
         // just need fast "zero set". Reassigning the value will drop the old one and allocate new
         // data to the stack
-        //output.f.iter_mut().for_each(|x| *x = Default::default());
         output.f = [Default::default(); N];
 
         for n in 0..N {
@@ -130,9 +129,7 @@ impl ORECipher for OREAES128 {
             left.x[n] = prp.permute(x[n]).map_err(|_| OREError)?;
 
             // Reset the f block
-            // TODO: We don't actually need to reset the whole thing - just from n onwards
-            //left.f.iter_mut().for_each(|x| *x = Default::default());
-            //left.f = [Default::default(); N];
+            // TODO: Do we need to zeroize the old data before it is dropped due to de-assignment?
             left.f[n] = Default::default();
 
 
@@ -145,7 +142,6 @@ impl ORECipher for OREAES128 {
             // because there is no plaintext prefix for the first block
             // This means we can generate the first 16 keys in a setup step
 
-            //let mut ro_keys = [0u8; 16 * 256];
             let mut ro_keys: [AesBlock; 256] = [Default::default(); 256];
 
             for j in 0..=255 {
