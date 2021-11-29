@@ -80,14 +80,14 @@ pub struct OREError;
  * Trait for an ORE scheme that encrypts a type, T and
  * outputs a CipherText with N blocks of 8-bit small-domain ORE.
  */
-pub trait ORE<T>: Sized {
+/*pub trait ORE<T>: Sized {
     fn init(k1: &[u8], k2: &[u8], seed: &SEED64) -> Result<Self, OREError>;
     fn encrypt_left(&self, input: T) -> Result<Left, OREError>;
     fn encrypt(&mut self, input: T) -> Result<CipherText, OREError>;
 
     // TODO: This could probably do dynamic dispatch depending on the type
     fn compare(a: &CipherText, b: &CipherText) -> i8;
-}
+}*/
 
 pub trait ORECipher: Sized {
     fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64) -> Result<Self, OREError>;
