@@ -12,6 +12,26 @@ It makes the following improvements on the original scheme:
 * Both SIMD and Neon intrinsic support for `X86_64` and `ARM`
 * Inclusion of the block number in block prefixes to avoid repeated prefixes
 
+## Usage
+
+First initalize a cipher via the `ORECipher` trait. We'll use the `OREAES128` implementation here.
+
+```rust
+use ore::{bit2::OREAES128, ORECipher};
+
+let mut ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
+```
+
+To encrypt an integer, make sure you to use the `ore::OREEncrypt` trait.
+Encryption returns a `CipherText<N>` where `N` is the number of blocks required to encrypt the type.
+`CipherText<N>` implements the `PartialOrd` trait so they can be compared directly.
+
+```rust
+let a = 47.encrypt(&mut ore).unwrap();
+let b = 100.encrypt(&mut ore).unwrap();
+let result = a > b;
+```
+
 ## Modules
 
 ### Hash
