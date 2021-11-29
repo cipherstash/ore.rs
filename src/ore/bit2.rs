@@ -9,6 +9,7 @@ pub use crate::ore::{
     Left,
     Right,
     CipherText,
+    PlainText,
     OreBlock8,
     ORECipher
 };
@@ -48,14 +49,14 @@ fn cmp(a: u8, b: u8) -> u8 {
     }
 }
 
-impl PartialOrd for CipherText {
+impl<const N: usize> PartialOrd for CipherText<N> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         return self.cmp(other);
     }
 }
 
-impl PartialEq for CipherText {
-    fn eq(&self, other: &CipherText) -> bool {
+impl<const N: usize> PartialEq for CipherText<N> {
+    fn eq(&self, other: &Self) -> bool {
         return self.eq(other);
     }
 }
@@ -119,11 +120,11 @@ impl ORECipher for OREAES128 {
         return Ok(output);
     }
 
-    fn encrypt(&mut self, x: &[u8]) -> Result<CipherText, OREError> {
+    fn encrypt<const N: usize>(&mut self, x: &PlainText<N>) -> Result<CipherText<N>, OREError> {
         // TODO: Replace with generic form
         let mut right = Right {
             nonce: Default::default(),
-            data: [Default::default(); 8]
+            data: [Default::default(); N]
         };
 
         let mut left = Left {
@@ -141,7 +142,7 @@ impl ORECipher for OREAES128 {
 
         self.prf2.encrypt_all(&mut left.f);
 
-        for n in 0..x.len() {
+        for n in 0..N {
             // Set prefix and create PRP for the block
             let position = n * 16;
             // Set prefix and create PRP for the block
@@ -167,7 +168,7 @@ impl ORECipher for OREAES128 {
                 // the output of F in H(F(k1, y|i-1||j), r)
                 ro_keys[offset..(offset + n)].clone_from_slice(&x[0..n]);
                 ro_keys[offset + n] = j as u8;
-                ro_keys[offset + x.len()] = n as u8;
+                ro_keys[offset + N] = n as u8;
             }
 
             self.prf1.encrypt_all(&mut ro_keys);
@@ -203,7 +204,7 @@ impl ORECipher for OREAES128 {
     }
 }
 
-impl CipherText {
+impl<const N: usize> CipherText<N> {
     fn eq(&self, b: &Self) -> bool {
         return match self.cmp(b) {
             Some(Ordering::Equal) => true,
@@ -212,12 +213,12 @@ impl CipherText {
     }
 
 
-    fn cmp(&self, b: &CipherText) -> Option<Ordering> {
+    fn cmp(&self, b: &CipherText<N>) -> Option<Ordering> {
         let mut is_equal = true;
         let mut l = 0; // Unequal block
 
         // TODO: Surely this could be done with iterators?
-        for n in 0..NUM_BLOCKS {
+        for n in 0..N {
             let position = n * 16;
             if &self.left.x[n] != &b.left.x[n] || &self.left.f[position..(position + 16)] != &b.left.f[position..(position + 16)] {
                 is_equal = false;

@@ -23,16 +23,18 @@ pub struct RightNew<const BLOCKS: usize> {
 }
 
 #[derive(Debug)]
-pub struct Right {
+pub struct Right<const N: usize> {
     pub nonce: GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>,
-    pub data: [OreBlock8; 8]
+    pub data: [OreBlock8; N]
 }
 
 #[derive(Debug)]
-pub struct CipherText {
+pub struct CipherText<const N: usize> {
     pub left: Left,
-    pub right: Right
+    pub right: Right<N>
 }
+
+pub type PlainText<const N: usize> = [u8; N];
 
 /* An ORE block for k=8
  * |N| = 2^k */
@@ -92,27 +94,31 @@ pub struct OREError;
 pub trait ORECipher: Sized {
     fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64) -> Result<Self, OREError>;
     fn encrypt_left(&mut self, input: &[u8]) -> Result<Left, OREError>;
-    fn encrypt(&mut self, input: &[u8]) -> Result<CipherText, OREError>;
+    fn encrypt<const N: usize>(&mut self, input: &PlainText<N>) -> Result<CipherText<N>, OREError>;
 }
 
 pub trait OREEncrypt {
+    type Output;
+
     fn encrypt_left(&self, cipher: &mut impl ORECipher) -> Result<Left, OREError>;
-    fn encrypt(&self, input: &mut impl ORECipher) -> Result<CipherText, OREError>;
+    fn encrypt<T: ORECipher>(&self, input: &mut T) -> Result<Self::Output, OREError>;
 }
 
 // TODO:
 // Make these the default implementations in the trait
-// And add a trait called ToOREPlaintextBytes or something
+// And add a trait called ToOREPlaintext or something
 // Then we only need one function here
 // FIXME: I don't like that the cipher is mutable - its private members are mutable
 impl OREEncrypt for u64 {
+    type Output = CipherText<8>;
+
     fn encrypt_left(&self, cipher: &mut impl ORECipher) -> Result<Left, OREError> {
         let bytes: [u8; 8] = self.to_be_bytes();
         return cipher.encrypt_left(&bytes);
     }
 
-    fn encrypt(&self, cipher: &mut impl ORECipher) -> Result<CipherText, OREError> {
-        let bytes: [u8; 8] = self.to_be_bytes();
+    fn encrypt<T: ORECipher>(&self, cipher: &mut T) -> Result<Self::Output, OREError> {
+        let bytes: PlainText<8> = self.to_be_bytes();
         return cipher.encrypt(&bytes);
     }
 }
