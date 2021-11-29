@@ -4,7 +4,9 @@ mod primitives;
 pub use crate::ore::{
     ORE,
     CipherText,
-    bit2
+    bit2,
+    ORECipher,
+    OREEncrypt
 };
 
 
