@@ -39,8 +39,6 @@ pub struct OREAES128 {
     prp_seed: SEED64
 }
 
-const NUM_BLOCKS: usize = 8;
-
 fn cmp(a: u8, b: u8) -> u8 {
     if a > b {
         return 1u8;
@@ -62,7 +60,6 @@ impl<const N: usize> PartialEq for CipherText<N> {
 }
 
 // TODO: Next steps
-// * Make the Left and Right generic
 // * Use a block type for Left as well as right? (possibly more work)
 // * Add marshall and unmarshall functions to get consistent binary formats
 // * Move this first implementation to ore/AES128ORE (consistent naming)

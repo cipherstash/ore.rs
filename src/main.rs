@@ -39,9 +39,9 @@ fn main() {
 
     let mut ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
     println!("LEFT = {:?}", x.encrypt_left(&mut ore).unwrap());
-    println!("FULL = {:?}", x.encrypt::<OREAES128>(&mut ore).unwrap());
-    let cta = 47.encrypt::<OREAES128>(&mut ore).unwrap();
-    let ctb = 50.encrypt::<OREAES128>(&mut ore).unwrap();
+    println!("FULL = {:?}", x.encrypt(&mut ore).unwrap());
+    let cta = 47u64.encrypt(&mut ore).unwrap();
+    let ctb = 50u64.encrypt(&mut ore).unwrap();
 
     println!("CMP = {}", cta >= ctb);
 
