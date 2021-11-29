@@ -8,11 +8,15 @@ pub mod prp;
  */
 pub type SEED64 = [u8; 8];
 
+use aes::Block;
+
+pub type AesBlock = Block;
+
 pub trait PRF {
     // TODO: Use a PRFKey trait as the argument here
     fn new(key: &[u8]) -> Self;
     // TODO: Use PRF Block trait as the data argument
-    fn encrypt_all(&self, data: &mut [u8]);
+    fn encrypt_all(&self, data: &mut [AesBlock]);
 }
 
 pub trait Hash {

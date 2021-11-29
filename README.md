@@ -99,3 +99,4 @@ cargo +nightly bench
 * Extraction of encrypt and compare traits to handle different block sizes and domain sizes
 * Zeroing and careful cleaning up of memory where appropriate
 * Support longer AES keys for the PRF and hash (if possible)
+* Get rid of GenericArray and replace with const generics (blocked by support in the AES crate)

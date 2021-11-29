@@ -18,6 +18,7 @@ use crate::primitives::{
     Hash,
     PRP,
     SEED64,
+    AesBlock,
     prf::AES128PRF,
     hash::AES128Hash,
     prp::KnuthShufflePRP
@@ -63,41 +64,38 @@ impl ORECipher for OREAES128 {
         })
     }
 
-    fn encrypt_left(&mut self, x: &[u8]) -> Result<Left, OREError> {
+    fn encrypt_left<const N: usize>(&mut self, x: &PlainText<N>) -> Result<Left<N>, OREError> {
         let mut output = Left {
             x: Default::default(),
-            f: [0u8; 128]
+            f: [Default::default(); N]
         };
 
         // Build the prefixes
         // TODO: Don't modify struct values directly - use a function on a "Left" trait
-        output.f.chunks_mut(16).enumerate().for_each(|(n, block)| {
+        output.f.iter_mut().enumerate().for_each(|(n, block)| {
             block[0..n].clone_from_slice(&x[0..n]);
         });
 
         self.prf2.encrypt_all(&mut output.f);
 
-        // TODO: Use chunks?
-        // TODO: Don't use the 16 magic number!
-        for n in 0..x.len() {
-            let position = n * 16;
+        for n in 0..N {
             // Set prefix and create PRP for the block
-            let prp: KnuthShufflePRP<u8, 256> = PRP::new(&output.f[position..(position + 16)], &self.prp_seed).map_err(|_| OREError)?;
+            let prp: KnuthShufflePRP<u8, 256> = PRP::new(&output.f[n], &self.prp_seed).map_err(|_| OREError)?;
             output.x[n] = prp.permute(x[n]).map_err(|_| OREError)?;
         }
 
         // Reset the f block
-        // TODO: Should we use Zeroize? Might be OK because we are returning the value (do some
-        // research)
-        output.f.iter_mut().for_each(|x| *x = 0);
+        // TODO: Should we use Zeroize? We don't actually need to clear sensitive data here, we
+        // just need fast "zero set". Reassigning the value will drop the old one and allocate new
+        // data to the stack
+        //output.f.iter_mut().for_each(|x| *x = Default::default());
+        output.f = [Default::default(); N];
 
-        // TODO: Use chunks?
-        for n in 0..x.len() {
-            let position = n * 16;
-            output.f[position..(position + n)].clone_from_slice(&x[0..n]);
-            output.f[position + n] = output.x[n];
+        for n in 0..N {
+            output.f[n][0..n].clone_from_slice(&x[0..n]);
+            output.f[n][n] = output.x[n];
             // Include the block number in the value passed to the Random Oracle
-            output.f[position + x.len()] = n as u8;
+            output.f[n][N] = n as u8;
         }
         self.prf1.encrypt_all(&mut output.f);
 
@@ -112,14 +110,15 @@ impl ORECipher for OREAES128 {
 
         let mut left = Left {
             x: Default::default(),
-            f: [0u8; 128]
+            f: [Default::default(); N]
         };
 
         // Generate a 16-byte random nonce
         self.rng.fill_bytes(&mut right.nonce);
 
         // Build the prefixes
-        left.f.chunks_mut(16).enumerate().for_each(|(n, block)| {
+        // TODO: Don't modify struct values directly - use a function on a "Left"
+        left.f.iter_mut().enumerate().for_each(|(n, block)| {
             block[0..n].clone_from_slice(&x[0..n]);
         });
 
@@ -127,31 +126,35 @@ impl ORECipher for OREAES128 {
 
         for n in 0..N {
             // Set prefix and create PRP for the block
-            let position = n * 16;
-            // Set prefix and create PRP for the block
-            let prp: KnuthShufflePRP<u8, 256> = PRP::new(&left.f[position..(position + 16)], &self.prp_seed).map_err(|_| OREError)?;
+            let prp: KnuthShufflePRP<u8, 256> = PRP::new(&left.f[n], &self.prp_seed).map_err(|_| OREError)?;
             left.x[n] = prp.permute(x[n]).map_err(|_| OREError)?;
 
             // Reset the f block
             // TODO: We don't actually need to reset the whole thing - just from n onwards
-            left.f[position..(position + 16)].iter_mut().for_each(|x| *x = 0);
-            left.f[position..(position + n)].clone_from_slice(&x[0..n]);
-            left.f[position + n] = left.x[n];
+            //left.f.iter_mut().for_each(|x| *x = Default::default());
+            //left.f = [Default::default(); N];
+            left.f[n] = Default::default();
+
+
+            left.f[n][0..n].clone_from_slice(&x[0..n]);
+            left.f[n][n] = left.x[n];
             // Include the block number in the value passed to the Random Oracle
-            left.f[position + x.len()] = n as u8;
+            left.f[n][N] = n as u8;
 
             // TODO: The first block or RO keys will be the same for every encryption
             // because there is no plaintext prefix for the first block
             // This means we can generate the first 16 keys in a setup step
 
-            let mut ro_keys = [0u8; 16 * 256];
+            //let mut ro_keys = [0u8; 16 * 256];
+            let mut ro_keys: [AesBlock; 256] = [Default::default(); 256];
 
             for j in 0..=255 {
-                let offset = j * 16;
-                // the output of F in H(F(k1, y|i-1||j), r)
-                ro_keys[offset..(offset + n)].clone_from_slice(&x[0..n]);
-                ro_keys[offset + n] = j as u8;
-                ro_keys[offset + N] = n as u8;
+                /*
+                 * The output of F in H(F(k1, y|i-1||j), r)
+                 */
+                ro_keys[j][0..n].clone_from_slice(&x[0..n]);
+                ro_keys[j][n] = j as u8;
+                ro_keys[j][N] = n as u8;
             }
 
             self.prf1.encrypt_all(&mut ro_keys);
@@ -167,14 +170,14 @@ impl ORECipher for OREAES128 {
              * If not, we will probably need to implement our own parallel encrypt using intrisics
              * like in the AES crate: https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/ni/aes128.rs#L26
              */
+            // TODO: Use the hash_all function
             let p: AES128PRF = PRF::new(&right.nonce);
             p.encrypt_all(&mut ro_keys);
 
             for j in 0..=255 {
                 let jstar = prp.invert(j).map_err(|_| OREError)?;
                 let indicator = cmp(jstar, x[n]);
-                let offset: usize = (j as usize) * 16;
-                let h = ro_keys[offset as usize] & 1u8;
+                let h = ro_keys[j as usize][0] & 1u8;
                 right.data[n].set_bit(j, indicator ^ h);
             }
         }
@@ -203,8 +206,9 @@ impl<const N: usize> CipherText<N> {
 
         // TODO: Surely this could be done with iterators?
         for n in 0..N {
-            let position = n * 16;
-            if &self.left.x[n] != &b.left.x[n] || &self.left.f[position..(position + 16)] != &b.left.f[position..(position + 16)] {
+            //let position = n * 16;
+            //if &self.left.x[n] != &b.left.x[n] || &self.left.f[position..(position + 16)] != &b.left.f[position..(position + 16)] {
+            if &self.left.x[n] != &b.left.x[n] || &self.left.f[n] != &b.left.f[n] {
                 is_equal = false;
                 l = n;
                 // TODO: Make sure that this is constant time (i.e. don't break)
@@ -217,7 +221,8 @@ impl<const N: usize> CipherText<N> {
         }
 
         let hash: AES128Hash = Hash::new(&b.right.nonce);
-        let h = hash.hash(&self.left.f[(l * 16)..((l * 16) + 16)]);
+        //let h = hash.hash(&self.left.f[(l * 16)..((l * 16) + 16)]);
+        let h = hash.hash(&self.left.f[l]);
 
         // Test the set and get bit functions
         let test = b.right.data[l].get_bit(self.left.x[l]) ^ h;
