@@ -10,7 +10,8 @@ pub use crate::ore::{
     Left,
     Right,
     CipherText,
-    OreBlock8
+    OreBlock8,
+    ORECipher
 };
 use crate::primitives::{
     PRF,
@@ -21,6 +22,7 @@ use crate::primitives::{
     hash::AES128Hash,
     prp::KnuthShufflePRP
 };
+use std::cmp::Ordering;
 
 use rand;
 use rand::Rng;
@@ -47,6 +49,18 @@ fn cmp(a: u8, b: u8) -> u8 {
     }
 }
 
+impl PartialOrd for CipherText {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        return self.cmp(other);
+    }
+}
+
+impl PartialEq for CipherText {
+    fn eq(&self, other: &CipherText) -> bool {
+        return self.eq(other);
+    }
+}
+
 // TODO: Next steps
 // * Make the Left and Right generic
 // * Use a block type for Left as well as right? (possibly more work)
@@ -54,23 +68,23 @@ fn cmp(a: u8, b: u8) -> u8 {
 // * Move this first implementation to ore/AES128ORE (consistent naming)
 //
 
-impl ORE<u64> for OREAES128 {
-    fn init(k1: &[u8], k2: &[u8], seed: &SEED64) -> Result<Self, OREError> {
+impl ORECipher for OREAES128 {
+    fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64) -> Result<Self, OREError> {
         // TODO: Can the PRP be initialized in the init function, too?
         return Ok(OREAES128 {
-            prf1: PRF::new(k1),
-            prf2: PRF::new(k2),
+            prf1: PRF::new(&k1), // TODO: Don't borrow - use the fixed length array
+            prf2: PRF::new(&k2),
             rng: OsRng::new().map_err(|_| OREError)?,
             prp_seed: *seed
         })
     }
 
-    fn encrypt_left(&self, input: u64) -> Result<Left, OREError> {
+    fn encrypt_left(&mut self, x: &[u8]) -> Result<Left, OREError> {
         let mut output = Left {
             x: Default::default(),
             f: [0u8; 128]
         };
-        let x: [u8; NUM_BLOCKS] = input.to_be_bytes();
+        //let x: [u8; NUM_BLOCKS] = input.to_be_bytes();
 
         // Build the prefixes
         // TODO: Don't modify struct values directly - use a function on a "Left" trait
@@ -107,7 +121,8 @@ impl ORE<u64> for OREAES128 {
         return Ok(output);
     }
 
-    fn encrypt(&mut self, input: u64) -> Result<CipherText, OREError> {
+    fn encrypt(&mut self, x: &[u8]) -> Result<CipherText, OREError> {
+        // TODO: Replace with generic form
         let mut right = Right {
             nonce: Default::default(),
             data: [Default::default(); 8]
@@ -121,7 +136,7 @@ impl ORE<u64> for OREAES128 {
         // Generate a 16-byte random nonce
         self.rng.fill_bytes(&mut right.nonce);
 
-        let x: [u8; NUM_BLOCKS] = input.to_be_bytes();
+        //let x: [u8; NUM_BLOCKS] = input.to_be_bytes();
 
         // Build the prefixes
         left.f.chunks_mut(16).enumerate().for_each(|(n, block)| {
@@ -190,15 +205,25 @@ impl ORE<u64> for OREAES128 {
 
         return Ok(CipherText { left: left, right: right });
     }
+}
 
-    fn compare(a: &CipherText, b: &CipherText) -> i8 {
+impl CipherText {
+    fn eq(&self, b: &Self) -> bool {
+        return match self.cmp(b) {
+            Some(Ordering::Equal) => true,
+            _ => false
+        }
+    }
+
+
+    fn cmp(&self, b: &CipherText) -> Option<Ordering> {
         let mut is_equal = true;
         let mut l = 0; // Unequal block
 
         // TODO: Surely this could be done with iterators?
         for n in 0..NUM_BLOCKS {
             let position = n * 16;
-            if &a.left.x[n] != &b.left.x[n] || &a.left.f[position..(position + 16)] != &b.left.f[position..(position + 16)] {
+            if &self.left.x[n] != &b.left.x[n] || &self.left.f[position..(position + 16)] != &b.left.f[position..(position + 16)] {
                 is_equal = false;
                 l = n;
                 // TODO: Make sure that this is constant time (i.e. don't break)
@@ -207,25 +232,28 @@ impl ORE<u64> for OREAES128 {
         }
 
         if is_equal {
-            return 0;
+            return Some(Ordering::Equal);
         }
 
         let hash: AES128Hash = Hash::new(&b.right.nonce);
-        let h = hash.hash(&a.left.f[(l * 16)..((l * 16) + 16)]);
+        let h = hash.hash(&self.left.f[(l * 16)..((l * 16) + 16)]);
 
         // Test the set and get bit functions
-        let test = b.right.data[l].get_bit(a.left.x[l]) ^ h;
+        let test = b.right.data[l].get_bit(self.left.x[l]) ^ h;
         if test == 1 {
-            return 1;
+            return Some(Ordering::Greater);
         }
 
-        return -1;
+        return Some(Ordering::Less);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    // TODO: We're only doing this to get the numerical traits - perhaps move those to their own
+    // module
+    use crate::ore::*;
 
     fn init_ore() -> OREAES128 {
         let mut k1: [u8; 16] = Default::default();
@@ -238,91 +266,85 @@ mod tests {
         rng.fill_bytes(&mut k1);
         rng.fill_bytes(&mut k2);
 
-        return ORE::init(&k1, &k2, &seed).unwrap();
+        return ORECipher::init(k1, k2, &seed).unwrap();
     }
 
     quickcheck! {
         fn compare(x: u64, y: u64) -> bool {
             let mut ore = init_ore();
+            let a = x.encrypt(&mut ore).unwrap();
+            let b = y.encrypt(&mut ore).unwrap();
 
-            let ret =
-                if x > y {
-                    1
-                } else if x < y {
-                    -1
-                } else {
-                    0
-                };
-
-            let a = ore.encrypt(x).unwrap();
-            let b = ore.encrypt(y).unwrap();
-
-            return ret == OREAES128::compare(&a, &b);
+            return match(x.cmp(&y)) {
+                Ordering::Greater => a > b,
+                Ordering::Less    => a < b,
+                Ordering::Equal   => a == b
+            };
         }
 
         fn compare_equal(x: u64) -> bool {
             let mut ore = init_ore();
-            let a = ore.encrypt(x).unwrap();
-            let b = ore.encrypt(x).unwrap();
+            let a = x.encrypt(&mut ore).unwrap();
+            let b = x.encrypt(&mut ore).unwrap();
 
-            return 0 == OREAES128::compare(&a, &b);
+            return a == b;
         }
     }
 
     #[test]
     fn smallest_to_largest() {
         let mut ore = init_ore();
-        let a = ore.encrypt(0).unwrap();
-        let b = ore.encrypt(18446744073709551615).unwrap();
+        let a = 0u64.encrypt(&mut ore).unwrap();
+        let b = 18446744073709551615u64.encrypt(&mut ore).unwrap();
 
-        assert_eq!(-1, OREAES128::compare(&a, &b));
+        assert!(a < b);
     }
 
     #[test]
     fn largest_to_smallest() {
         let mut ore = init_ore();
-        let a = ore.encrypt(18446744073709551615).unwrap();
-        let b = ore.encrypt(0).unwrap();
+        let a = 18446744073709551615u64.encrypt(&mut ore).unwrap();
+        let b = 0u64.encrypt(&mut ore).unwrap();
 
-        assert_eq!(1, OREAES128::compare(&a, &b));
+        assert!(a > b);
     }
 
     #[test]
     fn smallest_to_smallest() {
         let mut ore = init_ore();
-        let a = ore.encrypt(0).unwrap();
-        let b = ore.encrypt(0).unwrap();
+        let a = 0u64.encrypt(&mut ore).unwrap();
+        let b = 0u64.encrypt(&mut ore).unwrap();
 
-        assert_eq!(0, OREAES128::compare(&a, &b));
+        assert!(a == b);
     }
 
     #[test]
     fn largest_to_largest() {
         let mut ore = init_ore();
-        let a = ore.encrypt(18446744073709551615).unwrap();
-        let b = ore.encrypt(18446744073709551615).unwrap();
+        let a = 18446744073709551615u64.encrypt(&mut ore).unwrap();
+        let b = 18446744073709551615u64.encrypt(&mut ore).unwrap();
 
-        assert_eq!(0, OREAES128::compare(&a, &b));
+        assert!(a == b);
     }
 
     #[test]
     fn comparisons_in_first_block() {
         let mut ore = init_ore();
-        let a = ore.encrypt(18446744073709551615).unwrap();
-        let b = ore.encrypt(18446744073709551612).unwrap();
+        let a = 18446744073709551615u64.encrypt(&mut ore).unwrap();
+        let b = 18446744073709551612u64.encrypt(&mut ore).unwrap();
 
-        assert_eq!(1, OREAES128::compare(&a, &b));
-        assert_eq!(-1, OREAES128::compare(&b, &a));
+        assert!(a > b);
+        assert!(b < a);
     }
 
     #[test]
     fn comparisons_in_last_block() {
         let mut ore = init_ore();
-        let a = ore.encrypt(10).unwrap();
-        let b = ore.encrypt(73).unwrap();
+        let a = 10u64.encrypt(&mut ore).unwrap();
+        let b = 73u64.encrypt(&mut ore).unwrap();
 
-        assert_eq!(-1, OREAES128::compare(&a, &b));
-        assert_eq!(1, OREAES128::compare(&b, &a));
+        assert!(a < b);
+        assert!(b > a);
     }
 
     #[test]

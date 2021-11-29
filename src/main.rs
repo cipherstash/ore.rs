@@ -1,5 +1,5 @@
 
-use ore::{ORE, bit2::OREAES128};
+use ore::{ORE, bit2::OREAES128, OREEncrypt, ORECipher};
 use hex_literal::hex;
 
 //use aes::Aes128;
@@ -32,8 +32,18 @@ fn main() {
     let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
     let seed = hex!("00010203 04050607");
 
-    let mut ore: OREAES128 = ORE::init(&k1, &k2, &seed).unwrap();
-    println!("ORE = {:?}", ore.encrypt(25));
+    //let mut ore: OREAES128 = ORE::init(&k1, &k2, &seed).unwrap();
+    //println!("ORE = {:?}", ore.encrypt(25));
+
+    let x: u64 = 37;
+
+    let mut ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
+    println!("LEFT = {:?}", x.encrypt_left(&mut ore).unwrap());
+    println!("FULL = {:?}", x.encrypt(&mut ore).unwrap());
+    let cta = 47.encrypt(&mut ore).unwrap();
+    let ctb = 50.encrypt(&mut ore).unwrap();
+
+    println!("CMP = {}", cta >= ctb);
 
     /*let ct2 = ore.encrypt(18);
     let ct3 = ore.encrypt(15);
