@@ -17,7 +17,10 @@ It makes the following improvements on the original scheme:
 First initalize a cipher via the `ORECipher` trait. We'll use the `OREAES128` implementation here.
 
 ```rust
-use ore::{bit2::OREAES128, ORECipher};
+use ore::{
+  scheme::bit2::OREAES128,
+  ORECipher
+};
 
 let mut ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
 ```
@@ -95,8 +98,7 @@ cargo +nightly bench
 ## TODO
 
 * Constant time analysis to ensure that encryption or comparison time does not vary with input size
-* Analysis of PRNG used to seed the Knuth shuffle - we may need more bits to ensure sufficient entropy
-* Extraction of encrypt and compare traits to handle different block sizes and domain sizes
 * Zeroing and careful cleaning up of memory where appropriate
 * Support longer AES keys for the PRF and hash (if possible)
 * Get rid of GenericArray and replace with const generics (blocked by support in the AES crate)
+* Serializing and Deserializing into a consistent binary format
