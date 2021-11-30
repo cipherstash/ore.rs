@@ -6,41 +6,29 @@
 use crate::{
     OREError,
     PlainText,
-    ORECipher
+    ORECipher,
+    ciphertext::*,
+    primitives::{
+        PRF,
+        Hash,
+        PRP,
+        SEED64,
+        AesBlock,
+        prf::AES128PRF,
+        hash::AES128Z2Hash,
+        prp::KnuthShufflePRP
+    }
 };
-use crate::ciphertext::*;
-use crate::primitives::{
-    PRF,
-    Hash,
-    PRP,
-    SEED64,
-    AesBlock,
-    prf::AES128PRF,
-    hash::AES128Z2Hash,
-    prp::KnuthShufflePRP
-};
+
 use std::cmp::Ordering;
-
-use rand;
-use rand::Rng;
-use rand::os::{OsRng};
-
-use aes::cipher::{
-    generic_array::GenericArray
+use rand::{
+    Rng,
+    os::OsRng
 };
+use aes::cipher::generic_array::GenericArray;
 
-// TODO: Move these to a sub module called Block Types
-pub type LeftBlock16 = AesBlock;
-
-/* An ORE block for k=8
- * |N| = 2^k */
-// TODO: We might be able to use an __m256 for this
-// TODO: Poorly named - we should call it RightBlock32 (32 bytes)
-#[derive(Debug, Default, Copy, Clone)]
-pub struct OreBlock8 {
-    low: u128,
-    high: u128
-}
+pub mod block_types;
+pub use self::block_types::*;
 
 /* Define our scheme */
 #[derive(Debug)]
@@ -59,33 +47,6 @@ pub type OREAES128Right<const N: usize> = Right<OreBlock8, N>;
 pub type OREAES128CipherText<const N: usize> = CipherText<LeftBlock16, OreBlock8, N>;
 pub type EncryptLeftResult<const N: usize> = Result<OREAES128Left<N>, OREError>;
 pub type EncryptResult<const N: usize> = Result<OREAES128CipherText<N>, OREError>;
-
-impl OreBlock8 {
-    // TODO: This should really just take a bool or we define an unset_bit fn, too
-    // TODO: Return a Result<type>
-    #[inline]
-    pub fn set_bit(&mut self, position: u8, value: u8) {
-        if position < 128 {
-          let bit: u128 = (value as u128) << position;
-          self.low |= bit;
-        } else {
-          let bit: u128 = (value as u128) << (position - 128);
-          self.high |= bit;
-        }
-    }
-
-    #[inline]
-    pub fn get_bit(&self, position: u8) -> u8 {
-        if position < 128 {
-            let mask: u128 = 1 << position;
-            return ((self.low & mask) >> position) as u8;
-        } else {
-            let mask: u128 = 1 << (position - 128);
-            return ((self.high & mask) >> (position - 128)) as u8;
-        }
-    }
-}
-
 
 fn cmp(a: u8, b: u8) -> u8 {
     if a > b {
