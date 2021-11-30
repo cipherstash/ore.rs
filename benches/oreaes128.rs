@@ -3,7 +3,7 @@ use hex_literal::hex;
 use ore::{
     ORECipher,
     OREEncrypt,
-    bit2::{
+    scheme::bit2::{
         OREAES128,
         OREAES128CipherText
     }
