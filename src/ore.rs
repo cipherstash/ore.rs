@@ -1,37 +1,33 @@
 
 pub mod bit2;
-use crate::primitives::SEED64;
-use aes::cipher::{
-    NewBlockCipher,
-    generic_array::GenericArray,
-};
-use aes::Aes128;
+use crate::primitives::{AesBlock, SEED64};
 use std::cmp::Ordering;
 
-// TODO: Replace Left with a generic types
+pub type PlainText<const N: usize> = [u8; N];
+pub type LeftBlock16 = AesBlock;
+
 #[derive(Debug)]
-pub struct Left {
-    pub f: [u8; 128], // Blocksize * ORE blocks (16 * 8)
+pub struct Left<const N: usize> {
+    pub f: [LeftBlock16; N],
     pub x: [u8; 8] // FIXME: x is poorly named!
 }
 
 #[derive(Debug)]
 pub struct Right<const N: usize> {
-    pub nonce: GenericArray<u8, <Aes128 as NewBlockCipher>::KeySize>,
+    pub nonce: AesBlock,
     pub data: [OreBlock8; N]
 }
 
 #[derive(Debug)]
 pub struct CipherText<const N: usize> {
-    pub left: Left,
+    pub left: Left<N>,
     pub right: Right<N>
 }
-
-pub type PlainText<const N: usize> = [u8; N];
 
 /* An ORE block for k=8
  * |N| = 2^k */
 // TODO: We might be able to use an __m256 for this
+// TODO: Poorly named - we should call it RightBlock32 (32 bytes)
 #[derive(Debug, Default, Copy, Clone)]
 pub struct OreBlock8 {
     low: u128,
@@ -71,15 +67,16 @@ pub struct OREError;
 
 pub trait ORECipher: Sized {
     fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64) -> Result<Self, OREError>;
-    fn encrypt_left(&mut self, input: &[u8]) -> Result<Left, OREError>;
+    fn encrypt_left<const N: usize>(&mut self, input: &PlainText<N>) -> Result<Left<N>, OREError>;
     fn encrypt<const N: usize>(&mut self, input: &PlainText<N>) -> Result<CipherText<N>, OREError>;
 }
 
 pub trait OREEncrypt {
-    type Output;
+    type LeftOutput;
+    type FullOutput;
 
-    fn encrypt_left(&self, cipher: &mut impl ORECipher) -> Result<Left, OREError>;
-    fn encrypt<T: ORECipher>(&self, input: &mut T) -> Result<Self::Output, OREError>;
+    fn encrypt_left<T: ORECipher>(&self, cipher: &mut T) -> Result<Self::LeftOutput, OREError>;
+    fn encrypt<T: ORECipher>(&self, input: &mut T) -> Result<Self::FullOutput, OREError>;
 }
 
 impl<const N: usize> PartialOrd for CipherText<N> {
@@ -94,38 +91,36 @@ impl<const N: usize> PartialEq for CipherText<N> {
     }
 }
 
-// TODO:
-// Make these the default implementations in the trait
-// And add a trait called ToOREPlaintext or something
-// Then we only need one function here
 // FIXME: I don't like that the cipher is mutable - its private members are mutable
+// TODO: Perhaps we could make the implementations default for the trait and control things
+// with the types. Only need to override for things like floats.
 impl OREEncrypt for u64 {
-    type Output = CipherText<8>;
+    type LeftOutput = Left<8>;
+    type FullOutput = CipherText<8>;
 
-    fn encrypt_left(&self, cipher: &mut impl ORECipher) -> Result<Left, OREError> {
-        let bytes: [u8; 8] = self.to_be_bytes();
+    fn encrypt_left<T: ORECipher>(&self, cipher: &mut T) -> Result<Self::LeftOutput, OREError> {
+        let bytes = self.to_be_bytes();
         return cipher.encrypt_left(&bytes);
     }
 
-    fn encrypt<T: ORECipher>(&self, cipher: &mut T) -> Result<Self::Output, OREError> {
-        let bytes: PlainText<8> = self.to_be_bytes();
+    fn encrypt<T: ORECipher>(&self, cipher: &mut T) -> Result<Self::FullOutput, OREError> {
+        let bytes = self.to_be_bytes();
         return cipher.encrypt(&bytes);
     }
 }
 
-/*
- * TODO: This won't work yet as we need to genericise `Left`
 impl OREEncrypt for u32 {
-    type Output = CipherText<4>;
+    type LeftOutput = Left<4>;
+    type FullOutput = CipherText<4>;
 
-    fn encrypt_left(&self, cipher: &mut impl ORECipher) -> Result<Left, OREError> {
-        let bytes: [u8; 4] = self.to_be_bytes();
+    fn encrypt_left<T: ORECipher>(&self, cipher: &mut T) -> Result<Self::LeftOutput, OREError> {
+        let bytes = self.to_be_bytes();
         return cipher.encrypt_left(&bytes);
     }
 
-    fn encrypt<T: ORECipher>(&self, cipher: &mut T) -> Result<Self::Output, OREError> {
-        let bytes: PlainText<4> = self.to_be_bytes();
+    fn encrypt<T: ORECipher>(&self, cipher: &mut T) -> Result<Self::FullOutput, OREError> {
+        let bytes = self.to_be_bytes();
         return cipher.encrypt(&bytes);
     }
-}*/
+}
 
