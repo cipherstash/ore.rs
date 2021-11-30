@@ -170,11 +170,11 @@ impl ORECipher for OREAES128 {
             let hasher: AES128Hash = Hash::new(&right.nonce);
             let hashes = hasher.hash_all(&mut ro_keys);
 
-            // TODO: Iterate the hashes
-            for j in 0..=255 {
-                let jstar = prp.invert(j).map_err(|_| OREError)?;
+            // FIXME: force casting to u8 from usize could cause a panic
+            for (j, h) in hashes.iter().enumerate() {
+                let jstar = prp.invert(j as u8).map_err(|_| OREError)?;
                 let indicator = cmp(jstar, x[n]);
-                right.data[n].set_bit(j, indicator ^ hashes[j as usize]);
+                right.data[n].set_bit(j as u8, indicator ^ h);
             }
         }
         self.prf1.encrypt_all(&mut left.f);
