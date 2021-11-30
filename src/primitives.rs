@@ -3,22 +3,31 @@ pub mod prf;
 pub mod hash;
 pub mod prp;
 
+use aes::cipher::{
+    generic_array::GenericArray,
+    consts::U16
+};
+
 /*
  * Represents a 64-bit (8-byte) random seed.
  */
 pub type SEED64 = [u8; 8];
 
+use aes::Block;
+
+pub type AesBlock = Block;
+pub type PRFKey = GenericArray<u8, U16>;
+pub type HashKey = GenericArray<u8, U16>;
+
 pub trait PRF {
-    // TODO: Use a PRFKey trait as the argument here
-    fn new(key: &[u8]) -> Self;
-    // TODO: Use PRF Block trait as the data argument
-    fn encrypt_all(&self, data: &mut [u8]);
+    fn new(key: &PRFKey) -> Self;
+    fn encrypt_all(&self, data: &mut [AesBlock]);
 }
 
 pub trait Hash {
-    fn new(key: &[u8]) -> Self;
+    fn new(key: &HashKey) -> Self;
     fn hash(&self, data: &[u8]) -> u8;
-    fn hash_all(&self, input: &[u8], output: &mut [u8]);
+    fn hash_all(&self, input: &mut [AesBlock]) -> Vec<u8>;
 }
 
 #[derive(Debug, Clone)]
