@@ -1,9 +1,8 @@
 
-use crate::primitives::{AesBlock, PRF};
+use crate::primitives::{AesBlock, PRF, PRFKey};
 use aes::Aes128;
 use aes::cipher::{
     BlockEncrypt, NewBlockCipher, BlockCipher,
-    generic_array::{GenericArray, ArrayLength},
 };
 
 type BlockSize = <Aes128 as BlockCipher>::BlockSize;
@@ -13,17 +12,18 @@ pub struct AES128PRF {
     cipher: Aes128
 }
 
-// TODO: This will be a whole lot simpler
-// when the AES crate supports const generics and we don't have to deal with GenericArray
+/* 
+ * This can be made a whole lot simpler
+ * when the AES crate supports const generics and we don't have to deal with GenericArray.
+*/
 impl PRF for AES128PRF {
-    fn new(key: &[u8]) -> Self {
-        let key_array = GenericArray::from_slice(key);
-        let cipher = Aes128::new(&key_array);
+    fn new(key: &PRFKey) -> Self {
+        //let key_array = GenericArray::from_slice(key);
+        let cipher = Aes128::new(&key);
         return Self { cipher };
     }
 
     fn encrypt_all(&self, data: &mut [AesBlock]) {
-        //let mut blocks = to_blocks::<BlockSize>(&mut data[..]);
         self.cipher.encrypt_blocks(data);
     }
 }
@@ -32,11 +32,12 @@ impl PRF for AES128PRF {
 mod tests {
     use super::*;
     use hex_literal::hex;
-    use aes::cipher::generic_array::arr;
+    use aes::cipher::generic_array::{arr, ArrayLength, GenericArray};
 
     fn init_prf() -> AES128PRF {
         let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-        return PRF::new(&key);
+        let key_array = GenericArray::from_slice(&key);
+        return PRF::new(&key_array);
     }
 
     fn to_blocks<N>(data: &mut [u8]) -> &mut [GenericArray<u8, N>]

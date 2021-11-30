@@ -1,5 +1,5 @@
 
-use crate::primitives::Hash;
+use crate::primitives::{Hash, HashKey, AesBlock};
 use aes::Aes128;
 use aes::cipher::{
     BlockEncrypt, NewBlockCipher,
@@ -10,8 +10,9 @@ pub struct AES128Hash {
     cipher: Aes128
 }
 
+// TODO: Rename to AES128Z2Hash
 impl Hash for AES128Hash {
-    fn new(key: &[u8]) -> Self {
+    fn new(key: &HashKey) -> Self {
         let key_array = GenericArray::from_slice(key);
         let cipher = Aes128::new(&key_array);
         return Self { cipher };
@@ -33,9 +34,17 @@ impl Hash for AES128Hash {
         return output[0] & 1u8;
     }
 
-    fn hash_all(&self, input: &[u8], output: &mut [u8]) {
-        // len(output) = Blocksize * len(input) - how to check this at compile time?
-        // TODO
+    // TODO: this mutates - see how much a copy effects performance (clone_from_slice)
+    fn hash_all(&self, data: &mut [AesBlock]) -> Vec<u8> {
+        self.cipher.encrypt_blocks(data);
+
+        let mut vec = Vec::with_capacity(data.len());
+        for &mut block in data {
+            // Output is Z2 (1-bit)
+            vec.push(block[0] & 1u8);
+        }
+
+        return vec;
     }
 }
 
@@ -46,7 +55,8 @@ mod tests {
 
     fn init_hash() -> AES128Hash {
         let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-        return Hash::new(&key);
+        let key_array = GenericArray::from_slice(&key);
+        return Hash::new(&key_array);
     }
 
     #[test]
