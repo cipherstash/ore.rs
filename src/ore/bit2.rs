@@ -95,10 +95,6 @@ fn cmp(a: u8, b: u8) -> u8 {
     }
 }
 
-// TODO: Next steps
-// * Add marshall and unmarshall functions to get consistent binary formats
-// * Move this first implementation to ore/AES128ORE (consistent naming)
-
 impl ORECipher for OREAES128 {
     type LeftBlockType = LeftBlock16;
     type RightBlockType = OreBlock8;
@@ -293,7 +289,7 @@ mod tests {
     }
 
     quickcheck! {
-        fn compare(x: u64, y: u64) -> bool {
+        fn compare_64(x: u64, y: u64) -> bool {
             let mut ore = init_ore();
             let a = x.encrypt(&mut ore).unwrap();
             let b = y.encrypt(&mut ore).unwrap();
@@ -305,7 +301,27 @@ mod tests {
             };
         }
 
-        fn compare_equal(x: u64) -> bool {
+        fn equality_64(x: u64) -> bool {
+            let mut ore = init_ore();
+            let a = x.encrypt(&mut ore).unwrap();
+            let b = x.encrypt(&mut ore).unwrap();
+
+            return a == b;
+        }
+
+        fn compare_32(x: u32, y: u32) -> bool {
+            let mut ore = init_ore();
+            let a = x.encrypt(&mut ore).unwrap();
+            let b = y.encrypt(&mut ore).unwrap();
+
+            return match x.cmp(&y) {
+                Ordering::Greater => a > b,
+                Ordering::Less    => a < b,
+                Ordering::Equal   => a == b
+            };
+        }
+
+        fn equality_32(x: u64) -> bool {
             let mut ore = init_ore();
             let a = x.encrypt(&mut ore).unwrap();
             let b = x.encrypt(&mut ore).unwrap();

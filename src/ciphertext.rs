@@ -21,8 +21,3 @@ pub struct CipherText<L, R, const N: usize> {
     pub left: Left<L, N>,
     pub right: Right<R, N>
 }
-
-/*pub trait ORECompare {
-    pub fn ore_cmp(&self, b: &Self) -> Option<Ordering>;
-    pub fn eq(&self, b: &Self) -> bool;
-}*/
