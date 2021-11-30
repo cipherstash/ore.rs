@@ -1,22 +1,19 @@
 
 use crate::primitives::AesBlock;
 
-// TODO: Move these to a sub module called Block Types
 pub type LeftBlock16 = AesBlock;
 
-/* An ORE block for k=8
- * |N| = 2^k */
-// TODO: We might be able to use an __m256 for this
-// TODO: Poorly named - we should call it RightBlock32 (32 bytes)
+/*
+ * Block type for a Right CipherText with 32-bytes per block
+ * corresponding to a plaintext block-size of 8-bits and a 2-bit indicator function.
+ */
 #[derive(Debug, Default, Copy, Clone)]
-pub struct OreBlock8 {
+pub struct RightBlock32 {
     low: u128,
     high: u128
 }
 
-impl OreBlock8 {
-    // TODO: This should really just take a bool or we define an unset_bit fn, too
-    // TODO: Return a Result<type>
+impl RightBlock32 {
     #[inline]
     pub fn set_bit(&mut self, position: u8, value: u8) {
         if position < 128 {
@@ -40,3 +37,20 @@ impl OreBlock8 {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_and_get_bit() {
+        let mut block: RightBlock32 = Default::default();
+        block.set_bit(17, 1);
+        assert_eq!(block.get_bit(17), 1);
+
+        block.set_bit(180, 1);
+        assert_eq!(block.get_bit(180), 1);
+
+        block.set_bit(255, 1);
+        assert_eq!(block.get_bit(255), 1);
+    }
+}
