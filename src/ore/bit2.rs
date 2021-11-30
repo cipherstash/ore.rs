@@ -20,7 +20,7 @@ use crate::primitives::{
     SEED64,
     AesBlock,
     prf::AES128PRF,
-    hash::AES128Hash,
+    hash::AES128Z2Hash,
     prp::KnuthShufflePRP
 };
 use std::cmp::Ordering;
@@ -167,7 +167,7 @@ impl ORECipher for OREAES128 {
              * If not, we will probably need to implement our own parallel encrypt using intrisics
              * like in the AES crate: https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/ni/aes128.rs#L26
             */
-            let hasher: AES128Hash = Hash::new(&right.nonce);
+            let hasher: AES128Z2Hash = Hash::new(&right.nonce);
             let hashes = hasher.hash_all(&mut ro_keys);
 
             // FIXME: force casting to u8 from usize could cause a panic
@@ -213,7 +213,7 @@ impl<const N: usize> CipherText<N> {
             return Some(Ordering::Equal);
         }
 
-        let hash: AES128Hash = Hash::new(&b.right.nonce);
+        let hash: AES128Z2Hash = Hash::new(&b.right.nonce);
         let h = hash.hash(&self.left.f[l]);
 
         // Test the set and get bit functions
