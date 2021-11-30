@@ -1,18 +1,14 @@
 
 /*
- *
  * Block ORE Implemenation using a 2-bit indicator function
  */
 
-pub use crate::ore::{
+use crate::ore::{
     OREError,
-    Left,
-    Right,
-    CipherText,
     PlainText,
-    OreBlock8,
     ORECipher
 };
+use crate::ciphertext::*;
 use crate::primitives::{
     PRF,
     Hash,
@@ -33,6 +29,20 @@ use aes::cipher::{
     generic_array::GenericArray
 };
 
+// TODO: Move these to a sub module called Block Types
+pub type LeftBlock16 = AesBlock;
+
+/* An ORE block for k=8
+ * |N| = 2^k */
+// TODO: We might be able to use an __m256 for this
+// TODO: Poorly named - we should call it RightBlock32 (32 bytes)
+#[derive(Debug, Default, Copy, Clone)]
+pub struct OreBlock8 {
+    low: u128,
+    high: u128
+}
+
+/* Define our scheme */
 #[derive(Debug)]
 pub struct OREAES128 {
     prf1: AES128PRF,
@@ -42,6 +52,40 @@ pub struct OREAES128 {
     rng: OsRng,
     prp_seed: SEED64
 }
+
+/* Define some convenience types */
+pub type OREAES128Left<const N: usize> = Left<LeftBlock16, N>;
+pub type OREAES128Right<const N: usize> = Right<OreBlock8, N>;
+pub type OREAES128CipherText<const N: usize> = CipherText<LeftBlock16, OreBlock8, N>;
+pub type EncryptLeftResult<const N: usize> = Result<OREAES128Left<N>, OREError>;
+pub type EncryptResult<const N: usize> = Result<OREAES128CipherText<N>, OREError>;
+
+impl OreBlock8 {
+    // TODO: This should really just take a bool or we define an unset_bit fn, too
+    // TODO: Return a Result<type>
+    #[inline]
+    pub fn set_bit(&mut self, position: u8, value: u8) {
+        if position < 128 {
+          let bit: u128 = (value as u128) << position;
+          self.low |= bit;
+        } else {
+          let bit: u128 = (value as u128) << (position - 128);
+          self.high |= bit;
+        }
+    }
+
+    #[inline]
+    pub fn get_bit(&self, position: u8) -> u8 {
+        if position < 128 {
+            let mask: u128 = 1 << position;
+            return ((self.low & mask) >> position) as u8;
+        } else {
+            let mask: u128 = 1 << (position - 128);
+            return ((self.high & mask) >> (position - 128)) as u8;
+        }
+    }
+}
+
 
 fn cmp(a: u8, b: u8) -> u8 {
     if a > b {
@@ -56,6 +100,9 @@ fn cmp(a: u8, b: u8) -> u8 {
 // * Move this first implementation to ore/AES128ORE (consistent naming)
 
 impl ORECipher for OREAES128 {
+    type LeftBlockType = LeftBlock16;
+    type RightBlockType = OreBlock8;
+
     fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64) -> Result<Self, OREError> {
 
         // TODO: k1 and k2 should be Key types and we should have a set of traits to abstract the
@@ -69,8 +116,8 @@ impl ORECipher for OREAES128 {
         })
     }
 
-    fn encrypt_left<const N: usize>(&mut self, x: &PlainText<N>) -> Result<Left<N>, OREError> {
-        let mut output = Left {
+    fn encrypt_left<const N: usize>(&mut self, x: &PlainText<N>) -> EncryptLeftResult<N> {
+        let mut output = OREAES128Left::<N> {
             xt: [0; N],
             f: [Default::default(); N]
         };
@@ -106,13 +153,13 @@ impl ORECipher for OREAES128 {
         return Ok(output);
     }
 
-    fn encrypt<const N: usize>(&mut self, x: &PlainText<N>) -> Result<CipherText<N>, OREError> {
-        let mut right = Right {
+    fn encrypt<const N: usize>(&mut self, x: &PlainText<N>) -> EncryptResult<N> {
+        let mut right = OREAES128Right::<N> {
             nonce: Default::default(),
             data: [Default::default(); N]
         };
 
-        let mut left = Left {
+        let mut left = OREAES128Left::<N> {
             xt: [0; N],
             f: [Default::default(); N]
         };
@@ -186,17 +233,17 @@ impl ORECipher for OREAES128 {
     }
 }
 
-// TODO: This implementation is for the OREAES128 implementation
-// but its for the global CipherText type
-impl<const N: usize> CipherText<N> {
-    pub fn eq(&self, b: &Self) -> bool {
-        return match self.cmp(b) {
+impl<const N: usize> PartialEq for OREAES128CipherText<N> {
+    fn eq(&self, b: &Self) -> bool {
+        return match self.partial_cmp(b) {
             Some(Ordering::Equal) => true,
             _ => false
         }
     }
+}
 
-    pub fn cmp(&self, b: &CipherText<N>) -> Option<Ordering> {
+impl<const N: usize> PartialOrd for OREAES128CipherText<N> {
+    fn partial_cmp(&self, b: &Self) -> Option<Ordering> {
         let mut is_equal = true;
         let mut l = 0; // Unequal block
 
