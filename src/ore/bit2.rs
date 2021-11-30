@@ -29,6 +29,10 @@ use rand;
 use rand::Rng;
 use rand::os::{OsRng};
 
+use aes::cipher::{
+    generic_array::GenericArray
+};
+
 #[derive(Debug)]
 pub struct OREAES128 {
     prf1: AES128PRF,
@@ -48,17 +52,18 @@ fn cmp(a: u8, b: u8) -> u8 {
 }
 
 // TODO: Next steps
-// * Use a block type for Left as well as right? (possibly more work)
 // * Add marshall and unmarshall functions to get consistent binary formats
 // * Move this first implementation to ore/AES128ORE (consistent naming)
-//
 
 impl ORECipher for OREAES128 {
     fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64) -> Result<Self, OREError> {
-        // TODO: Can the PRP be initialized in the init function, too?
+
+        // TODO: k1 and k2 should be Key types and we should have a set of traits to abstract the
+        // behaviour ro parsing/loading etc
+
         return Ok(OREAES128 {
-            prf1: PRF::new(&k1), // TODO: Don't borrow - use the fixed length array
-            prf2: PRF::new(&k2),
+            prf1: PRF::new(GenericArray::from_slice(&k1)),
+            prf2: PRF::new(GenericArray::from_slice(&k2)),
             rng: OsRng::new().map_err(|_| OREError)?,
             prp_seed: *seed
         })
@@ -138,10 +143,6 @@ impl ORECipher for OREAES128 {
             // Include the block number in the value passed to the Random Oracle
             left.f[n][N] = n as u8;
 
-            // TODO: The first block or RO keys will be the same for every encryption
-            // because there is no plaintext prefix for the first block
-            // This means we can generate the first 16 keys in a setup step
-
             let mut ro_keys: [AesBlock; 256] = [Default::default(); 256];
 
             for j in 0..=255 {
@@ -165,22 +166,21 @@ impl ORECipher for OREAES128 {
              *
              * If not, we will probably need to implement our own parallel encrypt using intrisics
              * like in the AES crate: https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/ni/aes128.rs#L26
-             */
-            // TODO: Use the hash_all function
-            let p: AES128PRF = PRF::new(&right.nonce);
-            p.encrypt_all(&mut ro_keys);
+            */
+            let hasher: AES128Hash = Hash::new(&right.nonce);
+            let hashes = hasher.hash_all(&mut ro_keys);
 
+            // TODO: Iterate the hashes
             for j in 0..=255 {
                 let jstar = prp.invert(j).map_err(|_| OREError)?;
                 let indicator = cmp(jstar, x[n]);
-                let h = ro_keys[j as usize][0] & 1u8;
-                right.data[n].set_bit(j, indicator ^ h);
+                right.data[n].set_bit(j, indicator ^ hashes[j as usize]);
             }
         }
-        //prf::encrypt_all(&self.k1, &mut left.f);
         self.prf1.encrypt_all(&mut left.f);
 
         // TODO: Do we need to do any zeroing? See https://lib.rs/crates/zeroize
+        // Zeroize the RO Keys before re-assigning them
 
         return Ok(CipherText { left: left, right: right });
     }
@@ -200,10 +200,7 @@ impl<const N: usize> CipherText<N> {
         let mut is_equal = true;
         let mut l = 0; // Unequal block
 
-        // TODO: Surely this could be done with iterators?
         for n in 0..N {
-            //let position = n * 16;
-            //if &self.left.x[n] != &b.left.x[n] || &self.left.f[position..(position + 16)] != &b.left.f[position..(position + 16)] {
             if &self.left.x[n] != &b.left.x[n] || &self.left.f[n] != &b.left.f[n] {
                 is_equal = false;
                 l = n;
@@ -217,7 +214,6 @@ impl<const N: usize> CipherText<N> {
         }
 
         let hash: AES128Hash = Hash::new(&b.right.nonce);
-        //let h = hash.hash(&self.left.f[(l * 16)..((l * 16) + 16)]);
         let h = hash.hash(&self.left.f[l]);
 
         // Test the set and get bit functions
