@@ -1,6 +1,13 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hex_literal::hex;
-use ore::{ORECipher, OREEncrypt, CipherText, bit2::OREAES128};
+use ore::{
+    ORECipher,
+    OREEncrypt,
+    bit2::{
+        OREAES128,
+        OREAES128CipherText
+    }
+};
 
 #[inline]
 fn do_encrypt(ore: &mut OREAES128) {
@@ -13,7 +20,7 @@ fn do_encrypt_left(ore: &mut OREAES128) {
 }
 
 #[inline]
-fn do_compare<const N: usize>(a: &CipherText<N>, b: &CipherText<N>) {
+fn do_compare<const N: usize>(a: &OREAES128CipherText<N>, b: &OREAES128CipherText<N>) {
     a.partial_cmp(b);
 }
 

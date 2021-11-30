@@ -13,8 +13,8 @@ fn main() {
     println!("LEFT = {:?}", x.encrypt_left(&mut ore).unwrap());
     println!("FULL = {:?}", x.encrypt(&mut ore).unwrap());
 
-    let cta = 47u32.encrypt(&mut ore).unwrap();
-    let ctb = 50u32.encrypt(&mut ore).unwrap();
+    let cta = 47u64.encrypt(&mut ore).unwrap();
+    let ctb = 50u64.encrypt(&mut ore).unwrap();
 
     println!("CMP = {}", cta < ctb);
 }
