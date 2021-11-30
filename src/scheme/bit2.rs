@@ -3,7 +3,7 @@
  * Block ORE Implemenation using a 2-bit indicator function
  */
 
-use crate::ore::{
+use crate::{
     OREError,
     PlainText,
     ORECipher

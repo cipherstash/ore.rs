@@ -1,5 +1,5 @@
 
-use crate::ore::{
+use crate::{
     ORECipher,
     OREError
 };
