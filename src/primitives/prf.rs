@@ -2,10 +2,8 @@
 use crate::primitives::{AesBlock, PRF, PRFKey};
 use aes::Aes128;
 use aes::cipher::{
-    BlockEncrypt, NewBlockCipher, BlockCipher,
+    BlockEncrypt, NewBlockCipher
 };
-
-type BlockSize = <Aes128 as BlockCipher>::BlockSize;
 
 #[derive(Debug)]
 pub struct AES128PRF {
@@ -32,27 +30,13 @@ impl PRF for AES128PRF {
 mod tests {
     use super::*;
     use hex_literal::hex;
-    use aes::cipher::generic_array::{arr, ArrayLength, GenericArray};
+    use aes::cipher::generic_array::{arr, GenericArray};
 
     fn init_prf() -> AES128PRF {
         let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
         let key_array = GenericArray::from_slice(&key);
         return PRF::new(&key_array);
     }
-
-    fn to_blocks<N>(data: &mut [u8]) -> &mut [GenericArray<u8, N>]
-        where
-            N: ArrayLength<u8>,
-        {
-            use core::slice;
-            let n = N::to_usize();
-            debug_assert!(data.len() % n == 0);
-
-            #[allow(unsafe_code)]
-            unsafe {
-                slice::from_raw_parts_mut(data.as_ptr() as *mut GenericArray<u8, N>, data.len() / n)
-            }
-        }
 
     #[test]
     fn prf_test_single_block() {
