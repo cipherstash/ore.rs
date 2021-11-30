@@ -1,12 +1,13 @@
 
 mod ore;
+mod encrypt;
 mod primitives;
 pub use crate::ore::{
     CipherText,
     ORECipher,
-    OREEncrypt,
     bit2
 };
+pub use crate::encrypt::OREEncrypt;
 
 
 #[cfg(test)]
