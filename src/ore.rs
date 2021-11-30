@@ -13,7 +13,13 @@ pub trait ORECipher: Sized {
     type RightBlockType;
 
     fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64) -> Result<Self, OREError>;
-    fn encrypt_left<const N: usize>(&mut self, input: &PlainText<N>) -> Result<Left<Self::LeftBlockType, N>, OREError>;
-    fn encrypt<const N: usize>(&mut self, input: &PlainText<N>) -> Result<CipherText<Self::LeftBlockType, Self::RightBlockType, N>, OREError>;
+
+    fn encrypt_left<const N: usize>(
+        &mut self, input: &PlainText<N>
+    ) -> Result<Left<Self::LeftBlockType, N>, OREError>;
+
+    fn encrypt<const N: usize>(
+        &mut self, input: &PlainText<N>
+    ) -> Result<CipherText<Self::LeftBlockType, Self::RightBlockType, N>, OREError>;
 }
 
