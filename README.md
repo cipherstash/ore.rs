@@ -39,7 +39,13 @@ let result = a > b;
 
 ### Hash
 
-The Hash module isn't really a hash function but rather models a Random Oracle using AES.
+The Hash module is a primitive for a one way function with a small output domain (say Z2 or Z3). This different to
+large domain hash functions like SHA256 but still considered a hash function in the literature. Hash functions like
+these can be modelled a a "Random Oracle" for the purposes of cryptanalysis (though note that such a construct cannot
+exist in practice).
+
+One implementation of the Hash module is included which uses the first bit of an encryption under AES to simulate a
+random oracle.
 
 ### PRP
 
