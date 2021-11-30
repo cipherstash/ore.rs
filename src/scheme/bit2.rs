@@ -43,8 +43,8 @@ pub struct OREAES128 {
 
 /* Define some convenience types */
 pub type OREAES128Left<const N: usize> = Left<LeftBlock16, N>;
-pub type OREAES128Right<const N: usize> = Right<OreBlock8, N>;
-pub type OREAES128CipherText<const N: usize> = CipherText<LeftBlock16, OreBlock8, N>;
+pub type OREAES128Right<const N: usize> = Right<RightBlock32, N>;
+pub type OREAES128CipherText<const N: usize> = CipherText<LeftBlock16, RightBlock32, N>;
 pub type EncryptLeftResult<const N: usize> = Result<OREAES128Left<N>, OREError>;
 pub type EncryptResult<const N: usize> = Result<OREAES128CipherText<N>, OREError>;
 
@@ -58,7 +58,7 @@ fn cmp(a: u8, b: u8) -> u8 {
 
 impl ORECipher for OREAES128 {
     type LeftBlockType = LeftBlock16;
-    type RightBlockType = OreBlock8;
+    type RightBlockType = RightBlock32;
 
     fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64) -> Result<Self, OREError> {
 
@@ -345,18 +345,5 @@ mod tests {
 
         assert!(a < b);
         assert!(b > a);
-    }
-
-    #[test]
-    fn set_and_get_bit() {
-        let mut block: OreBlock8 = Default::default();
-        block.set_bit(17, 1);
-        assert_eq!(block.get_bit(17), 1);
-
-        block.set_bit(180, 1);
-        assert_eq!(block.get_bit(180), 1);
-
-        block.set_bit(255, 1);
-        assert_eq!(block.get_bit(255), 1);
     }
 }
