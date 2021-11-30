@@ -1,5 +1,5 @@
 
-use ore::{bit2::OREAES128, OREEncrypt, ORECipher};
+use ore::{scheme::bit2::OREAES128, OREEncrypt, ORECipher};
 use hex_literal::hex;
 
 fn main() {

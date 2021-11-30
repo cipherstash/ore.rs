@@ -1,5 +1,4 @@
 
-pub mod bit2;
 use crate::primitives::SEED64;
 use crate::ciphertext::*;
 
