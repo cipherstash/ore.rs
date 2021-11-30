@@ -71,7 +71,7 @@ impl ORECipher for OREAES128 {
 
     fn encrypt_left<const N: usize>(&mut self, x: &PlainText<N>) -> Result<Left<N>, OREError> {
         let mut output = Left {
-            x: Default::default(),
+            xt: [0; N],
             f: [Default::default(); N]
         };
 
@@ -86,7 +86,7 @@ impl ORECipher for OREAES128 {
         for n in 0..N {
             // Set prefix and create PRP for the block
             let prp: KnuthShufflePRP<u8, 256> = PRP::new(&output.f[n], &self.prp_seed).map_err(|_| OREError)?;
-            output.x[n] = prp.permute(x[n]).map_err(|_| OREError)?;
+            output.xt[n] = prp.permute(x[n]).map_err(|_| OREError)?;
         }
 
         // Reset the f block
@@ -97,7 +97,7 @@ impl ORECipher for OREAES128 {
 
         for n in 0..N {
             output.f[n][0..n].clone_from_slice(&x[0..n]);
-            output.f[n][n] = output.x[n];
+            output.f[n][n] = output.xt[n];
             // Include the block number in the value passed to the Random Oracle
             output.f[n][N] = n as u8;
         }
@@ -113,7 +113,7 @@ impl ORECipher for OREAES128 {
         };
 
         let mut left = Left {
-            x: Default::default(),
+            xt: [0; N],
             f: [Default::default(); N]
         };
 
@@ -131,7 +131,7 @@ impl ORECipher for OREAES128 {
         for n in 0..N {
             // Set prefix and create PRP for the block
             let prp: KnuthShufflePRP<u8, 256> = PRP::new(&left.f[n], &self.prp_seed).map_err(|_| OREError)?;
-            left.x[n] = prp.permute(x[n]).map_err(|_| OREError)?;
+            left.xt[n] = prp.permute(x[n]).map_err(|_| OREError)?;
 
             // Reset the f block
             // TODO: Do we need to zeroize the old data before it is dropped due to de-assignment?
@@ -139,7 +139,7 @@ impl ORECipher for OREAES128 {
 
 
             left.f[n][0..n].clone_from_slice(&x[0..n]);
-            left.f[n][n] = left.x[n];
+            left.f[n][n] = left.xt[n];
             // Include the block number in the value passed to the Random Oracle
             left.f[n][N] = n as u8;
 
@@ -201,7 +201,7 @@ impl<const N: usize> CipherText<N> {
         let mut l = 0; // Unequal block
 
         for n in 0..N {
-            if &self.left.x[n] != &b.left.x[n] || &self.left.f[n] != &b.left.f[n] {
+            if &self.left.xt[n] != &b.left.xt[n] || &self.left.f[n] != &b.left.f[n] {
                 is_equal = false;
                 l = n;
                 // TODO: Make sure that this is constant time (i.e. don't break)
@@ -217,7 +217,7 @@ impl<const N: usize> CipherText<N> {
         let h = hash.hash(&self.left.f[l]);
 
         // Test the set and get bit functions
-        let test = b.right.data[l].get_bit(self.left.x[l]) ^ h;
+        let test = b.right.data[l].get_bit(self.left.xt[l]) ^ h;
         if test == 1 {
             return Some(Ordering::Greater);
         }
@@ -229,9 +229,7 @@ impl<const N: usize> CipherText<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // TODO: We're only doing this to get the numerical traits - perhaps move those to their own
-    // module
-    use crate::ore::*;
+    use crate::encrypt::OREEncrypt;
 
     fn init_ore() -> OREAES128 {
         let mut k1: [u8; 16] = Default::default();
