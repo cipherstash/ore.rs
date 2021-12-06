@@ -22,11 +22,14 @@ pub trait ORECipher: Sized {
 
     fn encrypt_left<const N: usize>(
         &mut self, input: &PlainText<N>
-    ) -> Result<Left<Self::LeftBlockType, N>, OREError>;
+    ) -> Result<Left<Self::LeftBlockType, N>, OREError>
+        where <Self as ORECipher>::LeftBlockType: CipherTextBlock;
 
     fn encrypt<const N: usize>(
         &mut self, input: &PlainText<N>
-    ) -> Result<CipherText<Self::LeftBlockType, Self::RightBlockType, N>, OREError>;
+    ) -> Result<CipherText<Self::LeftBlockType, Self::RightBlockType, N>, OREError>
+        where <Self as ORECipher>::RightBlockType: CipherTextBlock,
+              <Self as ORECipher>::LeftBlockType: ciphertext::CipherTextBlock;
 }
 
 #[cfg(test)]
