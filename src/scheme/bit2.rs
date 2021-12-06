@@ -192,15 +192,15 @@ impl ORECipher for OREAES128 {
 
 impl<const N: usize> PartialEq for OREAES128CipherText<N> {
     fn eq(&self, b: &Self) -> bool {
-        return match self.partial_cmp(b) {
-            Some(Ordering::Equal) => true,
+        return match self.cmp(b) {
+            Ordering::Equal => true,
             _ => false
         }
     }
 }
 
-impl<const N: usize> PartialOrd for OREAES128CipherText<N> {
-    fn partial_cmp(&self, b: &Self) -> Option<Ordering> {
+impl<const N: usize> Ord for OREAES128CipherText<N> {
+    fn cmp(&self, b: &Self) -> Ordering {
         let mut is_equal = true;
         let mut l = 0; // Unequal block
 
@@ -214,7 +214,7 @@ impl<const N: usize> PartialOrd for OREAES128CipherText<N> {
         }
 
         if is_equal {
-            return Some(Ordering::Equal);
+            return Ordering::Equal;
         }
 
         let hash: AES128Z2Hash = Hash::new(&b.right.nonce);
@@ -223,12 +223,25 @@ impl<const N: usize> PartialOrd for OREAES128CipherText<N> {
         // Test the set and get bit functions
         let test = b.right.data[l].get_bit(self.left.xt[l]) ^ h;
         if test == 1 {
-            return Some(Ordering::Greater);
+            return Ordering::Greater;
         }
 
-        return Some(Ordering::Less);
+        return Ordering::Less;
     }
 }
+
+impl<const N: usize> PartialOrd for OREAES128CipherText<N> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/*
+ * (From the Rust docs)
+ * This property cannot be checked by the compiler, and therefore Eq implies PartialEq, and has no extra methods.
+ */
+impl<const N: usize> Eq for OREAES128CipherText<N> {}
+
 
 #[cfg(test)]
 mod tests {
