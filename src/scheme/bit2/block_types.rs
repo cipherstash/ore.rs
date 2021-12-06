@@ -1,5 +1,5 @@
-
 use crate::primitives::AesBlock;
+use crate::ciphertext::CipherTextBlock;
 
 pub type LeftBlock16 = AesBlock;
 
@@ -34,6 +34,29 @@ impl RightBlock32 {
             let mask: u128 = 1 << (position - 128);
             return ((self.high & mask) >> (position - 128)) as u8;
         }
+    }
+}
+
+impl CipherTextBlock for LeftBlock16 {
+    const BLOCK_SIZE: usize = 16;
+
+    fn to_bytes(self) -> Vec<u8> {
+        let mut vec = Vec::with_capacity(Self::BLOCK_SIZE);
+        for b in self {
+            vec.push(b);
+        }
+        return vec;
+    }
+}
+
+impl CipherTextBlock for RightBlock32 {
+    const BLOCK_SIZE: usize = 32;
+
+    fn to_bytes(self) -> Vec<u8> {
+        let mut v = Vec::with_capacity(Self::BLOCK_SIZE);
+        self.low.to_be_bytes().iter().for_each(|&x| v.push(x));
+        self.high.to_be_bytes().iter().for_each(|&x| v.push(x));
+        return v;
     }
 }
 

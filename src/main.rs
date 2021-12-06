@@ -16,7 +16,14 @@ fn main() {
     let cta = 47u64.encrypt(&mut ore).unwrap();
     let ctb = 50u64.encrypt(&mut ore).unwrap();
 
-    println!("FULL = {:?}", cta);
+    //let bytes = cta.to_bytes();
+    //let ct = CipherText<OREAES128, 8>::try_load_ciphertext(bytes);
 
-    println!("CMP = {}", cta < ctb);
+    //let serialized = serde_json::to_string(&cta).unwrap();
+
+    //println!("serialized = {}", serialized);
+
+    println!("LEFT/RIGHT/TOTAL: {:?}/{:?}/{:?}", cta.left.size(), cta.right.size(), cta.size());
+    println!("b = {:?}", cta.to_bytes());
+
 }

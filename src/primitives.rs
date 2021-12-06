@@ -39,3 +39,4 @@ pub trait PRP<T>: Sized {
     fn permute(&self, data: T) -> PRPResult<T>;
     fn invert(&self, data: T) -> PRPResult<T>;
 }
+
