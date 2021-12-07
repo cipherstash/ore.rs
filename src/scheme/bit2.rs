@@ -353,4 +353,12 @@ mod tests {
         assert!(a < b);
         assert!(b > a);
     }
+
+    #[test]
+    fn binary_encoding() {
+        let mut ore = init_ore();
+        let a = 10u64.encrypt(&mut ore).unwrap();
+        let bin = a.to_bytes();
+        assert_eq!(a, OREAES128CipherText::<8>::from_bytes(&bin).unwrap());
+    }
 }

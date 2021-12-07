@@ -44,20 +44,20 @@ impl<T: CipherTextBlock, const N: usize> Left<T, N> {
         }
     }
 
-    pub fn size(&self) -> usize {
+    pub fn size() -> usize {
         N * (T::BLOCK_SIZE + 1)
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        // TODO: We've made the vec bigger than it needs to be
-        let mut vec = Vec::with_capacity(self.size());
+        let mut vec = Vec::with_capacity(N * T::BLOCK_SIZE);
+        // TODO: Use an iter
         for i in 0..N {
             vec.append(&mut self.f[i].to_bytes());
         }
         return [self.xt.to_vec(), vec].concat();
     }
 
-    pub fn from_bytes(data: &Vec<u8>) -> Result<Self, ParseError> {
+    pub fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
         // TODO: Check input length
         let mut out = Self::init();
         out.xt.copy_from_slice(&data[0..N]);
@@ -79,22 +79,19 @@ impl<T: CipherTextBlock, const N: usize> Right<T, N> {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
+        // TODO: This is bigger than it needs to be!
         let mut vec = Vec::with_capacity(self.size());
-        // TODO: Does to_vec work?
-        for b in self.nonce {
-            vec.push(b);
-        }
         for i in 0..N {
             vec.append(&mut self.data[i].to_bytes());
         }
-        return vec;
+        return [self.nonce.to_vec(), vec].concat();
     }
 
     pub fn size(&self) -> usize {
         N * T::BLOCK_SIZE + 16 // TODO: nonce size magic number (AesBlock size)
     }
 
-    pub fn from_bytes(data: &Vec<u8>) -> Result<Self, ParseError> {
+    pub fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
         // TODO: Check input length
         let mut out = Self::init();
         out.nonce.copy_from_slice(&data[0..16]); // TODO: Nonce size
@@ -106,19 +103,18 @@ impl<T: CipherTextBlock, const N: usize> Right<T, N> {
     }
 }
 
+// TODO: This should really compose Left and Right and only actually be Generic in N
+// Left and Right are themselves generic
 impl <L: CipherTextBlock, R: CipherTextBlock, const N: usize> CipherText<L, R, N> {
-    pub fn size(&self) -> usize {
-        self.left.size() + self.right.size()
-    }
-
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut vec = Vec::with_capacity(self.size());
-        vec.append(&mut self.left.to_bytes());
-        vec.append(&mut self.right.to_bytes());
-        return vec;
+        return [self.left.to_bytes(), self.right.to_bytes()].concat();
     }
 
-    /*pub fn from_bytes(data: Vec<u8>) -> Result<Self> {
-        let left = L::from_bytes(&data);
-    }*/
+    pub fn from_bytes(data: &Vec<u8>) -> Result<Self, ParseError> {
+        let (left, right) = data.split_at(Left::<L, N>::size());
+        let left = Left::<L, N>::from_bytes(&left)?;
+        let right = Right::<R, N>::from_bytes(&right)?;
+
+        return Ok(Self { left: left, right: right });
+    }
 }
