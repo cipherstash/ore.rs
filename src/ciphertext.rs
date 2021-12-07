@@ -49,6 +49,7 @@ impl<T: CipherTextBlock, const N: usize> Left<T, N> {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
+        // TODO: We've made the vec bigger than it needs to be
         let mut vec = Vec::with_capacity(self.size());
         for i in 0..N {
             vec.append(&mut self.f[i].to_bytes());
@@ -79,17 +80,29 @@ impl<T: CipherTextBlock, const N: usize> Right<T, N> {
 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut vec = Vec::with_capacity(self.size());
+        // TODO: Does to_vec work?
         for b in self.nonce {
             vec.push(b);
         }
-        /*for i in 0..N {
+        for i in 0..N {
             vec.append(&mut self.data[i].to_bytes());
-        }*/
+        }
         return vec;
     }
 
     pub fn size(&self) -> usize {
         N * T::BLOCK_SIZE + 16 // TODO: nonce size magic number (AesBlock size)
+    }
+
+    pub fn from_bytes(data: &Vec<u8>) -> Result<Self, ParseError> {
+        // TODO: Check input length
+        let mut out = Self::init();
+        out.nonce.copy_from_slice(&data[0..16]); // TODO: Nonce size
+        for i in 0..N {
+            let block_start_index = 16 + (i * T::BLOCK_SIZE); // TODO: Nonce size
+            out.data[i] = T::from_bytes(&data[block_start_index..(block_start_index + T::BLOCK_SIZE)])?;
+        }
+        return Ok(out);
     }
 }
 
