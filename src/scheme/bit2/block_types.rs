@@ -70,10 +70,7 @@ impl CipherTextBlock for RightBlock32 {
     const BLOCK_SIZE: usize = 32;
 
     fn to_bytes(self) -> Vec<u8> {
-        let mut v = Vec::with_capacity(Self::BLOCK_SIZE);
-        self.low.to_be_bytes().iter().for_each(|&x| v.push(x));
-        self.high.to_be_bytes().iter().for_each(|&x| v.push(x));
-        return v;
+        [self.low.to_be_bytes().to_vec(), self.high.to_be_bytes().to_vec()].concat()
     }
 
     fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
