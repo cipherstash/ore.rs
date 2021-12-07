@@ -35,6 +35,25 @@ let b = 100.encrypt(&mut ore).unwrap();
 let result = a > b;
 ```
 
+### Serializing/Deserializing
+
+**Note: this library doesn't use Serde due to some complexities with GenericArray used in the AES library. This will
+likely change in the future.**
+
+To serialize a cipher text to a vector of bytes:
+
+```rust
+let bytes: Vec<u8> = a.to_bytes();
+```
+
+To deserialize, you must specify the CipherText type (including number of blocks) you are deserializing into:
+
+```rust
+use ore::scheme::bit2::OREAES128CipherText;
+
+let ct = OREAESCipherText::<8>::from_bytes(&bytes).unwrap();
+```
+
 ## Modules
 
 ### Hash
