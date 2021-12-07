@@ -30,7 +30,7 @@ fn main() {
 
     //println!("serialized = {}", serialized);
 
-    println!("LEFT/RIGHT/TOTAL: {:?}/{:?}/{:?}", cta.left.size(), cta.right.size(), cta.size());
+    //println!("LEFT/RIGHT/TOTAL: {:?}/{:?}/{:?}", cta.left.size(), cta.right.size(), cta.size());
     let bin = cta.right.to_bytes();
     println!("b = {:?}", cta.right.to_bytes());
     println!("Right = {:?}", cta.right);
