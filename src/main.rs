@@ -2,7 +2,7 @@
 use ore::{
     scheme::bit2::{
         OREAES128,
-        OREAES128Left
+        OREAES128Right
     },
     OREEncrypt,
     ORECipher
@@ -31,9 +31,9 @@ fn main() {
     //println!("serialized = {}", serialized);
 
     println!("LEFT/RIGHT/TOTAL: {:?}/{:?}/{:?}", cta.left.size(), cta.right.size(), cta.size());
-    let bin = cta.left.to_bytes();
-    //println!("b = {:?}", cta.left.to_bytes());
-    println!("Left = {:?}", cta.left);
-    println!("Parsed = {:?}", OREAES128Left::<8>::from_bytes(&bin).unwrap());
+    let bin = cta.right.to_bytes();
+    println!("b = {:?}", cta.right.to_bytes());
+    println!("Right = {:?}", cta.right);
+    println!("Parsed = {:?}", OREAES128Right::<8>::from_bytes(&bin).unwrap());
 
 }
