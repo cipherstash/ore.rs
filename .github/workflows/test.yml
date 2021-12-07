@@ -36,13 +36,32 @@ jobs:
           profile: minimal
           toolchain: nightly
 
-      - name: "Build"
-        run: |
-          cargo build
-
       - name: "Test"
         run: |
           cargo test
+
+  bench:
+    runs-on: ubuntu-latest
+    name: "⏱ Benchmark"
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install minimal nightly
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
 
       - name: "Benchmark"
         run: |
