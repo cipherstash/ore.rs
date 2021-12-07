@@ -361,4 +361,11 @@ mod tests {
         let bin = a.to_bytes();
         assert_eq!(a, OREAES128CipherText::<8>::from_bytes(&bin).unwrap());
     }
+
+    #[test]
+    #[should_panic(expected = "ParseError")]
+    fn binary_encoding_invalid_length() {
+        let bin = vec![0, 1, 2, 3];
+        OREAES128CipherText::<8>::from_bytes(&bin).unwrap();
+    }
 }

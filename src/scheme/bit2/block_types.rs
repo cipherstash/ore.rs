@@ -46,11 +46,7 @@ impl CipherTextBlock for LeftBlock16 {
     const BLOCK_SIZE: usize = 16;
 
     fn to_bytes(self) -> Vec<u8> {
-        let mut vec = Vec::with_capacity(Self::BLOCK_SIZE);
-        for b in self {
-            vec.push(b);
-        }
-        return vec;
+        return self.to_vec();
     }
 
     fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
@@ -63,7 +59,6 @@ impl CipherTextBlock for LeftBlock16 {
 }
 
 fn parse_words(input: &[u8]) -> Result<(u128, u128), TryFromSliceError> {
-    // TODO: Check input length
     let (int_bytes, rest) = input.split_at(std::mem::size_of::<u128>());
     let x = u128::from_be_bytes(int_bytes.try_into()?);
     let (int2_bytes, _) = rest.split_at(std::mem::size_of::<u128>());

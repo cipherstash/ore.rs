@@ -1,4 +1,4 @@
-use crate::primitives::AesBlock;
+use crate::primitives::{AesBlock, NONCE_SIZE};
 
 #[derive(Debug)]
 pub struct Left<T: CipherTextBlock, const N: usize> {
@@ -58,7 +58,6 @@ impl<T: CipherTextBlock, const N: usize> Left<T, N> {
     }
 
     pub fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
-        // TODO: Check input length
         let mut out = Self::init();
         out.xt.copy_from_slice(&data[0..N]);
         for i in 0..N {
@@ -78,25 +77,23 @@ impl<T: CipherTextBlock, const N: usize> Right<T, N> {
         }
     }
 
+    pub fn size() -> usize {
+        N * T::BLOCK_SIZE + NONCE_SIZE
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
-        // TODO: This is bigger than it needs to be!
-        let mut vec = Vec::with_capacity(self.size());
+        let mut vec = Vec::with_capacity(N * T::BLOCK_SIZE);
         for i in 0..N {
             vec.append(&mut self.data[i].to_bytes());
         }
         return [self.nonce.to_vec(), vec].concat();
     }
 
-    pub fn size(&self) -> usize {
-        N * T::BLOCK_SIZE + 16 // TODO: nonce size magic number (AesBlock size)
-    }
-
     pub fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
-        // TODO: Check input length
         let mut out = Self::init();
-        out.nonce.copy_from_slice(&data[0..16]); // TODO: Nonce size
+        out.nonce.copy_from_slice(&data[0..NONCE_SIZE]);
         for i in 0..N {
-            let block_start_index = 16 + (i * T::BLOCK_SIZE); // TODO: Nonce size
+            let block_start_index = NONCE_SIZE + (i * T::BLOCK_SIZE);
             out.data[i] = T::from_bytes(&data[block_start_index..(block_start_index + T::BLOCK_SIZE)])?;
         }
         return Ok(out);
@@ -111,6 +108,9 @@ impl <L: CipherTextBlock, R: CipherTextBlock, const N: usize> CipherText<L, R, N
     }
 
     pub fn from_bytes(data: &Vec<u8>) -> Result<Self, ParseError> {
+        if data.len() != (Left::<L, N>::size() + Right::<R, N>::size()) {
+            return Err(ParseError);
+        }
         let (left, right) = data.split_at(Left::<L, N>::size());
         let left = Left::<L, N>::from_bytes(&left)?;
         let right = Right::<R, N>::from_bytes(&right)?;
