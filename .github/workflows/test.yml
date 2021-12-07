@@ -1,0 +1,39 @@
+name: "Test"
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash -l {0}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: "🧪 Test"
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Install minimal nightly
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+
+      - name: "Build"
+        run: |
+          cargo build
+
+      - name: "Test"
+        run: |
+          cargo test
+
+      - name: "Benchmark"
+        run: |
+          cargo bench
