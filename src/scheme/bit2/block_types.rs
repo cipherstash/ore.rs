@@ -1,5 +1,8 @@
 use crate::primitives::AesBlock;
-use crate::ciphertext::CipherTextBlock;
+use crate::ciphertext::{
+    CipherTextBlock,
+    ParseError
+};
 
 pub type LeftBlock16 = AesBlock;
 
@@ -47,6 +50,11 @@ impl CipherTextBlock for LeftBlock16 {
         }
         return vec;
     }
+
+    fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
+        // TODO: Check length
+        Ok(Self::clone_from_slice(data))
+    }
 }
 
 impl CipherTextBlock for RightBlock32 {
@@ -57,6 +65,11 @@ impl CipherTextBlock for RightBlock32 {
         self.low.to_be_bytes().iter().for_each(|&x| v.push(x));
         self.high.to_be_bytes().iter().for_each(|&x| v.push(x));
         return v;
+    }
+
+    fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
+        // TODO
+        Err(ParseError)
     }
 }
 

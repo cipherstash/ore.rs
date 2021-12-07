@@ -1,5 +1,12 @@
 
-use ore::{scheme::bit2::OREAES128, OREEncrypt, ORECipher};
+use ore::{
+    scheme::bit2::{
+        OREAES128,
+        OREAES128Left
+    },
+    OREEncrypt,
+    ORECipher
+};
 use hex_literal::hex;
 
 fn main() {
@@ -13,8 +20,8 @@ fn main() {
     //println!("LEFT = {:?}", x.encrypt_left(&mut ore).unwrap());
     //println!("FULL = {:?}", x.encrypt(&mut ore).unwrap());
 
-    let cta = 47u64.encrypt(&mut ore).unwrap();
-    let ctb = 50u64.encrypt(&mut ore).unwrap();
+    let cta = 1u64.encrypt(&mut ore).unwrap();
+    //let ctb = 50u64.encrypt(&mut ore).unwrap();
 
     //let bytes = cta.to_bytes();
     //let ct = CipherText<OREAES128, 8>::try_load_ciphertext(bytes);
@@ -24,6 +31,9 @@ fn main() {
     //println!("serialized = {}", serialized);
 
     println!("LEFT/RIGHT/TOTAL: {:?}/{:?}/{:?}", cta.left.size(), cta.right.size(), cta.size());
-    println!("b = {:?}", cta.to_bytes());
+    let bin = cta.left.to_bytes();
+    //println!("b = {:?}", cta.left.to_bytes());
+    println!("Left = {:?}", cta.left);
+    println!("Parsed = {:?}", OREAES128Left::<8>::from_bytes(&bin).unwrap());
 
 }
