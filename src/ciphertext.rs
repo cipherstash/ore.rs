@@ -50,10 +50,7 @@ impl<T: CipherTextBlock, const N: usize> Left<T, N> {
 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut vec = Vec::with_capacity(N * T::BLOCK_SIZE);
-        // TODO: Use an iter
-        for i in 0..N {
-            vec.append(&mut self.f[i].to_bytes());
-        }
+        self.f.iter().for_each(|&block| vec.append(&mut block.to_bytes()));
         return [self.xt.to_vec(), vec].concat();
     }
 
@@ -68,7 +65,6 @@ impl<T: CipherTextBlock, const N: usize> Left<T, N> {
     }
 }
 
-// TODO: Test these for each implementation (and benchmark)
 impl<T: CipherTextBlock, const N: usize> Right<T, N> {
     pub(crate) fn init() -> Self {
         Self {
@@ -83,9 +79,7 @@ impl<T: CipherTextBlock, const N: usize> Right<T, N> {
 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut vec = Vec::with_capacity(N * T::BLOCK_SIZE);
-        for i in 0..N {
-            vec.append(&mut self.data[i].to_bytes());
-        }
+        self.data.iter().for_each(|&block| vec.append(&mut block.to_bytes()));
         return [self.nonce.to_vec(), vec].concat();
     }
 
