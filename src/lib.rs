@@ -4,7 +4,6 @@ mod ciphertext;
 mod primitives;
 pub mod scheme;
 
-//pub use crate::ore::ORECipher;
 pub use crate::encrypt::OREEncrypt;
 pub use crate::ciphertext::*;
 
@@ -27,7 +26,7 @@ pub trait ORECipher: Sized {
 
     fn encrypt<const N: usize>(
         &mut self, input: &PlainText<N>
-    ) -> Result<CipherText<Self::LeftBlockType, Self::RightBlockType, N>, OREError>
+    ) -> Result<CipherText<Self, N>, OREError>
         where <Self as ORECipher>::RightBlockType: CipherTextBlock,
               <Self as ORECipher>::LeftBlockType: ciphertext::CipherTextBlock;
 }

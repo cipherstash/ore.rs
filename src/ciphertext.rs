@@ -1,4 +1,5 @@
 use crate::primitives::{AesBlock, NONCE_SIZE};
+pub use crate::ORECipher;
 
 #[derive(Debug)]
 pub struct Left<T: CipherTextBlock, const N: usize> {
@@ -16,11 +17,12 @@ pub struct Right<T: CipherTextBlock, const N: usize> {
 }
 
 #[derive(Debug)]
-pub struct CipherText<L, R, const N: usize>
-where L: CipherTextBlock, R: CipherTextBlock
+pub struct CipherText<S: ORECipher, const N: usize>
+where <S as ORECipher>::LeftBlockType: CipherTextBlock,
+      <S as ORECipher>::RightBlockType: CipherTextBlock
 {
-    pub left: Left<L, N>,
-    pub right: Right<R, N>
+    pub left: Left<S::LeftBlockType, N>,
+    pub right: Right<S::RightBlockType, N>
 }
 
 pub trait CipherTextBlock: Default + Copy {
@@ -96,18 +98,22 @@ impl<T: CipherTextBlock, const N: usize> Right<T, N> {
 
 // TODO: This should really compose Left and Right and only actually be Generic in N
 // Left and Right are themselves generic
-impl <L: CipherTextBlock, R: CipherTextBlock, const N: usize> CipherText<L, R, N> {
+impl <S: ORECipher, const N: usize> CipherText<S, N>
+where <S as ORECipher>::LeftBlockType: CipherTextBlock,
+      <S as ORECipher>::RightBlockType: CipherTextBlock
+{
     pub fn to_bytes(&self) -> Vec<u8> {
         return [self.left.to_bytes(), self.right.to_bytes()].concat();
     }
 
+    // TODO: Can we use an associated type here to store the Left and Right types?
     pub fn from_bytes(data: &Vec<u8>) -> Result<Self, ParseError> {
-        if data.len() != (Left::<L, N>::size() + Right::<R, N>::size()) {
+        if data.len() != (Left::<S::LeftBlockType, N>::size() + Right::<S::RightBlockType, N>::size()) {
             return Err(ParseError);
         }
-        let (left, right) = data.split_at(Left::<L, N>::size());
-        let left = Left::<L, N>::from_bytes(&left)?;
-        let right = Right::<R, N>::from_bytes(&right)?;
+        let (left, right) = data.split_at(Left::<S::LeftBlockType, N>::size());
+        let left = Left::<S::LeftBlockType, N>::from_bytes(&left)?;
+        let right = Right::<S::RightBlockType, N>::from_bytes(&right)?;
 
         return Ok(Self { left: left, right: right });
     }
