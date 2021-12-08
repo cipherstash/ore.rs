@@ -16,16 +16,13 @@ pub trait OREEncrypt<T: ORECipher> {
 // FIXME: I don't like that the cipher is mutable - its private members are mutable
 // TODO: Perhaps we could make the implementations default for the trait and control things
 // with the types. Only need to override for things like floats.
-// TODO: This code could be dried up if we make it generic on the target type, too
-// but bound to a ToPlaintext bytes
-// TODO: Rgus will get a lot simpler if we encapsulate the blocktypes inside the ORECipher
 impl<T: ORECipher> OREEncrypt<T> for u64
 where <T as ORECipher>::LeftBlockType: CipherTextBlock,
       <T as ORECipher>::RightBlockType: CipherTextBlock
 {
     /* Note that Rust currently doesn't allow
      * generic associated types so this ia a bit verbose! */
-    type LeftOutput = Left<T::LeftBlockType, 8>;
+    type LeftOutput = Left<T, 8>;
     type FullOutput = CipherText<T, 8>;
 
     fn encrypt_left(&self, cipher: &mut T) -> Result<Self::LeftOutput, OREError>
@@ -48,7 +45,7 @@ impl<T: ORECipher> OREEncrypt<T> for u32
 where <T as ORECipher>::LeftBlockType: CipherTextBlock,
       <T as ORECipher>::RightBlockType: CipherTextBlock
 {
-    type LeftOutput = Left<T::LeftBlockType, 4>;
+    type LeftOutput = Left<T, 4>;
     type FullOutput = CipherText<T, 4>;
 
     fn encrypt_left(&self, cipher: &mut T) -> Result<Self::LeftOutput, OREError> {

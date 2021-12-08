@@ -21,7 +21,7 @@ pub trait ORECipher: Sized {
 
     fn encrypt_left<const N: usize>(
         &mut self, input: &PlainText<N>
-    ) -> Result<Left<Self::LeftBlockType, N>, OREError>
+    ) -> Result<Left<Self, N>, OREError>
         where <Self as ORECipher>::LeftBlockType: CipherTextBlock;
 
     fn encrypt<const N: usize>(
