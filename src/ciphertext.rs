@@ -13,9 +13,11 @@ where <S as ORECipher>::LeftBlockType: CipherTextBlock
 }
 
 #[derive(Debug)]
-pub struct Right<T: CipherTextBlock, const N: usize> {
+pub struct Right<S: ORECipher, const N: usize>
+where <S as ORECipher>::RightBlockType: CipherTextBlock
+{
     pub nonce: AesBlock,
-    pub data: [T; N]
+    pub data: [S::RightBlockType; N]
 }
 
 #[derive(Debug)]
@@ -24,7 +26,7 @@ where <S as ORECipher>::LeftBlockType: CipherTextBlock,
       <S as ORECipher>::RightBlockType: CipherTextBlock
 {
     pub left: Left<S, N>,
-    pub right: Right<S::RightBlockType, N>
+    pub right: Right<S, N>
 }
 
 pub trait CipherTextBlock: Default + Copy + std::fmt::Debug {
@@ -69,7 +71,9 @@ where <S as ORECipher>::LeftBlockType: CipherTextBlock
     }
 }
 
-impl<T: CipherTextBlock, const N: usize> Right<T, N> {
+impl<S: ORECipher, const N: usize> Right<S, N>
+where <S as ORECipher>::RightBlockType: CipherTextBlock
+{
     pub(crate) fn init() -> Self {
         Self {
             nonce: Default::default(),
@@ -78,11 +82,11 @@ impl<T: CipherTextBlock, const N: usize> Right<T, N> {
     }
 
     pub fn size() -> usize {
-        N * T::BLOCK_SIZE + NONCE_SIZE
+        N * S::RightBlockType::BLOCK_SIZE + NONCE_SIZE
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut vec = Vec::with_capacity(N * T::BLOCK_SIZE);
+        let mut vec = Vec::with_capacity(N * S::RightBlockType::BLOCK_SIZE);
         self.data.iter().for_each(|&block| vec.append(&mut block.to_bytes()));
         return [self.nonce.to_vec(), vec].concat();
     }
@@ -91,8 +95,8 @@ impl<T: CipherTextBlock, const N: usize> Right<T, N> {
         let mut out = Self::init();
         out.nonce.copy_from_slice(&data[0..NONCE_SIZE]);
         for i in 0..N {
-            let block_start_index = NONCE_SIZE + (i * T::BLOCK_SIZE);
-            out.data[i] = T::from_bytes(&data[block_start_index..(block_start_index + T::BLOCK_SIZE)])?;
+            let block_start_index = NONCE_SIZE + (i * S::RightBlockType::BLOCK_SIZE);
+            out.data[i] = S::RightBlockType::from_bytes(&data[block_start_index..(block_start_index + S::RightBlockType::BLOCK_SIZE)])?;
         }
         return Ok(out);
     }
@@ -107,12 +111,12 @@ where <S as ORECipher>::LeftBlockType: CipherTextBlock,
     }
 
     pub fn from_bytes(data: &Vec<u8>) -> Result<Self, ParseError> {
-        if data.len() != (Left::<S, N>::size() + Right::<S::RightBlockType, N>::size()) {
+        if data.len() != (Left::<S, N>::size() + Right::<S, N>::size()) {
             return Err(ParseError);
         }
         let (left, right) = data.split_at(Left::<S, N>::size());
         let left = Left::<S, N>::from_bytes(&left)?;
-        let right = Right::<S::RightBlockType, N>::from_bytes(&right)?;
+        let right = Right::<S, N>::from_bytes(&right)?;
 
         return Ok(Self { left: left, right: right });
     }

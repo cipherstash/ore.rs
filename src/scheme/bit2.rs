@@ -43,7 +43,7 @@ pub struct OREAES128 {
 
 /* Define some convenience types */
 pub type OREAES128Left<const N: usize> = Left<OREAES128, N>;
-pub type OREAES128Right<const N: usize> = Right<RightBlock32, N>;
+pub type OREAES128Right<const N: usize> = Right<OREAES128, N>;
 pub type OREAES128CipherText<const N: usize> = CipherText<OREAES128, N>;
 pub type EncryptLeftResult<const N: usize> = Result<OREAES128Left<N>, OREError>;
 pub type EncryptResult<const N: usize> = Result<OREAES128CipherText<N>, OREError>;
