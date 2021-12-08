@@ -1,5 +1,5 @@
 
-use ore::{
+use ore_rs::{
     scheme::bit2::OREAES128,
     OREEncrypt,
     ORECipher,
@@ -17,6 +17,8 @@ fn main() {
     let cta = 1u64.encrypt(&mut ore).unwrap();
     let ctb = 50u64.encrypt(&mut ore).unwrap();
     println!("1 > 50 = {}", cta > ctb);
+
+    println!("A left = {:?}", cta.left);
 
     let bytes = cta.to_bytes();
     let _ct = CipherText::<OREAES128, 8>::from_bytes(&bytes).unwrap();
