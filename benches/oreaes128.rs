@@ -3,10 +3,8 @@ use hex_literal::hex;
 use ore::{
     ORECipher,
     OREEncrypt,
-    scheme::bit2::{
-        OREAES128,
-        OREAES128CipherText
-    }
+    CipherText,
+    scheme::bit2::OREAES128
 };
 
 #[inline]
@@ -20,18 +18,18 @@ fn do_encrypt_left_64(input: u64, ore: &mut OREAES128) {
 }
 
 #[inline]
-fn do_compare<const N: usize>(a: &OREAES128CipherText<N>, b: &OREAES128CipherText<N>) {
+fn do_compare<const N: usize>(a: &CipherText<OREAES128, N>, b: &CipherText<OREAES128, N>) {
     a.partial_cmp(b);
 }
 
 #[inline]
-fn do_serialize<const N: usize>(a: &OREAES128CipherText<N>) {
+fn do_serialize<const N: usize>(a: &CipherText<OREAES128, N>) {
     let _ret = a.to_bytes();
 }
 
 #[inline]
 fn do_deserialize(bytes: &Vec<u8>) {
-    let _ret = OREAES128CipherText::<8>::from_bytes(bytes).unwrap();
+    let _ret = CipherText::<OREAES128, 8>::from_bytes(bytes).unwrap();
 }
 
 #[inline]
