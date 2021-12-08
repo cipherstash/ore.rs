@@ -38,7 +38,7 @@ cargo bench
 
 Example benchmark results below:
 
-![Benchmark](bench.png)
+![Benchmark](https://user-images.githubusercontent.com/12306/145158987-9846bd94-24c7-4163-b655-1cb3ad686dd9.png)
 
 ## ARMv8 and M1 Support
 
