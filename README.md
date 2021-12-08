@@ -49,9 +49,9 @@ let bytes: Vec<u8> = a.to_bytes();
 To deserialize, you must specify the CipherText type (including number of blocks) you are deserializing into:
 
 ```rust
-use ore::scheme::bit2::OREAES128CipherText;
+use ore::CipherText;
 
-let ct = OREAESCipherText::<8>::from_bytes(&bytes).unwrap();
+let ct = CipherText::<OREAES128, 8>::from_bytes(&bytes).unwrap();
 ```
 
 ## Modules

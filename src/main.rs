@@ -1,8 +1,9 @@
 
 use ore::{
-    scheme::bit2::{OREAES128, OREAES128CipherText},
+    scheme::bit2::OREAES128,
     OREEncrypt,
-    ORECipher
+    ORECipher,
+    CipherText
 };
 use hex_literal::hex;
 
@@ -18,5 +19,5 @@ fn main() {
     println!("1 > 50 = {}", cta > ctb);
 
     let bytes = cta.to_bytes();
-    let _ct = OREAES128CipherText::<8>::from_bytes(&bytes).unwrap();
+    let _ct = CipherText::<OREAES128, 8>::from_bytes(&bytes).unwrap();
 }
