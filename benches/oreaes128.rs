@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hex_literal::hex;
-use ore::{
+use ore_rs::{
     ORECipher,
     OREEncrypt,
     CipherText,
