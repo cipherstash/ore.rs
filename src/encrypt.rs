@@ -26,7 +26,7 @@ where <T as ORECipher>::LeftBlockType: CipherTextBlock,
     /* Note that Rust currently doesn't allow
      * generic associated types so this ia a bit verbose! */
     type LeftOutput = Left<T::LeftBlockType, 8>;
-    type FullOutput = CipherText<T::LeftBlockType, T::RightBlockType, 8>;
+    type FullOutput = CipherText<T, 8>;
 
     fn encrypt_left(&self, cipher: &mut T) -> Result<Self::LeftOutput, OREError>
         where T::LeftBlockType: CipherTextBlock
@@ -49,7 +49,7 @@ where <T as ORECipher>::LeftBlockType: CipherTextBlock,
       <T as ORECipher>::RightBlockType: CipherTextBlock
 {
     type LeftOutput = Left<T::LeftBlockType, 4>;
-    type FullOutput = CipherText<T::LeftBlockType, T::RightBlockType, 4>;
+    type FullOutput = CipherText<T, 4>;
 
     fn encrypt_left(&self, cipher: &mut T) -> Result<Self::LeftOutput, OREError> {
         let bytes = self.to_be_bytes();
