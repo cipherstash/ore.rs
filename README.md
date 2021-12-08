@@ -30,8 +30,8 @@ Encryption returns a `CipherText<N>` where `N` is the number of blocks required 
 `CipherText<N>` implements the `PartialOrd` trait so they can be compared directly.
 
 ```rust
-let a = 47.encrypt(&mut ore).unwrap();
-let b = 100.encrypt(&mut ore).unwrap();
+let a = 47u64.encrypt(&mut ore).unwrap();
+let b = 100u64.encrypt(&mut ore).unwrap();
 let result = a > b;
 ```
 
