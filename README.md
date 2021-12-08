@@ -14,7 +14,7 @@ It makes the following improvements on the original scheme:
 
 ## Usage Documentation
 
-Full documentation is available via [docs.rs](https://docs.rs/ore-rs).
+Reference documentation is on [docs.rs/ore-rs](https://docs.rs/ore-rs).
 
 ## Build, Test and Bench
 
