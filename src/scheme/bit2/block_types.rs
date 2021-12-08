@@ -1,5 +1,10 @@
-
 use crate::primitives::AesBlock;
+use crate::ciphertext::{
+    CipherTextBlock,
+    ParseError
+};
+use std::convert::TryInto;
+use core::array::TryFromSliceError;
 
 pub type LeftBlock16 = AesBlock;
 
@@ -33,6 +38,50 @@ impl RightBlock32 {
         } else {
             let mask: u128 = 1 << (position - 128);
             return ((self.high & mask) >> (position - 128)) as u8;
+        }
+    }
+}
+
+impl CipherTextBlock for LeftBlock16 {
+    const BLOCK_SIZE: usize = 16;
+
+    fn to_bytes(self) -> Vec<u8> {
+        return self.to_vec();
+    }
+
+    fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
+        if data.len() != Self::BLOCK_SIZE {
+            return Err(ParseError);
+        } else {
+            return Ok(Self::clone_from_slice(data));
+        }
+    }
+}
+
+fn parse_words(input: &[u8]) -> Result<(u128, u128), TryFromSliceError> {
+    let (int_bytes, rest) = input.split_at(std::mem::size_of::<u128>());
+    let x = u128::from_be_bytes(int_bytes.try_into()?);
+    let (int2_bytes, _) = rest.split_at(std::mem::size_of::<u128>());
+    let y = u128::from_be_bytes(int2_bytes.try_into()?);
+    return Ok((x, y));
+}
+
+impl CipherTextBlock for RightBlock32 {
+    const BLOCK_SIZE: usize = 32;
+
+    fn to_bytes(self) -> Vec<u8> {
+        [self.low.to_be_bytes().to_vec(), self.high.to_be_bytes().to_vec()].concat()
+    }
+
+    fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
+        if data.len() != Self::BLOCK_SIZE {
+            return Err(ParseError);
+        } else {
+            let (low, high) = parse_words(data).map_err(|_| ParseError)?;
+            return Ok(Self {
+                low: low,
+                high: high
+            });
         }
     }
 }
