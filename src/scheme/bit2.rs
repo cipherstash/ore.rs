@@ -42,11 +42,8 @@ pub struct OREAES128 {
 }
 
 /* Define some convenience types */
-pub type OREAES128Left<const N: usize> = Left<OREAES128, N>;
-pub type OREAES128Right<const N: usize> = Right<OREAES128, N>;
-pub type OREAES128CipherText<const N: usize> = CipherText<OREAES128, N>;
-pub type EncryptLeftResult<const N: usize> = Result<OREAES128Left<N>, OREError>;
-pub type EncryptResult<const N: usize> = Result<OREAES128CipherText<N>, OREError>;
+type EncryptLeftResult<const N: usize> = Result<Left<OREAES128, N>, OREError>;
+type EncryptResult<const N: usize> = Result<CipherText<OREAES128, N>, OREError>;
 
 fn cmp(a: u8, b: u8) -> u8 {
     if a > b {
@@ -74,7 +71,7 @@ impl ORECipher for OREAES128 {
     }
 
     fn encrypt_left<const N: usize>(&mut self, x: &PlainText<N>) -> EncryptLeftResult<N> {
-        let mut output = OREAES128Left::<N>::init();
+        let mut output = Left::<Self, N>::init();
 
         // Build the prefixes
         // TODO: Don't modify struct values directly - use a function on a "Left" trait
@@ -112,8 +109,8 @@ impl ORECipher for OREAES128 {
     }
 
     fn encrypt<const N: usize>(&mut self, x: &PlainText<N>) -> EncryptResult<N> {
-        let mut left = OREAES128Left::<N>::init();
-        let mut right = OREAES128Right::<N>::init();
+        let mut left = Left::<Self, N>::init();
+        let mut right = Right::<Self, N>::init();
 
         // Generate a 16-byte random nonce
         self.rng.fill_bytes(&mut right.nonce);
@@ -184,7 +181,7 @@ impl ORECipher for OREAES128 {
     }
 }
 
-impl<const N: usize> PartialEq for OREAES128CipherText<N> {
+impl<const N: usize> PartialEq for CipherText<OREAES128, N> {
     fn eq(&self, b: &Self) -> bool {
         return match self.cmp(b) {
             Ordering::Equal => true,
@@ -193,7 +190,7 @@ impl<const N: usize> PartialEq for OREAES128CipherText<N> {
     }
 }
 
-impl<const N: usize> Ord for OREAES128CipherText<N> {
+impl<const N: usize> Ord for CipherText<OREAES128, N> {
     fn cmp(&self, b: &Self) -> Ordering {
         let mut is_equal = true;
         let mut l = 0; // Unequal block
@@ -224,7 +221,7 @@ impl<const N: usize> Ord for OREAES128CipherText<N> {
     }
 }
 
-impl<const N: usize> PartialOrd for OREAES128CipherText<N> {
+impl<const N: usize> PartialOrd for CipherText<OREAES128, N> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
@@ -234,7 +231,7 @@ impl<const N: usize> PartialOrd for OREAES128CipherText<N> {
  * (From the Rust docs)
  * This property cannot be checked by the compiler, and therefore Eq implies PartialEq, and has no extra methods.
  */
-impl<const N: usize> Eq for OREAES128CipherText<N> {}
+impl<const N: usize> Eq for CipherText<OREAES128, N> {}
 
 
 #[cfg(test)]
@@ -359,13 +356,13 @@ mod tests {
         let mut ore = init_ore();
         let a = 10u64.encrypt(&mut ore).unwrap();
         let bin = a.to_bytes();
-        assert_eq!(a, OREAES128CipherText::<8>::from_bytes(&bin).unwrap());
+        assert_eq!(a, CipherText::<OREAES128, 8>::from_bytes(&bin).unwrap());
     }
 
     #[test]
     #[should_panic(expected = "ParseError")]
     fn binary_encoding_invalid_length() {
         let bin = vec![0, 1, 2, 3];
-        OREAES128CipherText::<8>::from_bytes(&bin).unwrap();
+        CipherText::<OREAES128, 8>::from_bytes(&bin).unwrap();
     }
 }
