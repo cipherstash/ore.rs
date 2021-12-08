@@ -74,15 +74,16 @@ impl ORECipher for OREAES128 {
     }
 
     fn encrypt_left<const N: usize>(&mut self, x: &PlainText<N>) -> EncryptLeftResult<N> {
-        let mut output = OREAES128Left::<N> {
-            xt: [0; N],
-            f: [Default::default(); N]
-        };
+        let mut output = OREAES128Left::<N>::init();
 
         // Build the prefixes
         // TODO: Don't modify struct values directly - use a function on a "Left" trait
         output.f.iter_mut().enumerate().for_each(|(n, block)| {
             block[0..n].clone_from_slice(&x[0..n]);
+            // TODO: Include the block number in the prefix to avoid repeating values for common
+            // blocks in a long prefix
+            // e.g. when plaintext is 4700 (2-bytes/blocks)
+            // xt = [17, 17, 17, 17, 17, 17, 223, 76]
         });
 
         self.prf2.encrypt_all(&mut output.f);
@@ -111,15 +112,8 @@ impl ORECipher for OREAES128 {
     }
 
     fn encrypt<const N: usize>(&mut self, x: &PlainText<N>) -> EncryptResult<N> {
-        let mut right = OREAES128Right::<N> {
-            nonce: Default::default(),
-            data: [Default::default(); N]
-        };
-
-        let mut left = OREAES128Left::<N> {
-            xt: [0; N],
-            f: [Default::default(); N]
-        };
+        let mut left = OREAES128Left::<N>::init();
+        let mut right = OREAES128Right::<N>::init();
 
         // Generate a 16-byte random nonce
         self.rng.fill_bytes(&mut right.nonce);
@@ -358,5 +352,20 @@ mod tests {
 
         assert!(a < b);
         assert!(b > a);
+    }
+
+    #[test]
+    fn binary_encoding() {
+        let mut ore = init_ore();
+        let a = 10u64.encrypt(&mut ore).unwrap();
+        let bin = a.to_bytes();
+        assert_eq!(a, OREAES128CipherText::<8>::from_bytes(&bin).unwrap());
+    }
+
+    #[test]
+    #[should_panic(expected = "ParseError")]
+    fn binary_encoding_invalid_length() {
+        let bin = vec![0, 1, 2, 3];
+        OREAES128CipherText::<8>::from_bytes(&bin).unwrap();
     }
 }

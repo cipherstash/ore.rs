@@ -18,6 +18,7 @@ use aes::Block;
 pub type AesBlock = Block;
 pub type PRFKey = GenericArray<u8, U16>;
 pub type HashKey = GenericArray<u8, U16>;
+pub const NONCE_SIZE: usize = 16;
 
 pub trait PRF {
     fn new(key: &PRFKey) -> Self;
@@ -39,3 +40,4 @@ pub trait PRP<T>: Sized {
     fn permute(&self, data: T) -> PRPResult<T>;
     fn invert(&self, data: T) -> PRPResult<T>;
 }
+

@@ -18,24 +18,36 @@ pub trait OREEncrypt<T: ORECipher> {
 // with the types. Only need to override for things like floats.
 // TODO: This code could be dried up if we make it generic on the target type, too
 // but bound to a ToPlaintext bytes
-impl<T: ORECipher> OREEncrypt<T> for u64 {
+// TODO: Rgus will get a lot simpler if we encapsulate the blocktypes inside the ORECipher
+impl<T: ORECipher> OREEncrypt<T> for u64
+where <T as ORECipher>::LeftBlockType: CipherTextBlock,
+      <T as ORECipher>::RightBlockType: CipherTextBlock
+{
     /* Note that Rust currently doesn't allow
      * generic associated types so this ia a bit verbose! */
     type LeftOutput = Left<T::LeftBlockType, 8>;
     type FullOutput = CipherText<T::LeftBlockType, T::RightBlockType, 8>;
 
-    fn encrypt_left(&self, cipher: &mut T) -> Result<Self::LeftOutput, OREError> {
+    fn encrypt_left(&self, cipher: &mut T) -> Result<Self::LeftOutput, OREError>
+        where T::LeftBlockType: CipherTextBlock
+    {
         let bytes = self.to_be_bytes();
         return cipher.encrypt_left(&bytes);
     }
 
-    fn encrypt(&self, cipher: &mut T) -> Result<Self::FullOutput, OREError> {
+    fn encrypt(&self, cipher: &mut T) -> Result<Self::FullOutput, OREError>
+        where T::LeftBlockType: CipherTextBlock,
+              T::RightBlockType: CipherTextBlock
+    {
         let bytes = self.to_be_bytes();
         return cipher.encrypt(&bytes);
     }
 }
 
-impl<T: ORECipher> OREEncrypt<T> for u32 {
+impl<T: ORECipher> OREEncrypt<T> for u32
+where <T as ORECipher>::LeftBlockType: CipherTextBlock,
+      <T as ORECipher>::RightBlockType: CipherTextBlock
+{
     type LeftOutput = Left<T::LeftBlockType, 4>;
     type FullOutput = CipherText<T::LeftBlockType, T::RightBlockType, 4>;
 
