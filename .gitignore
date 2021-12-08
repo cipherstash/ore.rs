@@ -1,2 +1,7 @@
 /target
 Cargo.lock
+
+# misc
+.DS_Store
+.env
+*.pem
