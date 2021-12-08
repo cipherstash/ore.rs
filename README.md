@@ -1,5 +1,7 @@
 # ORE
 
+[![Test](https://github.com/cipherstash/ore.rs/actions/workflows/test.yml/badge.svg)](https://github.com/cipherstash/ore.rs/actions/workflows/test.yml)
+
 This is an Order Revealing Encryption (ORE) library written in Rust and based on the BlockORE Encryption scheme
 developed by [Lewi-Wu in 2016](https://eprint.iacr.org/2016/612.pdf).
 
