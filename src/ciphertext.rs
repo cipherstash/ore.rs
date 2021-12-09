@@ -82,7 +82,7 @@ where <S as ORECipher>::RightBlockType: CipherTextBlock
     }
 
     pub fn size() -> usize {
-        N * S::RightBlockType::BLOCK_SIZE + NONCE_SIZE
+        (N * S::RightBlockType::BLOCK_SIZE) + NONCE_SIZE
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
