@@ -144,8 +144,9 @@ pub mod scheme;
 
 pub use crate::encrypt::OREEncrypt;
 pub use crate::ciphertext::*;
-
+use std::cmp::Ordering;
 use crate::primitives::SEED64;
+
 pub type PlainText<const N: usize> = [u8; N];
 
 #[derive(Debug, Clone)]
@@ -167,6 +168,8 @@ pub trait ORECipher: Sized {
     ) -> Result<CipherText<Self, N>, OREError>
         where <Self as ORECipher>::RightBlockType: CipherTextBlock,
               <Self as ORECipher>::LeftBlockType: ciphertext::CipherTextBlock;
+
+    fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering>;
 }
 
 #[cfg(test)]
