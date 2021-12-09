@@ -19,7 +19,12 @@ fn do_encrypt_left_64(input: u64, ore: &mut OREAES128) {
 
 #[inline]
 fn do_compare<const N: usize>(a: &CipherText<OREAES128, N>, b: &CipherText<OREAES128, N>) {
-    a.partial_cmp(b);
+    let _ret = a.partial_cmp(b);
+}
+
+#[inline]
+fn do_compare_slice(a: &[u8], b: &[u8]) {
+    let _ret = OREAES128::compare_raw_slices(a, b);
 }
 
 #[inline]
@@ -51,7 +56,8 @@ fn criterion_benchmark(c: &mut Criterion) {
     let x_u64 = 100_u64.encrypt(&mut ore).unwrap();
     let y_u64 = 100983939290192_u64.encrypt(&mut ore).unwrap();
 
-    let bytes = x_u64.to_bytes();
+    let x_bytes = x_u64.to_bytes();
+    let y_bytes = y_u64.to_bytes();
 
     let x_u32 = 100_u32.encrypt(&mut ore).unwrap();
     let y_u32 = 10098393_u32.encrypt(&mut ore).unwrap();
@@ -59,8 +65,9 @@ fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("encrypt-8", |b| b.iter(|| do_encrypt_64(25u64, black_box(&mut ore))));
     c.bench_function("encrypt-left-8", |b| b.iter(|| do_encrypt_left_64(25u64, black_box(&mut ore))));
     c.bench_function("compare-8", |b| b.iter(|| do_compare(black_box(&x_u64), black_box(&y_u64))));
+    c.bench_function("compare-8-slice", |b| b.iter(|| do_compare_slice(black_box(&x_bytes), black_box(&y_bytes))));
     c.bench_function("serialize-8", |b| b.iter(|| do_serialize(black_box(&x_u64))));
-    c.bench_function("deserialize-8", |b| b.iter(|| do_deserialize(black_box(&bytes))));
+    c.bench_function("deserialize-8", |b| b.iter(|| do_deserialize(black_box(&x_bytes))));
 
     c.bench_function("encrypt-4", |b| b.iter(|| do_encrypt_32(25u32, black_box(&mut ore))));
     c.bench_function("encrypt-left-4", |b| b.iter(|| do_encrypt_left_32(25u32, black_box(&mut ore))));
