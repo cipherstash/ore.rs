@@ -3,8 +3,6 @@ use crate::ciphertext::{
     CipherTextBlock,
     ParseError
 };
-use std::convert::TryInto;
-use core::array::TryFromSliceError;
 
 pub type LeftBlock16 = AesBlock;
 
@@ -12,33 +10,38 @@ pub type LeftBlock16 = AesBlock;
  * Block type for a Right CipherText with 32-bytes per block
  * corresponding to a plaintext block-size of 8-bits and a 2-bit indicator function.
  */
-#[derive(Debug, Default, Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct RightBlock32 {
-    low: u128,
-    high: u128
+    // TODO: Make this a slice later when the entire right ciphertext is a big array
+    data: [u8; 32]
+}
+
+impl Default for RightBlock32 {
+    fn default() -> Self {
+        Self {
+            data: [0; 32]
+        }
+    }
 }
 
 impl RightBlock32 {
     #[inline]
-    pub fn set_bit(&mut self, position: u8, value: u8) {
-        if position < 128 {
-          let bit: u128 = (value as u128) << position;
-          self.low |= bit;
-        } else {
-          let bit: u128 = (value as u128) << (position - 128);
-          self.high |= bit;
-        }
+    pub fn set_bit(&mut self, bit: usize, value: u8) {
+        debug_assert!(bit < 256);
+        let byte_index = bit / 8;
+        let mask = bit % 8;
+        let v = value << mask;
+        self.data[byte_index] |= v;
     }
 
     #[inline]
-    pub fn get_bit(&self, position: u8) -> u8 {
-        if position < 128 {
-            let mask: u128 = 1 << position;
-            return ((self.low & mask) >> position) as u8;
-        } else {
-            let mask: u128 = 1 << (position - 128);
-            return ((self.high & mask) >> (position - 128)) as u8;
-        }
+    pub fn get_bit(&self, bit: usize) -> u8 {
+        debug_assert!(bit < 256);
+        let byte_index = bit / 8;
+        let position = bit % 8;
+        let v = 1 << position;
+
+        return (self.data[byte_index] & v) >> position;
     }
 }
 
@@ -58,29 +61,23 @@ impl CipherTextBlock for LeftBlock16 {
     }
 }
 
-fn parse_words(input: &[u8]) -> Result<(u128, u128), TryFromSliceError> {
-    let (int_bytes, rest) = input.split_at(std::mem::size_of::<u128>());
-    let x = u128::from_be_bytes(int_bytes.try_into()?);
-    let (int2_bytes, _) = rest.split_at(std::mem::size_of::<u128>());
-    let y = u128::from_be_bytes(int2_bytes.try_into()?);
-    return Ok((x, y));
-}
-
 impl CipherTextBlock for RightBlock32 {
     const BLOCK_SIZE: usize = 32;
 
+    // TODO: Just return a slice so we can just return data directly!
     fn to_bytes(self) -> Vec<u8> {
-        [self.low.to_be_bytes().to_vec(), self.high.to_be_bytes().to_vec()].concat()
+        self.data.to_vec()
     }
 
     fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
         if data.len() != Self::BLOCK_SIZE {
             return Err(ParseError);
         } else {
-            let (low, high) = parse_words(data).map_err(|_| ParseError)?;
+            let mut arr = [0; 32];
+            arr.clone_from_slice(data);
+
             return Ok(Self {
-                low: low,
-                high: high
+                data: arr
             });
         }
     }

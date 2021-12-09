@@ -169,7 +169,7 @@ impl ORECipher for OREAES128 {
             for (j, h) in hashes.iter().enumerate() {
                 let jstar = prp.invert(j as u8).map_err(|_| OREError)?;
                 let indicator = cmp(jstar, x[n]);
-                right.data[n].set_bit(j as u8, indicator ^ h);
+                right.data[n].set_bit(j, indicator ^ h);
             }
         }
         self.prf1.encrypt_all(&mut left.f);
@@ -211,8 +211,7 @@ impl<const N: usize> Ord for CipherText<OREAES128, N> {
         let hash: AES128Z2Hash = Hash::new(&b.right.nonce);
         let h = hash.hash(&self.left.f[l]);
 
-        // Test the set and get bit functions
-        let test = b.right.data[l].get_bit(self.left.xt[l]) ^ h;
+        let test = b.right.data[l].get_bit(self.left.xt[l] as usize) ^ h;
         if test == 1 {
             return Ordering::Greater;
         }
