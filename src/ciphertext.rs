@@ -1,7 +1,7 @@
 use crate::primitives::{AesBlock, NONCE_SIZE};
 pub use crate::ORECipher;
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Left<S: ORECipher, const N: usize>
 where <S as ORECipher>::LeftBlockType: CipherTextBlock
 {
@@ -12,7 +12,7 @@ where <S as ORECipher>::LeftBlockType: CipherTextBlock
     pub xt: [u8; N]
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Right<S: ORECipher, const N: usize>
 where <S as ORECipher>::RightBlockType: CipherTextBlock
 {
@@ -20,7 +20,7 @@ where <S as ORECipher>::RightBlockType: CipherTextBlock
     pub data: [S::RightBlockType; N]
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct CipherText<S: ORECipher, const N: usize>
 where <S as ORECipher>::LeftBlockType: CipherTextBlock,
       <S as ORECipher>::RightBlockType: CipherTextBlock
