@@ -447,10 +447,10 @@ mod tests {
     #[test]
     fn compare_raw_slices_mismatched_lengths() {
         let mut ore = init_ore();
-        let a = 10u64.encrypt(&mut ore).unwrap().to_bytes();
-        let b = 73u32.encrypt(&mut ore).unwrap().to_bytes();
+        let a_64 = 10u64.encrypt(&mut ore).unwrap().to_bytes();
+        let a_32 = 10u32.encrypt(&mut ore).unwrap().to_bytes();
 
-        assert_eq!(OREAES128::compare_raw_slices(&a, &b), Option::None);
+        assert_eq!(OREAES128::compare_raw_slices(&a_64, &a_32), Option::None);
     }
 
     #[test]
