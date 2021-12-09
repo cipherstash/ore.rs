@@ -11,9 +11,11 @@ use crate::{
     primitives::{
         PRF,
         Hash,
+        HashKey,
         PRP,
         SEED64,
         AesBlock,
+        NONCE_SIZE,
         prf::AES128PRF,
         hash::AES128Z2Hash,
         prp::KnuthShufflePRP
@@ -179,6 +181,74 @@ impl ORECipher for OREAES128 {
 
         return Ok(CipherText { left: left, right: right });
     }
+
+
+    fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering> {
+        if a.len() != b.len() { return None };
+        let left_size = Self::LeftBlockType::BLOCK_SIZE;
+        let right_size = Self::RightBlockType::BLOCK_SIZE;
+
+        // TODO: This calculation slows things down a bit - maybe store the number of blocks in the
+        // first byte?
+        let num_blocks = (a.len() - NONCE_SIZE) / (left_size + right_size + 1);
+
+        let mut is_equal = true;
+        let mut l = 0; // Unequal block
+
+        // Slices for the PRF ("f") blocks
+        let a_f = &a[num_blocks..];
+        let b_f = &a[num_blocks..];
+
+        for n in 0..num_blocks {
+            if a[n] != b[n] || left_block(a_f, n) != left_block(b_f, n) {
+                is_equal = false;
+                l = n;
+                break;
+            }
+        }
+
+        if is_equal {
+            return Some(Ordering::Equal);
+        }
+
+        let b_right = &b[num_blocks * (left_size + 1)..];
+        let hash_key = HashKey::from_slice(&b_right[0..NONCE_SIZE]);
+        let hash: AES128Z2Hash = Hash::new(&hash_key);
+        let h = hash.hash(left_block(a_f, l));
+
+        let target_block = right_block(&b_right[NONCE_SIZE..], l);
+        let test = get_bit(target_block, a[l] as usize) ^ h;
+
+        if test == 1 {
+            return Some(Ordering::Greater);
+        }
+
+        return Some(Ordering::Less);
+    }
+}
+
+// TODO: Move these to block_types
+#[inline]
+fn left_block(input: &[u8], n: usize) -> &[u8] {
+    let f_pos = n * LeftBlock16::BLOCK_SIZE;
+    return &input[f_pos..(f_pos + LeftBlock16::BLOCK_SIZE)];
+}
+
+#[inline]
+fn right_block(input: &[u8], n: usize) -> &[u8] {
+    let f_pos = n * RightBlock32::BLOCK_SIZE;
+    return &input[f_pos..(f_pos + RightBlock32::BLOCK_SIZE)];
+}
+
+#[inline]
+fn get_bit(block: &[u8], bit: usize) -> u8 {
+    debug_assert!(block.len() == RightBlock32::BLOCK_SIZE);
+    debug_assert!(bit < 256);
+    let byte_index = bit / 8;
+    let position = bit % 8;
+    let v = 1 << position;
+
+    return (block[byte_index] & v) >> position;
 }
 
 impl<const N: usize> PartialEq for CipherText<OREAES128, N> {
@@ -265,12 +335,36 @@ mod tests {
             };
         }
 
+        fn compare_64_raw_slices(x: u64, y: u64) -> bool {
+            let mut ore = init_ore();
+            let a = x.encrypt(&mut ore).unwrap().to_bytes();
+            let b = y.encrypt(&mut ore).unwrap().to_bytes();
+
+            return match OREAES128::compare_raw_slices(&a, &b) {
+                Some(Ordering::Greater) => x > y,
+                Some(Ordering::Less)    => x < y,
+                Some(Ordering::Equal)   => x == y,
+                None                    => false
+            };
+        }
+
         fn equality_64(x: u64) -> bool {
             let mut ore = init_ore();
             let a = x.encrypt(&mut ore).unwrap();
             let b = x.encrypt(&mut ore).unwrap();
 
             return a == b;
+        }
+
+        fn equality_64_raw_slices(x: u64) -> bool {
+            let mut ore = init_ore();
+            let a = x.encrypt(&mut ore).unwrap().to_bytes();
+            let b = x.encrypt(&mut ore).unwrap().to_bytes();
+
+            return match OREAES128::compare_raw_slices(&a, &b) {
+                Some(Ordering::Equal) => true,
+                _ => false
+            }
         }
 
         fn compare_32(x: u32, y: u32) -> bool {
@@ -348,6 +442,15 @@ mod tests {
 
         assert!(a < b);
         assert!(b > a);
+    }
+
+    #[test]
+    fn compare_raw_slices_mismatched_lengths() {
+        let mut ore = init_ore();
+        let a = 10u64.encrypt(&mut ore).unwrap().to_bytes();
+        let b = 73u32.encrypt(&mut ore).unwrap().to_bytes();
+
+        assert_eq!(OREAES128::compare_raw_slices(&a, &b), Option::None);
     }
 
     #[test]
