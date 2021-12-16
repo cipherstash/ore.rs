@@ -1,12 +1,8 @@
-
-pub mod prf;
 pub mod hash;
+pub mod prf;
 pub mod prp;
 
-use aes::cipher::{
-    generic_array::GenericArray,
-    consts::U16
-};
+use aes::cipher::{consts::U16, generic_array::GenericArray};
 
 /*
  * Represents a 64-bit (8-byte) random seed.
@@ -40,4 +36,3 @@ pub trait PRP<T>: Sized {
     fn permute(&self, data: T) -> PRPResult<T>;
     fn invert(&self, data: T) -> PRPResult<T>;
 }
-
