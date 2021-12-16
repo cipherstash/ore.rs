@@ -1,9 +1,5 @@
-
-use crate::{
-    ORECipher,
-    OREError
-};
 use crate::ciphertext::*;
+use crate::{ORECipher, OREError};
 
 pub trait OREEncrypt<T: ORECipher> {
     type LeftOutput;
@@ -17,8 +13,9 @@ pub trait OREEncrypt<T: ORECipher> {
 // TODO: Perhaps we could make the implementations default for the trait and control things
 // with the types. Only need to override for things like floats.
 impl<T: ORECipher> OREEncrypt<T> for u64
-where <T as ORECipher>::LeftBlockType: CipherTextBlock,
-      <T as ORECipher>::RightBlockType: CipherTextBlock
+where
+    <T as ORECipher>::LeftBlockType: CipherTextBlock,
+    <T as ORECipher>::RightBlockType: CipherTextBlock,
 {
     /* Note that Rust currently doesn't allow
      * generic associated types so this ia a bit verbose! */
@@ -26,15 +23,17 @@ where <T as ORECipher>::LeftBlockType: CipherTextBlock,
     type FullOutput = CipherText<T, 8>;
 
     fn encrypt_left(&self, cipher: &mut T) -> Result<Self::LeftOutput, OREError>
-        where T::LeftBlockType: CipherTextBlock
+    where
+        T::LeftBlockType: CipherTextBlock,
     {
         let bytes = self.to_be_bytes();
         return cipher.encrypt_left(&bytes);
     }
 
     fn encrypt(&self, cipher: &mut T) -> Result<Self::FullOutput, OREError>
-        where T::LeftBlockType: CipherTextBlock,
-              T::RightBlockType: CipherTextBlock
+    where
+        T::LeftBlockType: CipherTextBlock,
+        T::RightBlockType: CipherTextBlock,
     {
         let bytes = self.to_be_bytes();
         return cipher.encrypt(&bytes);
@@ -42,8 +41,9 @@ where <T as ORECipher>::LeftBlockType: CipherTextBlock,
 }
 
 impl<T: ORECipher> OREEncrypt<T> for u32
-where <T as ORECipher>::LeftBlockType: CipherTextBlock,
-      <T as ORECipher>::RightBlockType: CipherTextBlock
+where
+    <T as ORECipher>::LeftBlockType: CipherTextBlock,
+    <T as ORECipher>::RightBlockType: CipherTextBlock,
 {
     type LeftOutput = Left<T, 4>;
     type FullOutput = CipherText<T, 4>;
@@ -58,4 +58,3 @@ where <T as ORECipher>::LeftBlockType: CipherTextBlock,
         return cipher.encrypt(&bytes);
     }
 }
-
