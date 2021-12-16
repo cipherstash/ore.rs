@@ -1,16 +1,13 @@
-
-use crate::primitives::{AesBlock, PRF, PRFKey};
+use crate::primitives::{AesBlock, PRFKey, PRF};
+use aes::cipher::{BlockEncrypt, NewBlockCipher};
 use aes::Aes128;
-use aes::cipher::{
-    BlockEncrypt, NewBlockCipher
-};
 
 #[derive(Debug)]
 pub struct AES128PRF {
-    cipher: Aes128
+    cipher: Aes128,
 }
 
-/* 
+/*
  * This can be made a whole lot simpler
  * when the AES crate supports const generics and we don't have to deal with GenericArray.
 */
@@ -29,8 +26,8 @@ impl PRF for AES128PRF {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hex_literal::hex;
     use aes::cipher::generic_array::{arr, GenericArray};
+    use hex_literal::hex;
 
     fn init_prf() -> AES128PRF {
         let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
@@ -44,22 +41,27 @@ mod tests {
         let prf = init_prf();
 
         prf.encrypt_all(&mut input);
-        assert_eq!(input, [arr![u8; 183, 103, 151, 211, 249, 253, 170, 135, 117, 243, 131, 50, 27, 15, 170, 59]]);
+        assert_eq!(
+            input,
+            [arr![u8; 183, 103, 151, 211, 249, 253, 170, 135, 117, 243, 131, 50, 27, 15, 170, 59]]
+        );
     }
 
     #[test]
     fn prf_test_2_blocks() {
         let mut input = [
             arr![u8; 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 170],
-            arr![u8; 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 170, 255, 221, 97, 170]
+            arr![u8; 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 170, 255, 221, 97, 170],
         ];
         let prf = init_prf();
 
         prf.encrypt_all(&mut input);
-        assert_eq!(input, [
-            arr![u8; 183, 103, 151, 211, 249, 253, 170, 135, 117, 243, 131, 50, 27, 15, 170, 59],
-            arr![u8; 100, 192, 41, 108, 208, 245, 146, 251, 188, 245, 156, 28, 33, 210, 70, 50]
-        ]);
+        assert_eq!(
+            input,
+            [
+                arr![u8; 183, 103, 151, 211, 249, 253, 170, 135, 117, 243, 131, 50, 27, 15, 170, 59],
+                arr![u8; 100, 192, 41, 108, 208, 245, 146, 251, 188, 245, 156, 28, 33, 210, 70, 50]
+            ]
+        );
     }
 }
- 

@@ -1,13 +1,9 @@
-
-use crate::primitives::{Hash, HashKey, AesBlock};
+use crate::primitives::{AesBlock, Hash, HashKey};
+use aes::cipher::{generic_array::GenericArray, BlockEncrypt, NewBlockCipher};
 use aes::Aes128;
-use aes::cipher::{
-    BlockEncrypt, NewBlockCipher,
-    generic_array::GenericArray,
-};
 
 pub struct AES128Z2Hash {
-    cipher: Aes128
+    cipher: Aes128,
 }
 
 impl Hash for AES128Z2Hash {
@@ -23,7 +19,7 @@ impl Hash for AES128Z2Hash {
          * We could do this with compile checks but this would require an additional
          * copy (and doesn't entirely avoid runtime checks anyway)
          * See https://stackoverflow.com/questions/38168956/take-slice-of-certain-length-known-at-compile-time
-        */
+         */
         assert_eq!(data.len(), 16);
         // Can we clone into GenericArray directly? Are we doing an extra copy?
         let mut output = [0u8; 16];
