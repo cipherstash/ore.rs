@@ -1,33 +1,19 @@
-
 /*
  * Block ORE Implemenation using a 2-bit indicator function
  */
 
 use crate::{
-    OREError,
-    PlainText,
-    ORECipher,
     ciphertext::*,
     primitives::{
-        PRF,
-        Hash,
-        HashKey,
-        PRP,
-        SEED64,
-        AesBlock,
-        NONCE_SIZE,
-        prf::AES128PRF,
-        hash::AES128Z2Hash,
-        prp::KnuthShufflePRP
-    }
+        hash::AES128Z2Hash, prf::AES128PRF, prp::KnuthShufflePRP, AesBlock, Hash, HashKey,
+        NONCE_SIZE, PRF, PRP, SEED64,
+    },
+    ORECipher, OREError, PlainText,
 };
 
-use std::cmp::Ordering;
-use rand::{
-    Rng,
-    os::OsRng
-};
 use aes::cipher::generic_array::GenericArray;
+use rand::{os::OsRng, Rng};
+use std::cmp::Ordering;
 
 pub mod block_types;
 pub use self::block_types::*;
@@ -40,7 +26,7 @@ pub struct OREAES128 {
     // OsRng uses /dev/urandom but we may want to look at
     // ChaCha20 rng and HC128
     rng: OsRng,
-    prp_seed: SEED64
+    prp_seed: SEED64,
 }
 
 /* Define some convenience types */
@@ -60,7 +46,6 @@ impl ORECipher for OREAES128 {
     type RightBlockType = RightBlock32;
 
     fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64) -> Result<Self, OREError> {
-
         // TODO: k1 and k2 should be Key types and we should have a set of traits to abstract the
         // behaviour ro parsing/loading etc
 
@@ -68,8 +53,8 @@ impl ORECipher for OREAES128 {
             prf1: PRF::new(GenericArray::from_slice(&k1)),
             prf2: PRF::new(GenericArray::from_slice(&k2)),
             rng: OsRng::new().map_err(|_| OREError)?,
-            prp_seed: *seed
-        })
+            prp_seed: *seed,
+        });
     }
 
     fn encrypt_left<const N: usize>(&mut self, x: &PlainText<N>) -> EncryptLeftResult<N> {
@@ -89,7 +74,8 @@ impl ORECipher for OREAES128 {
 
         for n in 0..N {
             // Set prefix and create PRP for the block
-            let prp: KnuthShufflePRP<u8, 256> = PRP::new(&output.f[n], &self.prp_seed).map_err(|_| OREError)?;
+            let prp: KnuthShufflePRP<u8, 256> =
+                PRP::new(&output.f[n], &self.prp_seed).map_err(|_| OREError)?;
             output.xt[n] = prp.permute(x[n]).map_err(|_| OREError)?;
         }
 
@@ -127,13 +113,13 @@ impl ORECipher for OREAES128 {
 
         for n in 0..N {
             // Set prefix and create PRP for the block
-            let prp: KnuthShufflePRP<u8, 256> = PRP::new(&left.f[n], &self.prp_seed).map_err(|_| OREError)?;
+            let prp: KnuthShufflePRP<u8, 256> =
+                PRP::new(&left.f[n], &self.prp_seed).map_err(|_| OREError)?;
             left.xt[n] = prp.permute(x[n]).map_err(|_| OREError)?;
 
             // Reset the f block
             // TODO: Do we need to zeroize the old data before it is dropped due to de-assignment?
             left.f[n] = Default::default();
-
 
             left.f[n][0..n].clone_from_slice(&x[0..n]);
             left.f[n][n] = left.xt[n];
@@ -163,7 +149,7 @@ impl ORECipher for OREAES128 {
              *
              * If not, we will probably need to implement our own parallel encrypt using intrisics
              * like in the AES crate: https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/ni/aes128.rs#L26
-            */
+             */
             let hasher: AES128Z2Hash = Hash::new(&right.nonce);
             let hashes = hasher.hash_all(&mut ro_keys);
 
@@ -179,12 +165,16 @@ impl ORECipher for OREAES128 {
         // TODO: Do we need to do any zeroing? See https://lib.rs/crates/zeroize
         // Zeroize the RO Keys before re-assigning them
 
-        return Ok(CipherText { left: left, right: right });
+        return Ok(CipherText {
+            left: left,
+            right: right,
+        });
     }
 
-
     fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering> {
-        if a.len() != b.len() { return None };
+        if a.len() != b.len() {
+            return None;
+        };
         let left_size = Self::LeftBlockType::BLOCK_SIZE;
         let right_size = Self::RightBlockType::BLOCK_SIZE;
 
@@ -255,8 +245,8 @@ impl<const N: usize> PartialEq for CipherText<OREAES128, N> {
     fn eq(&self, b: &Self) -> bool {
         return match self.cmp(b) {
             Ordering::Equal => true,
-            _ => false
-        }
+            _ => false,
+        };
     }
 }
 
@@ -301,7 +291,6 @@ impl<const N: usize> PartialOrd for CipherText<OREAES128, N> {
  * This property cannot be checked by the compiler, and therefore Eq implies PartialEq, and has no extra methods.
  */
 impl<const N: usize> Eq for CipherText<OREAES128, N> {}
-
 
 #[cfg(test)]
 mod tests {
@@ -470,9 +459,15 @@ mod tests {
 
     #[test]
     fn test_different_prf_keys() {
-        let k1: [u8; 16] = [97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112];
-        let k2: [u8; 16] = [129, 4, 114, 186, 102, 145, 225, 73, 166, 57, 244, 251, 56, 92, 188, 36];
-        let k3: [u8; 16] = [49, 50, 51, 52, 53, 54, 55, 56, 57, 48, 97, 98, 99, 100, 101, 102];
+        let k1: [u8; 16] = [
+            97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112,
+        ];
+        let k2: [u8; 16] = [
+            129, 4, 114, 186, 102, 145, 225, 73, 166, 57, 244, 251, 56, 92, 188, 36,
+        ];
+        let k3: [u8; 16] = [
+            49, 50, 51, 52, 53, 54, 55, 56, 57, 48, 97, 98, 99, 100, 101, 102,
+        ];
         let seed: [u8; 8] = [119, 104, 41, 110, 199, 157, 235, 169];
 
         let mut ore1: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
@@ -486,9 +481,15 @@ mod tests {
 
     #[test]
     fn test_different_prp_keys() {
-        let k1: [u8; 16] = [97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112];
-        let k2: [u8; 16] = [129, 4, 114, 186, 102, 145, 225, 73, 166, 57, 244, 251, 56, 92, 188, 36];
-        let k3: [u8; 16] = [49, 50, 51, 52, 53, 54, 55, 56, 57, 48, 97, 98, 99, 100, 101, 102];
+        let k1: [u8; 16] = [
+            97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112,
+        ];
+        let k2: [u8; 16] = [
+            129, 4, 114, 186, 102, 145, 225, 73, 166, 57, 244, 251, 56, 92, 188, 36,
+        ];
+        let k3: [u8; 16] = [
+            49, 50, 51, 52, 53, 54, 55, 56, 57, 48, 97, 98, 99, 100, 101, 102,
+        ];
         let seed: [u8; 8] = [119, 104, 41, 110, 199, 157, 235, 169];
 
         let mut ore1: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();

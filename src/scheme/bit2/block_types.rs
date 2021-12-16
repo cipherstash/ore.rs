@@ -1,8 +1,5 @@
+use crate::ciphertext::{CipherTextBlock, ParseError};
 use crate::primitives::AesBlock;
-use crate::ciphertext::{
-    CipherTextBlock,
-    ParseError
-};
 
 pub type LeftBlock16 = AesBlock;
 
@@ -13,14 +10,12 @@ pub type LeftBlock16 = AesBlock;
 #[derive(Debug, Copy, Clone)]
 pub struct RightBlock32 {
     // TODO: Make this a slice later when the entire right ciphertext is a big array
-    data: [u8; 32]
+    data: [u8; 32],
 }
 
 impl Default for RightBlock32 {
     fn default() -> Self {
-        Self {
-            data: [0; 32]
-        }
+        Self { data: [0; 32] }
     }
 }
 
@@ -76,9 +71,7 @@ impl CipherTextBlock for RightBlock32 {
             let mut arr = [0; 32];
             arr.clone_from_slice(data);
 
-            return Ok(Self {
-                data: arr
-            });
+            return Ok(Self { data: arr });
         }
     }
 }

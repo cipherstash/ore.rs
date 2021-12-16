@@ -3,30 +3,33 @@ pub use crate::ORECipher;
 
 #[derive(Debug, Copy, Clone)]
 pub struct Left<S: ORECipher, const N: usize>
-where <S as ORECipher>::LeftBlockType: CipherTextBlock
+where
+    <S as ORECipher>::LeftBlockType: CipherTextBlock,
 {
     /* Array of Left blocks of size N */
     pub f: [S::LeftBlockType; N],
 
     /* Transformed input array of size N (x̃ = π(F (k_2 , x|i−1 ), x_i )) */
-    pub xt: [u8; N]
+    pub xt: [u8; N],
 }
 
 #[derive(Debug, Copy, Clone)]
 pub struct Right<S: ORECipher, const N: usize>
-where <S as ORECipher>::RightBlockType: CipherTextBlock
+where
+    <S as ORECipher>::RightBlockType: CipherTextBlock,
 {
     pub nonce: AesBlock,
-    pub data: [S::RightBlockType; N]
+    pub data: [S::RightBlockType; N],
 }
 
 #[derive(Debug, Copy, Clone)]
 pub struct CipherText<S: ORECipher, const N: usize>
-where <S as ORECipher>::LeftBlockType: CipherTextBlock,
-      <S as ORECipher>::RightBlockType: CipherTextBlock
+where
+    <S as ORECipher>::LeftBlockType: CipherTextBlock,
+    <S as ORECipher>::RightBlockType: CipherTextBlock,
 {
     pub left: Left<S, N>,
-    pub right: Right<S, N>
+    pub right: Right<S, N>,
 }
 
 pub trait CipherTextBlock: Default + Copy + std::fmt::Debug {
@@ -41,12 +44,13 @@ pub trait CipherTextBlock: Default + Copy + std::fmt::Debug {
 pub struct ParseError;
 
 impl<S: ORECipher, const N: usize> Left<S, N>
-where <S as ORECipher>::LeftBlockType: CipherTextBlock
+where
+    <S as ORECipher>::LeftBlockType: CipherTextBlock,
 {
     pub(crate) fn init() -> Self {
         Self {
             xt: [0; N],
-            f: [S::LeftBlockType::default(); N]
+            f: [S::LeftBlockType::default(); N],
         }
     }
 
@@ -56,7 +60,9 @@ where <S as ORECipher>::LeftBlockType: CipherTextBlock
 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut vec = Vec::with_capacity(N * S::LeftBlockType::BLOCK_SIZE);
-        self.f.iter().for_each(|&block| vec.append(&mut block.to_bytes()));
+        self.f
+            .iter()
+            .for_each(|&block| vec.append(&mut block.to_bytes()));
         return [self.xt.to_vec(), vec].concat();
     }
 
@@ -65,19 +71,22 @@ where <S as ORECipher>::LeftBlockType: CipherTextBlock
         out.xt.copy_from_slice(&data[0..N]);
         for i in 0..N {
             let block_start_index = N + (i * S::LeftBlockType::BLOCK_SIZE);
-            out.f[i] = S::LeftBlockType::from_bytes(&data[block_start_index..(block_start_index + S::LeftBlockType::BLOCK_SIZE)])?;
+            out.f[i] = S::LeftBlockType::from_bytes(
+                &data[block_start_index..(block_start_index + S::LeftBlockType::BLOCK_SIZE)],
+            )?;
         }
         return Ok(out);
     }
 }
 
 impl<S: ORECipher, const N: usize> Right<S, N>
-where <S as ORECipher>::RightBlockType: CipherTextBlock
+where
+    <S as ORECipher>::RightBlockType: CipherTextBlock,
 {
     pub(crate) fn init() -> Self {
         Self {
             nonce: Default::default(),
-            data: [Default::default(); N]
+            data: [Default::default(); N],
         }
     }
 
@@ -87,7 +96,9 @@ where <S as ORECipher>::RightBlockType: CipherTextBlock
 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut vec = Vec::with_capacity(N * S::RightBlockType::BLOCK_SIZE);
-        self.data.iter().for_each(|&block| vec.append(&mut block.to_bytes()));
+        self.data
+            .iter()
+            .for_each(|&block| vec.append(&mut block.to_bytes()));
         return [self.nonce.to_vec(), vec].concat();
     }
 
@@ -96,15 +107,18 @@ where <S as ORECipher>::RightBlockType: CipherTextBlock
         out.nonce.copy_from_slice(&data[0..NONCE_SIZE]);
         for i in 0..N {
             let block_start_index = NONCE_SIZE + (i * S::RightBlockType::BLOCK_SIZE);
-            out.data[i] = S::RightBlockType::from_bytes(&data[block_start_index..(block_start_index + S::RightBlockType::BLOCK_SIZE)])?;
+            out.data[i] = S::RightBlockType::from_bytes(
+                &data[block_start_index..(block_start_index + S::RightBlockType::BLOCK_SIZE)],
+            )?;
         }
         return Ok(out);
     }
 }
 
-impl <S: ORECipher, const N: usize> CipherText<S, N>
-where <S as ORECipher>::LeftBlockType: CipherTextBlock,
-      <S as ORECipher>::RightBlockType: CipherTextBlock
+impl<S: ORECipher, const N: usize> CipherText<S, N>
+where
+    <S as ORECipher>::LeftBlockType: CipherTextBlock,
+    <S as ORECipher>::RightBlockType: CipherTextBlock,
 {
     pub fn to_bytes(&self) -> Vec<u8> {
         return [self.left.to_bytes(), self.right.to_bytes()].concat();
@@ -118,6 +132,9 @@ where <S as ORECipher>::LeftBlockType: CipherTextBlock,
         let left = Left::<S, N>::from_bytes(&left)?;
         let right = Right::<S, N>::from_bytes(&right)?;
 
-        return Ok(Self { left: left, right: right });
+        return Ok(Self {
+            left: left,
+            right: right,
+        });
     }
 }
