@@ -197,7 +197,7 @@ impl ORECipher for OREAES128 {
 
         // Slices for the PRF ("f") blocks
         let a_f = &a[num_blocks..];
-        let b_f = &a[num_blocks..];
+        let b_f = &b[num_blocks..];
 
         for n in 0..num_blocks {
             if a[n] != b[n] || left_block(a_f, n) != left_block(b_f, n) {
@@ -466,5 +466,37 @@ mod tests {
     fn binary_encoding_invalid_length() {
         let bin = vec![0, 1, 2, 3];
         CipherText::<OREAES128, 8>::from_bytes(&bin).unwrap();
+    }
+
+    #[test]
+    fn test_different_prf_keys() {
+        let k1: [u8; 16] = [97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112];
+        let k2: [u8; 16] = [129, 4, 114, 186, 102, 145, 225, 73, 166, 57, 244, 251, 56, 92, 188, 36];
+        let k3: [u8; 16] = [49, 50, 51, 52, 53, 54, 55, 56, 57, 48, 97, 98, 99, 100, 101, 102];
+        let seed: [u8; 8] = [119, 104, 41, 110, 199, 157, 235, 169];
+
+        let mut ore1: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
+        let mut ore2: OREAES128 = ORECipher::init(k3, k2, &seed).unwrap();
+
+        let a = 1000u32.encrypt(&mut ore1).unwrap().to_bytes();
+        let b = 1000u32.encrypt(&mut ore2).unwrap().to_bytes();
+
+        assert_ne!(Some(Ordering::Equal), OREAES128::compare_raw_slices(&a, &b));
+    }
+
+    #[test]
+    fn test_different_prp_keys() {
+        let k1: [u8; 16] = [97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112];
+        let k2: [u8; 16] = [129, 4, 114, 186, 102, 145, 225, 73, 166, 57, 244, 251, 56, 92, 188, 36];
+        let k3: [u8; 16] = [49, 50, 51, 52, 53, 54, 55, 56, 57, 48, 97, 98, 99, 100, 101, 102];
+        let seed: [u8; 8] = [119, 104, 41, 110, 199, 157, 235, 169];
+
+        let mut ore1: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
+        let mut ore2: OREAES128 = ORECipher::init(k1, k3, &seed).unwrap();
+
+        let a = 1000u32.encrypt(&mut ore1).unwrap().to_bytes();
+        let b = 1000u32.encrypt(&mut ore2).unwrap().to_bytes();
+
+        assert_ne!(Some(Ordering::Equal), OREAES128::compare_raw_slices(&a, &b));
     }
 }
