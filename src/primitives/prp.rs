@@ -1,11 +1,10 @@
-
 pub mod prng;
-use crate::primitives::{PRP, PRPResult, PRPError, SEED64};
 use crate::primitives::prp::prng::AES128PRNG;
+use crate::primitives::{PRPError, PRPResult, PRP, SEED64};
 use std::convert::TryFrom;
 
 pub struct KnuthShufflePRP<T, const N: usize> {
-    permutation: Vec<T>
+    permutation: Vec<T>,
 }
 
 impl PRP<u8> for KnuthShufflePRP<u8, 256> {
@@ -22,7 +21,9 @@ impl PRP<u8> for KnuthShufflePRP<u8, 256> {
             permutation.swap(elem, usize::try_from(j).map_err(|_| PRPError)?);
         }
 
-        return Ok(Self { permutation: permutation });
+        return Ok(Self {
+            permutation: permutation,
+        });
     }
 
     /*
@@ -32,7 +33,8 @@ impl PRP<u8> for KnuthShufflePRP<u8, 256> {
      * Forward permutations are only used once in the ORE scheme so this is OK
      */
     fn permute(&self, input: u8) -> PRPResult<u8> {
-        let u = self.permutation
+        let u = self
+            .permutation
             .iter()
             .position(|&x| x == input)
             .ok_or(PRPError)?;
@@ -48,8 +50,8 @@ impl PRP<u8> for KnuthShufflePRP<u8, 256> {
 
         return match self.permutation.get(index) {
             Some(i) => Ok(*i),
-            None    => Err(PRPError)
-        }
+            None => Err(PRPError),
+        };
     }
 }
 
@@ -75,4 +77,3 @@ mod tests {
         Ok(())
     }
 }
-
