@@ -340,8 +340,6 @@ mod tests {
             let a = x.encrypt(&mut ore).unwrap().to_bytes();
             let b = y.encrypt(&mut ore).unwrap().to_bytes();
 
-            eprintln!("{}, {}, {:?}", x, y, OREAES128::compare_raw_slices(&a, &b));
-
             return match OREAES128::compare_raw_slices(&a, &b) {
                 Some(Ordering::Greater) => x > y,
                 Some(Ordering::Less)    => x < y,
