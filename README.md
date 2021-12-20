@@ -1,18 +1,19 @@
-# ORE
+# ore.rs
+
+_(pronounced "auras")_
 
 [![Test](https://github.com/cipherstash/ore.rs/actions/workflows/test.yml/badge.svg)](https://github.com/cipherstash/ore.rs/actions/workflows/test.yml)
 
-This is an Order Revealing Encryption (ORE) library written in Rust and based on the BlockORE Encryption scheme
+This is an Order Revealing Encryption (ORE) library written in Rust and based on the Block-ORE Encryption scheme
 developed by [Lewi-Wu in 2016](https://eprint.iacr.org/2016/612.pdf).
 
 It makes the following improvements on the original scheme:
 
-* Use of a Knuth (Fisher-Yates) Shuffle for the PRP (instead of a Feistel Network which was found to be insecure for
-  small domains, see [Bogatov et al](https://eprint.iacr.org/2018/953.pdf)
+* Use of a Knuth (Fisher-Yates) Shuffle for the PRP (instead of a Feistel Network which was found to be insecure for small domains (see [Bogatov et al](https://eprint.iacr.org/2018/953.pdf))
 * Exclusive use of AES as a Random Oracle
-* Pipeline optimisations for higher throughput
-* Both SIMD and Neon intrinsic support for `X86_64` and `ARM`
-* Inclusion of the block number in block prefixes to avoid repeated prefixes
+* Pipeline optimisations, for higher throughput
+* Both SIMD and Neon intrinsic support for `x86_64` and `ARM`
+* Inclusion of the block number in block prefixes, to avoid repeated prefixes
 
 ## Usage Documentation
 
@@ -44,8 +45,7 @@ Example benchmark results below:
 
 ## ARMv8 and M1 Support
 
-ARMv8 and M1 Macs work out of the box but will default to AES in software which is around 4x slower than AES-NI
-(at least on the test machine using an Intel i7 8700K).
+ARMv8 and M1 Macs work out of the box but will default to AES in software which is around 4x slower than AES-NI (at least on the test machine using an Intel i7 8700K).
 
 To take advantage of hardware AES using NEON Intrinsics on ARM, you need to use Rust nightly.
 
