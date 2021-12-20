@@ -4,7 +4,7 @@ _(pronounced "auras")_
 
 [![Test](https://github.com/cipherstash/ore.rs/actions/workflows/test.yml/badge.svg)](https://github.com/cipherstash/ore.rs/actions/workflows/test.yml)
 
-This is an Order Revealing Encryption (ORE) library written in Rust and based on the Block ORE Encryption scheme
+This is an Order Revealing Encryption (ORE) library written in Rust and based on the Block-ORE Encryption scheme
 developed by [Lewi-Wu in 2016](https://eprint.iacr.org/2016/612.pdf).
 
 It makes the following improvements on the original scheme:
