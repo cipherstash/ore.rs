@@ -405,6 +405,26 @@ mod tests {
 
             return a == b;
         }
+
+        fn compare_plaintext(x: u64, y: u64) -> bool {
+            let mut ore = init_ore();
+            let a = x.to_be_bytes().encrypt(&mut ore).unwrap();
+            let b = y.to_be_bytes().encrypt(&mut ore).unwrap();
+
+            return match x.cmp(&y) {
+                Ordering::Greater => a > b,
+                Ordering::Less    => a < b,
+                Ordering::Equal   => a == b
+            };
+        }
+
+        fn equality_plaintext(x: f64) -> bool {
+            let mut ore = init_ore();
+            let a = x.to_be_bytes().encrypt(&mut ore).unwrap();
+            let b = x.to_be_bytes().encrypt(&mut ore).unwrap();
+
+            return a == b;
+        }
     }
 
     #[test]
