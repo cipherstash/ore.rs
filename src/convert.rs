@@ -5,7 +5,7 @@
 
   The 64 bit integer that is produced is a plaintext that will be ORE encrypted
   later on.
-  
+
   The mapping is such that the ordering of the floats will be preserved when
   mapped to an unsigned integer, for example, an array of unsigned integers
   dervived from a sorted array of doubles will result in no change to its
@@ -13,7 +13,7 @@
 
   The mapping does not preserve any notion of the previous value after the
   conversion - only ordering is preserved.
-  
+
   Caveat: NaN and -ve & +ve infinity will also be mapped and ordering is not
   well-defined with those values. Those values should be discarded before
   converting arrays of those values.
