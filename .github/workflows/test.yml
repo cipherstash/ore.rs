@@ -39,6 +39,7 @@ jobs:
       - name: "Test"
         run: |
           cargo test
+          cargo clippy -- -D warnings
 
   bench:
     runs-on: ubuntu-latest
