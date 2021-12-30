@@ -24,7 +24,7 @@ impl AES128PRNG {
             seed: *seed,
         };
         prng.generate();
-        return prng;
+        prng
     }
 
     /*
@@ -34,7 +34,7 @@ impl AES128PRNG {
         debug_assert!(self.ptr.0 < 16 && self.ptr.1 < 16);
         let value: u8 = self.data[self.ptr.0][self.ptr.1];
         self.inc_ptr();
-        return value;
+        value
     }
 
     fn generate(&mut self) {

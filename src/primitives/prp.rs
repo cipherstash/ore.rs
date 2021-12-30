@@ -21,9 +21,7 @@ impl PRP<u8> for KnuthShufflePRP<u8, 256> {
             permutation.swap(elem, usize::try_from(j).map_err(|_| PRPError)?);
         }
 
-        return Ok(Self {
-            permutation: permutation,
-        });
+        Ok(Self { permutation })
     }
 
     /*
@@ -39,7 +37,7 @@ impl PRP<u8> for KnuthShufflePRP<u8, 256> {
             .position(|&x| x == input)
             .ok_or(PRPError)?;
 
-        return u8::try_from(u).map_err(|_| PRPError);
+        u8::try_from(u).map_err(|_| PRPError)
     }
 
     /* Performs the inverse permutation. This operation is constant time
@@ -48,10 +46,10 @@ impl PRP<u8> for KnuthShufflePRP<u8, 256> {
     fn invert(&self, input: u8) -> PRPResult<u8> {
         let index = usize::try_from(input).map_err(|_| PRPError)?;
 
-        return match self.permutation.get(index) {
+        match self.permutation.get(index) {
             Some(i) => Ok(*i),
             None => Err(PRPError),
-        };
+        }
     }
 }
 

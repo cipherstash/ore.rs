@@ -10,7 +10,7 @@ impl Hash for AES128Z2Hash {
     fn new(key: &HashKey) -> Self {
         let key_array = GenericArray::from_slice(key);
         let cipher = Aes128::new(&key_array);
-        return Self { cipher };
+        Self { cipher }
     }
 
     fn hash(&self, data: &[u8]) -> u8 {
@@ -26,7 +26,7 @@ impl Hash for AES128Z2Hash {
         output.clone_from_slice(data);
         let mut block = GenericArray::from_mut_slice(&mut output);
         self.cipher.encrypt_block(&mut block);
-        return output[0] & 1u8;
+        output[0] & 1u8
     }
 
     // TODO: this mutates - see how much a copy effects performance (clone_from_slice)
@@ -39,7 +39,7 @@ impl Hash for AES128Z2Hash {
             vec.push(block[0] & 1u8);
         }
 
-        return vec;
+        vec
     }
 }
 

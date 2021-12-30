@@ -63,7 +63,8 @@ where
         self.f
             .iter()
             .for_each(|&block| vec.append(&mut block.to_bytes()));
-        return [self.xt.to_vec(), vec].concat();
+
+        [self.xt.to_vec(), vec].concat()
     }
 
     pub fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
@@ -75,7 +76,8 @@ where
                 &data[block_start_index..(block_start_index + S::LeftBlockType::BLOCK_SIZE)],
             )?;
         }
-        return Ok(out);
+
+        Ok(out)
     }
 }
 
@@ -99,7 +101,8 @@ where
         self.data
             .iter()
             .for_each(|&block| vec.append(&mut block.to_bytes()));
-        return [self.nonce.to_vec(), vec].concat();
+
+        [self.nonce.to_vec(), vec].concat()
     }
 
     pub fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
@@ -111,7 +114,7 @@ where
                 &data[block_start_index..(block_start_index + S::RightBlockType::BLOCK_SIZE)],
             )?;
         }
-        return Ok(out);
+        Ok(out)
     }
 }
 
@@ -121,10 +124,10 @@ where
     <S as ORECipher>::RightBlockType: CipherTextBlock,
 {
     pub fn to_bytes(&self) -> Vec<u8> {
-        return [self.left.to_bytes(), self.right.to_bytes()].concat();
+        [self.left.to_bytes(), self.right.to_bytes()].concat()
     }
 
-    pub fn from_bytes(data: &Vec<u8>) -> Result<Self, ParseError> {
+    pub fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
         if data.len() != (Left::<S, N>::size() + Right::<S, N>::size()) {
             return Err(ParseError);
         }
@@ -132,9 +135,6 @@ where
         let left = Left::<S, N>::from_bytes(&left)?;
         let right = Right::<S, N>::from_bytes(&right)?;
 
-        return Ok(Self {
-            left: left,
-            right: right,
-        });
+        Ok(Self { left, right })
     }
 }
