@@ -15,7 +15,7 @@ impl PRF for AES128PRF {
     fn new(key: &PRFKey) -> Self {
         //let key_array = GenericArray::from_slice(key);
         let cipher = Aes128::new(&key);
-        return Self { cipher };
+        Self { cipher }
     }
 
     fn encrypt_all(&self, data: &mut [AesBlock]) {
