@@ -16,7 +16,7 @@ pub type PRFKey = GenericArray<u8, U16>;
 pub type HashKey = GenericArray<u8, U16>;
 pub const NONCE_SIZE: usize = 16;
 
-pub trait PRF {
+pub trait Prf {
     fn new(key: &PRFKey) -> Self;
     fn encrypt_all(&self, data: &mut [AesBlock]);
 }

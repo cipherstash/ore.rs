@@ -6,7 +6,7 @@ use crate::{
     ciphertext::*,
     primitives::{
         hash::AES128Z2Hash, prf::AES128PRF, prp::KnuthShufflePRP, AesBlock, Hash, HashKey,
-        NONCE_SIZE, PRF, PRP, SEED64,
+        NONCE_SIZE, Prf, PRP, SEED64,
     },
     ORECipher, OREError, PlainText,
 };
@@ -46,8 +46,8 @@ impl ORECipher for OREAES128 {
         // behaviour ro parsing/loading etc
 
         return Ok(OREAES128 {
-            prf1: PRF::new(GenericArray::from_slice(&k1)),
-            prf2: PRF::new(GenericArray::from_slice(&k2)),
+            prf1: Prf::new(GenericArray::from_slice(&k1)),
+            prf2: Prf::new(GenericArray::from_slice(&k2)),
             rng: OsRng::new().map_err(|_| OREError)?,
             prp_seed: *seed,
         });
