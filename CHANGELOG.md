@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 * Copy and Clone trait implementations for CipherText, Left and Right types
-
+* Added encrypt trait for f64 type
+* Added `compare_raw_slices` function
 
 ## [0.1.0]
 
