@@ -13,7 +13,7 @@ impl PRP<u8> for KnuthShufflePRP<u8, 256> {
      * and a 64-bit random seed
      */
     fn new(key: &[u8], seed: &SEED64) -> PRPResult<Self> {
-        let mut prg = AES128PRNG::init(&key, &seed); // TODO: Use Result type here, too
+        let mut prg = AES128PRNG::init(key, seed); // TODO: Use Result type here, too
         let mut permutation: Vec<u8> = (0..=255).collect();
 
         for elem in 0..permutation.len() {
@@ -61,7 +61,7 @@ mod tests {
     fn init_prp() -> PRPResult<KnuthShufflePRP<u8, 256>> {
         let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0eaa");
         let seed: [u8; 8] = hex!("00010203 04050607");
-        return PRP::new(&key, &seed);
+        PRP::new(&key, &seed)
     }
 
     #[test]

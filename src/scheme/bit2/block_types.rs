@@ -7,16 +7,10 @@ pub type LeftBlock16 = AesBlock;
  * Block type for a Right CipherText with 32-bytes per block
  * corresponding to a plaintext block-size of 8-bits and a 2-bit indicator function.
  */
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 pub struct RightBlock32 {
     // TODO: Make this a slice later when the entire right ciphertext is a big array
     data: [u8; 32],
-}
-
-impl Default for RightBlock32 {
-    fn default() -> Self {
-        Self { data: [0; 32] }
-    }
 }
 
 impl RightBlock32 {

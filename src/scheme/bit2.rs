@@ -196,7 +196,7 @@ impl ORECipher for OREAES128 {
 
         let b_right = &b[num_blocks * (left_size + 1)..];
         let hash_key = HashKey::from_slice(&b_right[0..NONCE_SIZE]);
-        let hash: AES128Z2Hash = Hash::new(&hash_key);
+        let hash: AES128Z2Hash = Hash::new(hash_key);
         let h = hash.hash(left_block(a_f, l));
 
         let target_block = right_block(&b_right[NONCE_SIZE..], l);
@@ -299,7 +299,7 @@ mod tests {
         rng.fill_bytes(&mut k1);
         rng.fill_bytes(&mut k2);
 
-        return ORECipher::init(k1, k2, &seed).unwrap();
+        ORECipher::init(k1, k2, &seed).unwrap()
     }
 
     quickcheck! {
@@ -308,11 +308,11 @@ mod tests {
             let a = x.encrypt(&mut ore).unwrap();
             let b = y.encrypt(&mut ore).unwrap();
 
-            return match x.cmp(&y) {
+            match x.cmp(&y) {
                 Ordering::Greater => a > b,
                 Ordering::Less    => a < b,
                 Ordering::Equal   => a == b
-            };
+            }
         }
 
         fn compare_u64_raw_slices(x: u64, y: u64) -> bool {
@@ -320,12 +320,12 @@ mod tests {
             let a = x.encrypt(&mut ore).unwrap().to_bytes();
             let b = y.encrypt(&mut ore).unwrap().to_bytes();
 
-            return match OREAES128::compare_raw_slices(&a, &b) {
+            match OREAES128::compare_raw_slices(&a, &b) {
                 Some(Ordering::Greater) => x > y,
                 Some(Ordering::Less)    => x < y,
                 Some(Ordering::Equal)   => x == y,
                 None                    => false
-            };
+            }
         }
 
         fn equality_u64(x: u64) -> bool {
@@ -333,7 +333,7 @@ mod tests {
             let a = x.encrypt(&mut ore).unwrap();
             let b = x.encrypt(&mut ore).unwrap();
 
-            return a == b;
+            a == b
         }
 
         fn equality_u64_raw_slices(x: u64) -> bool {
@@ -341,7 +341,7 @@ mod tests {
             let a = x.encrypt(&mut ore).unwrap().to_bytes();
             let b = x.encrypt(&mut ore).unwrap().to_bytes();
 
-            return match OREAES128::compare_raw_slices(&a, &b) {
+            match OREAES128::compare_raw_slices(&a, &b) {
                 Some(Ordering::Equal) => true,
                 _ => false
             }
@@ -352,11 +352,11 @@ mod tests {
             let a = x.encrypt(&mut ore).unwrap();
             let b = y.encrypt(&mut ore).unwrap();
 
-            return match x.cmp(&y) {
+            match x.cmp(&y) {
                 Ordering::Greater => a > b,
                 Ordering::Less    => a < b,
                 Ordering::Equal   => a == b
-            };
+            }
         }
 
         fn equality_u32(x: u64) -> bool {
@@ -364,7 +364,7 @@ mod tests {
             let a = x.encrypt(&mut ore).unwrap();
             let b = x.encrypt(&mut ore).unwrap();
 
-            return a == b;
+            a == b
         }
 
         fn compare_f64(x: f64, y: f64) -> TestResult {
@@ -376,12 +376,12 @@ mod tests {
             let a = x.encrypt(&mut ore).unwrap();
             let b = y.encrypt(&mut ore).unwrap();
 
-            return match x.partial_cmp(&y) {
+            match x.partial_cmp(&y) {
                 Some(Ordering::Greater) => TestResult::from_bool(a > b),
                 Some(Ordering::Less)    => TestResult::from_bool(a < b),
                 Some(Ordering::Equal)   => TestResult::from_bool(a == b),
                 None                    => TestResult::failed()
-            };
+            }
         }
 
         /*
@@ -393,7 +393,7 @@ mod tests {
             let a = x.encrypt(&mut ore).unwrap();
             let b = x.encrypt(&mut ore).unwrap();
 
-            return a == b;
+            a == b
         }
 
         fn compare_plaintext(x: u64, y: u64) -> bool {
@@ -401,11 +401,11 @@ mod tests {
             let a = x.to_be_bytes().encrypt(&mut ore).unwrap();
             let b = y.to_be_bytes().encrypt(&mut ore).unwrap();
 
-            return match x.cmp(&y) {
+            match x.cmp(&y) {
                 Ordering::Greater => a > b,
                 Ordering::Less    => a < b,
                 Ordering::Equal   => a == b
-            };
+            }
         }
 
         fn equality_plaintext(x: f64) -> bool {
@@ -413,7 +413,7 @@ mod tests {
             let a = x.to_be_bytes().encrypt(&mut ore).unwrap();
             let b = x.to_be_bytes().encrypt(&mut ore).unwrap();
 
-            return a == b;
+            a == b
         }
     }
 
