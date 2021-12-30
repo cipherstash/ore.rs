@@ -9,8 +9,8 @@ pub struct AES128Z2Hash {
 impl Hash for AES128Z2Hash {
     fn new(key: &HashKey) -> Self {
         let key_array = GenericArray::from_slice(key);
-        let cipher = Aes128::new(&key_array);
-        return Self { cipher };
+        let cipher = Aes128::new(key_array);
+        Self { cipher }
     }
 
     fn hash(&self, data: &[u8]) -> u8 {
@@ -24,9 +24,9 @@ impl Hash for AES128Z2Hash {
         // Can we clone into GenericArray directly? Are we doing an extra copy?
         let mut output = [0u8; 16];
         output.clone_from_slice(data);
-        let mut block = GenericArray::from_mut_slice(&mut output);
-        self.cipher.encrypt_block(&mut block);
-        return output[0] & 1u8;
+        let block = GenericArray::from_mut_slice(&mut output);
+        self.cipher.encrypt_block(block);
+        output[0] & 1u8
     }
 
     // TODO: this mutates - see how much a copy effects performance (clone_from_slice)
@@ -39,7 +39,7 @@ impl Hash for AES128Z2Hash {
             vec.push(block[0] & 1u8);
         }
 
-        return vec;
+        vec
     }
 }
 
@@ -51,7 +51,7 @@ mod tests {
     fn init_hash() -> AES128Z2Hash {
         let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
         let key_array = GenericArray::from_slice(&key);
-        return Hash::new(&key_array);
+        Hash::new(key_array)
     }
 
     #[test]

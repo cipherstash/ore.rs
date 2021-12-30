@@ -5,8 +5,8 @@
 use crate::{
     ciphertext::*,
     primitives::{
-        hash::AES128Z2Hash, prf::AES128PRF, prp::KnuthShufflePRP, AesBlock, Hash, HashKey,
-        NONCE_SIZE, PRF, PRP, SEED64,
+        hash::AES128Z2Hash, prf::AES128PRF, prp::KnuthShufflePRP, AesBlock, Hash, HashKey, Prf,
+        Prp, NONCE_SIZE, SEED64,
     },
     ORECipher, OREError, PlainText,
 };
@@ -35,9 +35,9 @@ type EncryptResult<const N: usize> = Result<CipherText<OREAES128, N>, OREError>;
 
 fn cmp(a: u8, b: u8) -> u8 {
     if a > b {
-        return 1u8;
+        1u8
     } else {
-        return 0u8;
+        0u8
     }
 }
 
@@ -50,8 +50,8 @@ impl ORECipher for OREAES128 {
         // behaviour ro parsing/loading etc
 
         return Ok(OREAES128 {
-            prf1: PRF::new(GenericArray::from_slice(&k1)),
-            prf2: PRF::new(GenericArray::from_slice(&k2)),
+            prf1: Prf::new(GenericArray::from_slice(&k1)),
+            prf2: Prf::new(GenericArray::from_slice(&k2)),
             rng: OsRng::new().map_err(|_| OREError)?,
             prp_seed: *seed,
         });
@@ -72,11 +72,12 @@ impl ORECipher for OREAES128 {
 
         self.prf2.encrypt_all(&mut output.f);
 
-        for n in 0..N {
+        for (n, xn) in x.iter().enumerate().take(N) {
             // Set prefix and create PRP for the block
             let prp: KnuthShufflePRP<u8, 256> =
-                PRP::new(&output.f[n], &self.prp_seed).map_err(|_| OREError)?;
-            output.xt[n] = prp.permute(x[n]).map_err(|_| OREError)?;
+                Prp::new(&output.f[n], &self.prp_seed).map_err(|_| OREError)?;
+
+            output.xt[n] = prp.permute(*xn).map_err(|_| OREError)?;
         }
 
         // Reset the f block
@@ -93,7 +94,7 @@ impl ORECipher for OREAES128 {
         }
         self.prf1.encrypt_all(&mut output.f);
 
-        return Ok(output);
+        Ok(output)
     }
 
     fn encrypt<const N: usize>(&mut self, x: &PlainText<N>) -> EncryptResult<N> {
@@ -114,7 +115,8 @@ impl ORECipher for OREAES128 {
         for n in 0..N {
             // Set prefix and create PRP for the block
             let prp: KnuthShufflePRP<u8, 256> =
-                PRP::new(&left.f[n], &self.prp_seed).map_err(|_| OREError)?;
+                Prp::new(&left.f[n], &self.prp_seed).map_err(|_| OREError)?;
+
             left.xt[n] = prp.permute(x[n]).map_err(|_| OREError)?;
 
             // Reset the f block
@@ -128,13 +130,13 @@ impl ORECipher for OREAES128 {
 
             let mut ro_keys: [AesBlock; 256] = [Default::default(); 256];
 
-            for j in 0..=255 {
+            for (j, ro_key) in ro_keys.iter_mut().enumerate() {
                 /*
                  * The output of F in H(F(k1, y|i-1||j), r)
                  */
-                ro_keys[j][0..n].clone_from_slice(&x[0..n]);
-                ro_keys[j][n] = j as u8;
-                ro_keys[j][N] = n as u8;
+                ro_key[0..n].clone_from_slice(&x[0..n]);
+                ro_key[n] = j as u8;
+                ro_key[N] = n as u8;
             }
 
             self.prf1.encrypt_all(&mut ro_keys);
@@ -165,10 +167,7 @@ impl ORECipher for OREAES128 {
         // TODO: Do we need to do any zeroing? See https://lib.rs/crates/zeroize
         // Zeroize the RO Keys before re-assigning them
 
-        return Ok(CipherText {
-            left: left,
-            right: right,
-        });
+        Ok(CipherText { left, right })
     }
 
     fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering> {
@@ -203,7 +202,7 @@ impl ORECipher for OREAES128 {
 
         let b_right = &b[num_blocks * (left_size + 1)..];
         let hash_key = HashKey::from_slice(&b_right[0..NONCE_SIZE]);
-        let hash: AES128Z2Hash = Hash::new(&hash_key);
+        let hash: AES128Z2Hash = Hash::new(hash_key);
         let h = hash.hash(left_block(a_f, l));
 
         let target_block = right_block(&b_right[NONCE_SIZE..], l);
@@ -213,7 +212,7 @@ impl ORECipher for OREAES128 {
             return Some(Ordering::Greater);
         }
 
-        return Some(Ordering::Less);
+        Some(Ordering::Less)
     }
 }
 
@@ -221,13 +220,13 @@ impl ORECipher for OREAES128 {
 #[inline]
 fn left_block(input: &[u8], n: usize) -> &[u8] {
     let f_pos = n * LeftBlock16::BLOCK_SIZE;
-    return &input[f_pos..(f_pos + LeftBlock16::BLOCK_SIZE)];
+    &input[f_pos..(f_pos + LeftBlock16::BLOCK_SIZE)]
 }
 
 #[inline]
 fn right_block(input: &[u8], n: usize) -> &[u8] {
     let f_pos = n * RightBlock32::BLOCK_SIZE;
-    return &input[f_pos..(f_pos + RightBlock32::BLOCK_SIZE)];
+    &input[f_pos..(f_pos + RightBlock32::BLOCK_SIZE)]
 }
 
 #[inline]
@@ -238,15 +237,12 @@ fn get_bit(block: &[u8], bit: usize) -> u8 {
     let position = bit % 8;
     let v = 1 << position;
 
-    return (block[byte_index] & v) >> position;
+    (block[byte_index] & v) >> position
 }
 
 impl<const N: usize> PartialEq for CipherText<OREAES128, N> {
     fn eq(&self, b: &Self) -> bool {
-        return match self.cmp(b) {
-            Ordering::Equal => true,
-            _ => false,
-        };
+        matches!(self.cmp(b), Ordering::Equal)
     }
 }
 
@@ -256,7 +252,7 @@ impl<const N: usize> Ord for CipherText<OREAES128, N> {
         let mut l = 0; // Unequal block
 
         for n in 0..N {
-            if &self.left.xt[n] != &b.left.xt[n] || &self.left.f[n] != &b.left.f[n] {
+            if self.left.xt[n] != b.left.xt[n] || self.left.f[n] != b.left.f[n] {
                 is_equal = false;
                 l = n;
                 // TODO: Make sure that this is constant time (i.e. don't break)
@@ -276,7 +272,7 @@ impl<const N: usize> Ord for CipherText<OREAES128, N> {
             return Ordering::Greater;
         }
 
-        return Ordering::Less;
+        Ordering::Less
     }
 }
 
@@ -309,7 +305,7 @@ mod tests {
         rng.fill_bytes(&mut k1);
         rng.fill_bytes(&mut k2);
 
-        return ORECipher::init(k1, k2, &seed).unwrap();
+        ORECipher::init(k1, k2, &seed).unwrap()
     }
 
     quickcheck! {
@@ -318,11 +314,11 @@ mod tests {
             let a = x.encrypt(&mut ore).unwrap();
             let b = y.encrypt(&mut ore).unwrap();
 
-            return match x.cmp(&y) {
+            match x.cmp(&y) {
                 Ordering::Greater => a > b,
                 Ordering::Less    => a < b,
                 Ordering::Equal   => a == b
-            };
+            }
         }
 
         fn compare_u64_raw_slices(x: u64, y: u64) -> bool {
@@ -330,12 +326,12 @@ mod tests {
             let a = x.encrypt(&mut ore).unwrap().to_bytes();
             let b = y.encrypt(&mut ore).unwrap().to_bytes();
 
-            return match OREAES128::compare_raw_slices(&a, &b) {
+            match OREAES128::compare_raw_slices(&a, &b) {
                 Some(Ordering::Greater) => x > y,
                 Some(Ordering::Less)    => x < y,
                 Some(Ordering::Equal)   => x == y,
                 None                    => false
-            };
+            }
         }
 
         fn equality_u64(x: u64) -> bool {
@@ -343,7 +339,7 @@ mod tests {
             let a = x.encrypt(&mut ore).unwrap();
             let b = x.encrypt(&mut ore).unwrap();
 
-            return a == b;
+            a == b
         }
 
         fn equality_u64_raw_slices(x: u64) -> bool {
@@ -351,7 +347,7 @@ mod tests {
             let a = x.encrypt(&mut ore).unwrap().to_bytes();
             let b = x.encrypt(&mut ore).unwrap().to_bytes();
 
-            return match OREAES128::compare_raw_slices(&a, &b) {
+            match OREAES128::compare_raw_slices(&a, &b) {
                 Some(Ordering::Equal) => true,
                 _ => false
             }
@@ -362,11 +358,11 @@ mod tests {
             let a = x.encrypt(&mut ore).unwrap();
             let b = y.encrypt(&mut ore).unwrap();
 
-            return match x.cmp(&y) {
+            match x.cmp(&y) {
                 Ordering::Greater => a > b,
                 Ordering::Less    => a < b,
                 Ordering::Equal   => a == b
-            };
+            }
         }
 
         fn equality_u32(x: u64) -> bool {
@@ -374,7 +370,7 @@ mod tests {
             let a = x.encrypt(&mut ore).unwrap();
             let b = x.encrypt(&mut ore).unwrap();
 
-            return a == b;
+            a == b
         }
 
         fn compare_f64(x: f64, y: f64) -> TestResult {
@@ -386,12 +382,12 @@ mod tests {
             let a = x.encrypt(&mut ore).unwrap();
             let b = y.encrypt(&mut ore).unwrap();
 
-            return match x.partial_cmp(&y) {
+            match x.partial_cmp(&y) {
                 Some(Ordering::Greater) => TestResult::from_bool(a > b),
                 Some(Ordering::Less)    => TestResult::from_bool(a < b),
                 Some(Ordering::Equal)   => TestResult::from_bool(a == b),
                 None                    => TestResult::failed()
-            };
+            }
         }
 
         /*
@@ -403,7 +399,7 @@ mod tests {
             let a = x.encrypt(&mut ore).unwrap();
             let b = x.encrypt(&mut ore).unwrap();
 
-            return a == b;
+            a == b
         }
 
         fn compare_plaintext(x: u64, y: u64) -> bool {
@@ -411,11 +407,11 @@ mod tests {
             let a = x.to_be_bytes().encrypt(&mut ore).unwrap();
             let b = y.to_be_bytes().encrypt(&mut ore).unwrap();
 
-            return match x.cmp(&y) {
+            match x.cmp(&y) {
                 Ordering::Greater => a > b,
                 Ordering::Less    => a < b,
                 Ordering::Equal   => a == b
-            };
+            }
         }
 
         fn equality_plaintext(x: f64) -> bool {
@@ -423,7 +419,7 @@ mod tests {
             let a = x.to_be_bytes().encrypt(&mut ore).unwrap();
             let b = x.to_be_bytes().encrypt(&mut ore).unwrap();
 
-            return a == b;
+            a == b
         }
     }
 
