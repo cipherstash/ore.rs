@@ -5,7 +5,7 @@
 
   The 64 bit integer that is produced is a plaintext that will be ORE encrypted
   later on.
-  
+
   The mapping is such that the ordering of the floats will be preserved when
   mapped to an unsigned integer, for example, an array of unsigned integers
   dervived from a sorted array of doubles will result in no change to its
@@ -13,7 +13,7 @@
 
   The mapping does not preserve any notion of the previous value after the
   conversion - only ordering is preserved.
-  
+
   Caveat: NaN and -ve & +ve infinity will also be mapped and ordering is not
   well-defined with those values. Those values should be discarded before
   converting arrays of those values.
@@ -38,7 +38,7 @@ impl ToOrderedInteger<u64> for f64 {
         let signed: i64 = -(unsafe { mem::transmute(num >> 63) });
         let mut mask: u64 = unsafe { mem::transmute(signed) };
         mask |= 0x8000000000000000;
-        return num ^ mask;
+        num ^ mask
     }
 }
 
@@ -46,7 +46,7 @@ impl FromOrderedInteger<u64> for f64 {
     fn map_from(input: u64) -> f64 {
         let i = (((input >> 63) as i64) - 1) as u64;
         let mask: u64 = i | 0x8000000000000000;
-        return f64::from_bits(input ^ mask);
+        f64::from_bits(input ^ mask)
     }
 }
 
@@ -58,9 +58,9 @@ mod tests {
     quickcheck! {
         fn roundtrip(x: f64) -> TestResult {
             if !x.is_nan() && x.is_finite() {
-                return TestResult::from_bool(x == f64::map_from(x.map_to()));
+                TestResult::from_bool(x == f64::map_from(x.map_to()))
             } else {
-                return TestResult::discard();
+                TestResult::discard()
             }
         }
     }

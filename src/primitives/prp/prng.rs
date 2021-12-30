@@ -16,7 +16,7 @@ pub struct AES128PRNG {
 impl AES128PRNG {
     pub fn init(key: &[u8], seed: &SEED64) -> Self {
         let key_array = GenericArray::from_slice(key);
-        let cipher = Aes128::new(&key_array);
+        let cipher = Aes128::new(key_array);
         let mut prng = Self {
             cipher,
             data: Default::default(),
@@ -24,7 +24,7 @@ impl AES128PRNG {
             seed: *seed,
         };
         prng.generate();
-        return prng;
+        prng
     }
 
     /*
@@ -34,7 +34,7 @@ impl AES128PRNG {
         debug_assert!(self.ptr.0 < 16 && self.ptr.1 < 16);
         let value: u8 = self.data[self.ptr.0][self.ptr.1];
         self.inc_ptr();
-        return value;
+        value
     }
 
     fn generate(&mut self) {
@@ -75,7 +75,7 @@ mod tests {
         let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
         let seed: SEED64 = hex!("00010203 04050607");
 
-        return AES128PRNG::init(&key, &seed);
+        AES128PRNG::init(&key, &seed)
     }
 
     #[test]
