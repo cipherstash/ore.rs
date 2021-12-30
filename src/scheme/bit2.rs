@@ -6,7 +6,7 @@ use crate::{
     ciphertext::*,
     primitives::{
         hash::AES128Z2Hash, prf::AES128PRF, prp::KnuthShufflePRP, AesBlock, Hash, HashKey,
-        NONCE_SIZE, Prf, PRP, SEED64,
+        NONCE_SIZE, Prf, Prp, SEED64,
     },
     ORECipher, OREError, PlainText,
 };
@@ -71,7 +71,8 @@ impl ORECipher for OREAES128 {
         for (n, xn) in x.iter().enumerate().take(N) {
             // Set prefix and create PRP for the block
             let prp: KnuthShufflePRP<u8, 256> =
-                PRP::new(&output.f[n], &self.prp_seed).map_err(|_| OREError)?;
+                Prp::new(&output.f[n], &self.prp_seed).map_err(|_| OREError)?;
+
             output.xt[n] = prp.permute(*xn).map_err(|_| OREError)?;
         }
 
@@ -110,7 +111,8 @@ impl ORECipher for OREAES128 {
         for n in 0..N {
             // Set prefix and create PRP for the block
             let prp: KnuthShufflePRP<u8, 256> =
-                PRP::new(&left.f[n], &self.prp_seed).map_err(|_| OREError)?;
+                Prp::new(&left.f[n], &self.prp_seed).map_err(|_| OREError)?;
+
             left.xt[n] = prp.permute(x[n]).map_err(|_| OREError)?;
 
             // Reset the f block

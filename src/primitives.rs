@@ -31,7 +31,7 @@ pub trait Hash {
 pub struct PRPError;
 pub type PRPResult<T> = Result<T, PRPError>;
 
-pub trait PRP<T>: Sized {
+pub trait Prp<T>: Sized {
     fn new(key: &[u8], seed: &SEED64) -> PRPResult<Self>;
     fn permute(&self, data: T) -> PRPResult<T>;
     fn invert(&self, data: T) -> PRPResult<T>;
