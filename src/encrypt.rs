@@ -29,7 +29,7 @@ where
         T::LeftBlockType: CipherTextBlock,
     {
         let bytes = self.to_be_bytes();
-        return cipher.encrypt_left(&bytes);
+        cipher.encrypt_left(&bytes)
     }
 
     fn encrypt(&self, cipher: &mut T) -> Result<Self::FullOutput, OREError>
@@ -38,7 +38,7 @@ where
         T::RightBlockType: CipherTextBlock,
     {
         let bytes = self.to_be_bytes();
-        return cipher.encrypt(&bytes);
+        cipher.encrypt(&bytes)
     }
 }
 
@@ -52,12 +52,12 @@ where
 
     fn encrypt_left(&self, cipher: &mut T) -> Result<Self::LeftOutput, OREError> {
         let bytes = self.to_be_bytes();
-        return cipher.encrypt_left(&bytes);
+        cipher.encrypt_left(&bytes)
     }
 
     fn encrypt(&self, cipher: &mut T) -> Result<Self::FullOutput, OREError> {
         let bytes = self.to_be_bytes();
-        return cipher.encrypt(&bytes);
+        cipher.encrypt(&bytes)
     }
 }
 
@@ -71,12 +71,12 @@ where
 
     fn encrypt_left(&self, cipher: &mut T) -> Result<Self::LeftOutput, OREError> {
         let plaintext: u64 = self.map_to();
-        return plaintext.encrypt_left(cipher);
+        plaintext.encrypt_left(cipher)
     }
 
     fn encrypt(&self, cipher: &mut T) -> Result<Self::FullOutput, OREError> {
         let plaintext: u64 = self.map_to();
-        return plaintext.encrypt(cipher);
+        plaintext.encrypt(cipher)
     }
 }
 
@@ -89,10 +89,10 @@ where
     type FullOutput = CipherText<T, N>;
 
     fn encrypt_left(&self, cipher: &mut T) -> Result<Self::LeftOutput, OREError> {
-        return cipher.encrypt_left(&self);
+        cipher.encrypt_left(&self)
     }
 
     fn encrypt(&self, cipher: &mut T) -> Result<Self::FullOutput, OREError> {
-        return cipher.encrypt(&self);
+        cipher.encrypt(&self)
     }
 }

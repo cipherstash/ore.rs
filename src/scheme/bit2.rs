@@ -34,11 +34,7 @@ type EncryptLeftResult<const N: usize> = Result<Left<OREAES128, N>, OREError>;
 type EncryptResult<const N: usize> = Result<CipherText<OREAES128, N>, OREError>;
 
 fn cmp(a: u8, b: u8) -> u8 {
-    if a > b {
-        return 1u8;
-    } else {
-        return 0u8;
-    }
+    if a > b { 1u8 } else { 0u8 }
 }
 
 impl ORECipher for OREAES128 {
@@ -72,11 +68,11 @@ impl ORECipher for OREAES128 {
 
         self.prf2.encrypt_all(&mut output.f);
 
-        for n in 0..N {
+        for (n, xn) in x.iter().enumerate().take(N) {
             // Set prefix and create PRP for the block
             let prp: KnuthShufflePRP<u8, 256> =
                 PRP::new(&output.f[n], &self.prp_seed).map_err(|_| OREError)?;
-            output.xt[n] = prp.permute(x[n]).map_err(|_| OREError)?;
+            output.xt[n] = prp.permute(*xn).map_err(|_| OREError)?;
         }
 
         // Reset the f block
@@ -93,7 +89,7 @@ impl ORECipher for OREAES128 {
         }
         self.prf1.encrypt_all(&mut output.f);
 
-        return Ok(output);
+        Ok(output)
     }
 
     fn encrypt<const N: usize>(&mut self, x: &PlainText<N>) -> EncryptResult<N> {
@@ -128,13 +124,13 @@ impl ORECipher for OREAES128 {
 
             let mut ro_keys: [AesBlock; 256] = [Default::default(); 256];
 
-            for j in 0..=255 {
+            for (j, ro_key) in ro_keys.iter_mut().enumerate() {
                 /*
                  * The output of F in H(F(k1, y|i-1||j), r)
                  */
-                ro_keys[j][0..n].clone_from_slice(&x[0..n]);
-                ro_keys[j][n] = j as u8;
-                ro_keys[j][N] = n as u8;
+                ro_key[0..n].clone_from_slice(&x[0..n]);
+                ro_key[n] = j as u8;
+                ro_key[N] = n as u8;
             }
 
             self.prf1.encrypt_all(&mut ro_keys);
@@ -165,10 +161,7 @@ impl ORECipher for OREAES128 {
         // TODO: Do we need to do any zeroing? See https://lib.rs/crates/zeroize
         // Zeroize the RO Keys before re-assigning them
 
-        return Ok(CipherText {
-            left: left,
-            right: right,
-        });
+        Ok(CipherText { left, right })
     }
 
     fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering> {
@@ -213,7 +206,7 @@ impl ORECipher for OREAES128 {
             return Some(Ordering::Greater);
         }
 
-        return Some(Ordering::Less);
+        Some(Ordering::Less)
     }
 }
 
@@ -221,13 +214,13 @@ impl ORECipher for OREAES128 {
 #[inline]
 fn left_block(input: &[u8], n: usize) -> &[u8] {
     let f_pos = n * LeftBlock16::BLOCK_SIZE;
-    return &input[f_pos..(f_pos + LeftBlock16::BLOCK_SIZE)];
+    &input[f_pos..(f_pos + LeftBlock16::BLOCK_SIZE)]
 }
 
 #[inline]
 fn right_block(input: &[u8], n: usize) -> &[u8] {
     let f_pos = n * RightBlock32::BLOCK_SIZE;
-    return &input[f_pos..(f_pos + RightBlock32::BLOCK_SIZE)];
+    &input[f_pos..(f_pos + RightBlock32::BLOCK_SIZE)]
 }
 
 #[inline]
@@ -238,15 +231,12 @@ fn get_bit(block: &[u8], bit: usize) -> u8 {
     let position = bit % 8;
     let v = 1 << position;
 
-    return (block[byte_index] & v) >> position;
+    (block[byte_index] & v) >> position
 }
 
 impl<const N: usize> PartialEq for CipherText<OREAES128, N> {
     fn eq(&self, b: &Self) -> bool {
-        return match self.cmp(b) {
-            Ordering::Equal => true,
-            _ => false,
-        };
+        matches!(self.cmp(b), Ordering::Equal)
     }
 }
 
@@ -256,7 +246,7 @@ impl<const N: usize> Ord for CipherText<OREAES128, N> {
         let mut l = 0; // Unequal block
 
         for n in 0..N {
-            if &self.left.xt[n] != &b.left.xt[n] || &self.left.f[n] != &b.left.f[n] {
+            if self.left.xt[n] != b.left.xt[n] || self.left.f[n] != b.left.f[n] {
                 is_equal = false;
                 l = n;
                 // TODO: Make sure that this is constant time (i.e. don't break)
@@ -276,7 +266,7 @@ impl<const N: usize> Ord for CipherText<OREAES128, N> {
             return Ordering::Greater;
         }
 
-        return Ordering::Less;
+        Ordering::Less
     }
 }
 
