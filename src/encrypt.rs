@@ -1,5 +1,6 @@
 use crate::ciphertext::*;
 use crate::{ORECipher, OREError};
+use crate::convert::ToOrderedInteger;
 
 pub trait OREEncrypt<T: ORECipher> {
     type LeftOutput;
@@ -56,5 +57,24 @@ where
     fn encrypt(&self, cipher: &mut T) -> Result<Self::FullOutput, OREError> {
         let bytes = self.to_be_bytes();
         return cipher.encrypt(&bytes);
+    }
+}
+
+impl<T: ORECipher> OREEncrypt<T> for f64
+where
+    <T as ORECipher>::LeftBlockType: CipherTextBlock,
+    <T as ORECipher>::RightBlockType: CipherTextBlock,
+{
+    type LeftOutput = Left<T, 8>;
+    type FullOutput = CipherText<T, 8>;
+
+    fn encrypt_left(&self, cipher: &mut T) -> Result<Self::LeftOutput, OREError> {
+        let plaintext: u64 = self.map_to();
+        return plaintext.encrypt_left(cipher);
+    }
+
+    fn encrypt(&self, cipher: &mut T) -> Result<Self::FullOutput, OREError> {
+        let plaintext: u64 = self.map_to();
+        return plaintext.encrypt(cipher);
     }
 }

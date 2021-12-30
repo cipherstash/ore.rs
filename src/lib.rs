@@ -140,6 +140,7 @@
 mod ciphertext;
 mod encrypt;
 mod primitives;
+mod convert;
 pub mod scheme;
 
 pub use crate::ciphertext::*;
