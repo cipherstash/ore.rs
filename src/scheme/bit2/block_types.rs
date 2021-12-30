@@ -7,16 +7,10 @@ pub type LeftBlock16 = AesBlock;
  * Block type for a Right CipherText with 32-bytes per block
  * corresponding to a plaintext block-size of 8-bits and a 2-bit indicator function.
  */
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 pub struct RightBlock32 {
     // TODO: Make this a slice later when the entire right ciphertext is a big array
     data: [u8; 32],
-}
-
-impl Default for RightBlock32 {
-    fn default() -> Self {
-        Self { data: [0; 32] }
-    }
 }
 
 impl RightBlock32 {
@@ -36,7 +30,7 @@ impl RightBlock32 {
         let position = bit % 8;
         let v = 1 << position;
 
-        return (self.data[byte_index] & v) >> position;
+        (self.data[byte_index] & v) >> position
     }
 }
 
@@ -44,14 +38,14 @@ impl CipherTextBlock for LeftBlock16 {
     const BLOCK_SIZE: usize = 16;
 
     fn to_bytes(self) -> Vec<u8> {
-        return self.to_vec();
+        self.to_vec()
     }
 
     fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
         if data.len() != Self::BLOCK_SIZE {
-            return Err(ParseError);
+            Err(ParseError)
         } else {
-            return Ok(Self::clone_from_slice(data));
+            Ok(Self::clone_from_slice(data))
         }
     }
 }
@@ -66,12 +60,12 @@ impl CipherTextBlock for RightBlock32 {
 
     fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
         if data.len() != Self::BLOCK_SIZE {
-            return Err(ParseError);
+            Err(ParseError)
         } else {
             let mut arr = [0; 32];
             arr.clone_from_slice(data);
 
-            return Ok(Self { data: arr });
+            Ok(Self { data: arr })
         }
     }
 }
