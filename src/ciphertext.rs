@@ -132,8 +132,8 @@ where
             return Err(ParseError);
         }
         let (left, right) = data.split_at(Left::<S, N>::size());
-        let left = Left::<S, N>::from_bytes(&left)?;
-        let right = Right::<S, N>::from_bytes(&right)?;
+        let left = Left::<S, N>::from_bytes(left)?;
+        let right = Right::<S, N>::from_bytes(right)?;
 
         Ok(Self { left, right })
     }

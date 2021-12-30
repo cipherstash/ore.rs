@@ -89,10 +89,10 @@ where
     type FullOutput = CipherText<T, N>;
 
     fn encrypt_left(&self, cipher: &mut T) -> Result<Self::LeftOutput, OREError> {
-        cipher.encrypt_left(&self)
+        cipher.encrypt_left(self)
     }
 
     fn encrypt(&self, cipher: &mut T) -> Result<Self::FullOutput, OREError> {
-        cipher.encrypt(&self)
+        cipher.encrypt(self)
     }
 }
