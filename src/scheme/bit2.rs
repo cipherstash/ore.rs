@@ -5,8 +5,8 @@
 use crate::{
     ciphertext::*,
     primitives::{
-        hash::AES128Z2Hash, prf::AES128PRF, prp::KnuthShufflePRP, AesBlock, Hash, HashKey,
-        NONCE_SIZE, Prf, Prp, SEED64,
+        hash::AES128Z2Hash, prf::AES128PRF, prp::KnuthShufflePRP, AesBlock, Hash, HashKey, Prf,
+        Prp, NONCE_SIZE, SEED64,
     },
     ORECipher, OREError, PlainText,
 };
@@ -34,7 +34,11 @@ type EncryptLeftResult<const N: usize> = Result<Left<OREAES128, N>, OREError>;
 type EncryptResult<const N: usize> = Result<CipherText<OREAES128, N>, OREError>;
 
 fn cmp(a: u8, b: u8) -> u8 {
-    if a > b { 1u8 } else { 0u8 }
+    if a > b {
+        1u8
+    } else {
+        0u8
+    }
 }
 
 impl ORECipher for OREAES128 {
