@@ -1,4 +1,4 @@
-use crate::ciphertext::{CipherTextBlock, ParseError};
+use crate::ciphertext::{ParseError};
 use crate::primitives::AesBlock;
 
 pub type LeftBlock16 = AesBlock;
@@ -31,42 +31,6 @@ impl RightBlock32 {
         let v = 1 << position;
 
         (self.data[byte_index] & v) >> position
-    }
-}
-
-impl CipherTextBlock for LeftBlock16 {
-    const BLOCK_SIZE: usize = 16;
-
-    fn to_bytes(self) -> Vec<u8> {
-        self.to_vec()
-    }
-
-    fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
-        if data.len() != Self::BLOCK_SIZE {
-            Err(ParseError)
-        } else {
-            Ok(Self::clone_from_slice(data))
-        }
-    }
-}
-
-impl CipherTextBlock for RightBlock32 {
-    const BLOCK_SIZE: usize = 32;
-
-    // TODO: Just return a slice so we can just return data directly!
-    fn to_bytes(self) -> Vec<u8> {
-        self.data.to_vec()
-    }
-
-    fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
-        if data.len() != Self::BLOCK_SIZE {
-            Err(ParseError)
-        } else {
-            let mut arr = [0; 32];
-            arr.clone_from_slice(data);
-
-            Ok(Self { data: arr })
-        }
     }
 }
 

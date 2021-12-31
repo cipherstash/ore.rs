@@ -18,13 +18,13 @@ pub const NONCE_SIZE: usize = 16;
 
 pub trait Prf {
     fn new(key: &PRFKey) -> Self;
-    fn encrypt_all(&self, data: &mut [AesBlock]);
+    fn encrypt_all(&self, data: &mut [u8]);
 }
 
 pub trait Hash {
     fn new(key: &HashKey) -> Self;
     fn hash(&self, data: &[u8]) -> u8;
-    fn hash_all(&self, input: &mut [AesBlock]) -> Vec<u8>;
+    fn hash_all(&self, data: &mut [u8]) -> Vec<u8>;
 }
 
 #[derive(Debug, Clone)]

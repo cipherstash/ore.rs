@@ -1,6 +1,11 @@
 use crate::primitives::{AesBlock, Hash, HashKey};
-use aes::cipher::{generic_array::GenericArray, BlockEncrypt, NewBlockCipher};
 use aes::Aes128;
+use aes::cipher::{
+    BlockEncrypt, NewBlockCipher, BlockCipher,
+    generic_array::{GenericArray, ArrayLength},
+};
+
+type BlockSize = <Aes128 as BlockCipher>::BlockSize;
 
 pub struct AES128Z2Hash {
     cipher: Aes128,
@@ -29,17 +34,32 @@ impl Hash for AES128Z2Hash {
         output[0] & 1u8
     }
 
-    // TODO: this mutates - see how much a copy effects performance (clone_from_slice)
-    fn hash_all(&self, data: &mut [AesBlock]) -> Vec<u8> {
-        self.cipher.encrypt_blocks(data);
-
+    fn hash_all(&self, data: &mut [u8]) -> Vec<u8> {
         let mut vec = Vec::with_capacity(data.len());
-        for &mut block in data {
+        let mut blocks = to_blocks::<BlockSize>(&mut data[..]);
+        self.cipher.encrypt_blocks(blocks);
+
+        // TODO: Use a mapping iterator?
+        for &mut block in blocks {
             // Output is Z2 (1-bit)
             vec.push(block[0] & 1u8);
         }
 
         vec
+    }
+}
+
+fn to_blocks<N>(data: &mut [u8]) -> &mut [GenericArray<u8, N>]
+where
+    N: ArrayLength<u8>,
+{
+    use core::slice;
+    let n = N::to_usize();
+    debug_assert!(data.len() % n == 0);
+
+    #[allow(unsafe_code)]
+    unsafe {
+        slice::from_raw_parts_mut(data.as_ptr() as *mut GenericArray<u8, N>, data.len() / n)
     }
 }
 
