@@ -45,7 +45,7 @@ pub trait RightCipherText {
     fn num_blocks(&self) -> usize;
     fn block(&self, index: usize) -> &[u8];
     // TODO: Is this needed?
-    fn block_mut(&mut self, index: usize) -> &mut [u8];
+    //fn block_mut(&mut self, index: usize) -> &mut [u8];
 
     /* Set's the jth bit (or trit) of the nth block to value */
     fn set_n_bit(&mut self, index: usize, j: usize, value: u8);

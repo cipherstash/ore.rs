@@ -39,11 +39,11 @@ pub struct OreAes128Right {
 }
 
 impl LeftCipherText for OreAes128Left {
-    const BLOCK_SIZE: usize = 17; // TODO: Make this 16
+    const BLOCK_SIZE: usize = 16;
 
     fn init(blocks: usize) -> Self {
         Self {
-            data: vec![0; blocks * Self::BLOCK_SIZE],
+            data: vec![0; blocks * (Self::BLOCK_SIZE + 1)],
             num_blocks: blocks,
         }
     }
@@ -61,15 +61,15 @@ impl LeftCipherText for OreAes128Left {
     #[inline]
     fn block(&self, index: usize) -> &[u8] {
         debug_assert!(index < self.num_blocks);
-        let offset = self.num_blocks + (index * 16); // TODO: LEFT_F_BLOCK_SIZE
-        &self.data[offset..(offset + 16)]
+        let offset = self.num_blocks + (index * Self::BLOCK_SIZE);
+        &self.data[offset..(offset + Self::BLOCK_SIZE)]
     }
 
     #[inline]
     fn block_mut(&mut self, index: usize) -> &mut [u8] {
         debug_assert!(index < self.num_blocks);
-        let offset = self.num_blocks + (index * 16); // TODO: LEFT_F_BLOCK_SIZE
-        &mut self.data[offset..(offset + 16)]
+        let offset = self.num_blocks + (index * Self::BLOCK_SIZE);
+        &mut self.data[offset..(offset + Self::BLOCK_SIZE)]
     }
 
     #[inline]
@@ -96,26 +96,18 @@ impl RightCipherText for OreAes128Right {
         self.num_blocks
     }
 
-    // TODO: Is this function even needed now?!
-    #[inline]
-    fn block_mut(&mut self, index: usize) -> &mut [u8] {
-        debug_assert!(index < self.num_blocks);
-        let offset = index * 32; // TODO: RIGHT_BLOCK_SIZE
-        &mut self.data[offset..(offset + 32)]
-    }
-
     #[inline]
     fn block(&self, index: usize) -> &[u8] {
         debug_assert!(index < self.num_blocks);
-        let offset = index * 32; // TODO: RIGHT_BLOCK_SIZE
-        &self.data[offset..(offset + 32)]
+        let offset = index * Self::BLOCK_SIZE;
+        &self.data[offset..(offset + Self::BLOCK_SIZE)]
     }
 
     #[inline]
     fn set_n_bit(&mut self, index: usize, bit: usize, value: u8) {
         debug_assert!(bit < 256 && index < self.num_blocks);
-        let offset = index * 32; // TODO: RIGHT_BLOCK_SIZE
-        let block = &mut self.data[offset..(offset + 32)];
+        let offset = index * Self::BLOCK_SIZE;
+        let block = &mut self.data[offset..(offset + Self::BLOCK_SIZE)];
 
         let byte_index = bit / 8;
         let mask = bit % 8;
@@ -126,8 +118,8 @@ impl RightCipherText for OreAes128Right {
     #[inline]
     fn get_n_bit(&self, index: usize, bit: usize) -> u8 {
         debug_assert!(bit < 256 && index < self.num_blocks);
-        let offset = index * 32; // TODO: RIGHT_BLOCK_SIZE
-        let block = &self.data[offset..(offset + 32)];
+        let offset = index * Self::BLOCK_SIZE;
+        let block = &self.data[offset..(offset + Self::BLOCK_SIZE)];
 
         let byte_index = bit / 8;
         let position = bit % 8;

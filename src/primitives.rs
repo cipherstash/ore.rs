@@ -11,7 +11,6 @@ pub type SEED64 = [u8; 8];
 
 use aes::Block;
 
-pub type AesBlock = Block;
 pub type PRFKey = GenericArray<u8, U16>;
 pub type HashKey = GenericArray<u8, U16>;
 pub type Nonce = Block;
