@@ -1,10 +1,5 @@
-use crate::primitives::{AesBlock, NONCE_SIZE};
+use crate::primitives::AesBlock;
 pub use crate::ORECipher;
-
-#[derive(Debug, Clone)]
-pub struct Left {
-    pub data: Vec<u8>
-}
 
 #[derive(Debug, Clone)]
 pub struct Right {
@@ -22,6 +17,7 @@ pub trait LeftCipherText {
     const BLOCK_SIZE: usize;
 
     fn init(blocks: usize) -> Self;
+    fn num_blocks(&self) -> usize;
 
     /* Sets the value for the nth permuted x value in the output */
     fn set_xn(&mut self, n: usize, value: u8);
@@ -33,26 +29,6 @@ pub trait LeftCipherText {
      * This must be suitable for passing to a PRF.
      * TODO: Perhaps we should consider a trait bound here? */
     fn f_mut(&mut self) -> &mut [u8];
-}
-
-impl Left {
-    pub(crate) fn init(len: usize) -> Self {
-        Self {
-            data: vec![0u8; len]
-        }
-    }
-
-    pub fn size(self) -> usize {
-        self.data.len()
-    }
-
-    pub fn to_bytes(self) -> Vec<u8> {
-        self.data
-    }
-
-    pub fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
-        Ok(Self { data: Vec::from(data) })
-    }
 }
 
 impl Right {

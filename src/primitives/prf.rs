@@ -1,4 +1,4 @@
-use crate::primitives::{AesBlock, PRFKey, Prf};
+use crate::primitives::{PRFKey, Prf};
 use aes::Aes128;
 
 use aes::cipher::{
@@ -46,7 +46,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aes::cipher::generic_array::{arr, GenericArray};
     use hex_literal::hex;
 
     fn init_prf() -> AES128PRF {
