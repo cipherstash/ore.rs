@@ -27,12 +27,11 @@ pub trait LeftCipherText {
 
     fn init(blocks: usize) -> Self;
     fn num_blocks(&self) -> usize;
+    fn block(&self, index: usize) -> &[u8];
+    fn block_mut(&mut self, index: usize) -> &mut [u8];
 
     /* Sets the value for the nth permuted x value in the output */
     fn set_xn(&mut self, n: usize, value: u8);
-
-    fn block(&self, index: usize) -> &[u8];
-    fn block_mut(&mut self, index: usize) -> &mut [u8];
 
     /* Returns a mutable slice for the whole "F" block.
      * This must be suitable for passing to a PRF.
@@ -42,9 +41,13 @@ pub trait LeftCipherText {
 
 pub trait RightCipherText {
     const BLOCK_SIZE: usize;
-
     fn init<R: Rng>(blocks: usize, rng: &mut R) -> Self;
     fn num_blocks(&self) -> usize;
+    fn block(&self, index: usize) -> &[u8];
+    fn block_mut(&mut self, index: usize) -> &mut [u8];
+
+    /* Set's the jth bit (or trit) of the nth block to value */
+    fn set_n_bit(&mut self, index: usize, j: usize, value: u8);
 }
 
 impl Right {

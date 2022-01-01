@@ -68,12 +68,14 @@ impl LeftCipherText for OreAes128Left {
 
     #[inline]
     fn block(&self, index: usize) -> &[u8] {
+        debug_assert!(index < self.num_blocks);
         let offset = self.num_blocks + (index * 16); // TODO: LEFT_F_BLOCK_SIZE
         &self.data[offset..(offset + 16)]
     }
 
     #[inline]
     fn block_mut(&mut self, index: usize) -> &mut [u8] {
+        debug_assert!(index < self.num_blocks);
         let offset = self.num_blocks + (index * 16); // TODO: LEFT_F_BLOCK_SIZE
         &mut self.data[offset..(offset + 16)]
     }
@@ -100,6 +102,33 @@ impl RightCipherText for OreAes128Right {
 
     fn num_blocks(&self) -> usize {
         self.num_blocks
+    }
+
+    // TODO: Is this function even needed now?!
+    #[inline]
+    fn block_mut(&mut self, index: usize) -> &mut [u8] {
+        debug_assert!(index < self.num_blocks);
+        let offset = index * 32; // TODO: RIGHT_BLOCK_SIZE
+        &mut self.data[offset..(offset + 32)]
+    }
+
+    #[inline]
+    fn block(&self, index: usize) -> &[u8] {
+        debug_assert!(index < self.num_blocks);
+        let offset = index * 32; // TODO: RIGHT_BLOCK_SIZE
+        &self.data[offset..(offset + 32)]
+    }
+
+    #[inline]
+    fn set_n_bit(&mut self, index: usize, bit: usize, value: u8) {
+        debug_assert!(bit < 256 && index < self.num_blocks);
+        let offset = index * 32; // TODO: RIGHT_BLOCK_SIZE
+        let block = &mut self.data[offset..(offset + 32)];
+
+        let byte_index = bit / 8;
+        let mask = bit % 8;
+        let v = value << mask;
+        block[byte_index] |= v;
     }
 }
 
@@ -266,11 +295,7 @@ impl ORECipher for OREAES128 {
             for (j, h) in hashes.iter().enumerate() {
                 let jstar = prp.invert(j as u8).map_err(|_| OREError)?;
                 let indicator = cmp(jstar, x[n]);
-
-                // TODO: Perhaps these functions should be combined and take n as an arg
-                // Then we could do right.set_bit(n, j, inidicator ^ h);
-                let right_block = right_block_mut(&mut right.data, n);
-                right_set_bit(right_block, j, indicator ^ h);
+                right.set_n_bit(n, j, indicator ^ h);
             }
         }
         self.prf1.encrypt_all(left.f_mut());
