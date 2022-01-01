@@ -48,6 +48,9 @@ pub trait RightCipherText {
 
     /* Set's the jth bit (or trit) of the nth block to value */
     fn set_n_bit(&mut self, index: usize, j: usize, value: u8);
+
+    /* Get's the jth bit (or trit) of the nth block */
+    fn get_n_bit(&self, index: usize, j: usize) -> u8;
 }
 
 impl Right {

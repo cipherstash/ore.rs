@@ -130,6 +130,19 @@ impl RightCipherText for OreAes128Right {
         let v = value << mask;
         block[byte_index] |= v;
     }
+
+    #[inline]
+    fn get_n_bit(&self, index: usize, bit: usize) -> u8 {
+        debug_assert!(bit < 256 && index < self.num_blocks);
+        let offset = index * 32; // TODO: RIGHT_BLOCK_SIZE
+        let block = &self.data[offset..(offset + 32)];
+
+        let byte_index = bit / 8;
+        let position = bit % 8;
+        let v = 1 << position;
+
+        (block[byte_index] & v) >> position
+    }
 }
 
 fn cmp(a: u8, b: u8) -> u8 {
@@ -138,12 +151,6 @@ fn cmp(a: u8, b: u8) -> u8 {
     } else {
         0u8
     }
-}
-
-#[inline]
-fn right_block_mut(data: &mut [u8], index: usize) -> &mut [u8] {
-    let offset = index * 32; // TODO: RIGHT_BLOCK_SIZE
-    &mut data[offset..(offset + 32)]
 }
 
 #[inline]
@@ -385,8 +392,7 @@ impl Ord for CipherText<OREAES128> {
         let hash: AES128Z2Hash = Hash::new(&b.right.nonce);
         let h = hash.hash(self.left.block(l));
 
-        let block = right_block(&b.right.data, l);
-        let test = right_get_bit(block, self.left.data[l] as usize) ^ h;
+        let test = b.right.get_n_bit(l, self.left.data[l] as usize) ^ h;
         if test == 1 {
             return Ordering::Greater;
         }
