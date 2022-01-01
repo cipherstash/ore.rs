@@ -13,6 +13,7 @@ use crate::{
 use aes::cipher::generic_array::GenericArray;
 use rand::{os::OsRng, Rng};
 use std::cmp::Ordering;
+use serde::{Serialize, Deserialize};
 
 /* Define our scheme */
 #[derive(Debug)]
@@ -25,13 +26,13 @@ pub struct OREAES128 {
     prp_seed: SEED64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct OreAes128Left {
     num_blocks: usize,
     data: Vec<u8>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct OreAes128Right {
     num_blocks: usize,
     data: Vec<u8>,
@@ -576,20 +577,21 @@ mod tests {
 
         assert_eq!(OREAES128::compare_raw_slices(&a_64, &a_32), Option::None);
     }
+    */
 
     #[test]
     fn binary_encoding() {
         let mut ore = init_ore();
         let a = 10u64.encrypt(&mut ore).unwrap();
         let bin = a.to_bytes();
-        assert_eq!(a, CipherText::<OREAES128, 8>::from_bytes(&bin).unwrap());
+        assert_eq!(a, CipherText::<OREAES128>::from_bytes(&bin).unwrap());
     }
 
     #[test]
     #[should_panic(expected = "ParseError")]
     fn binary_encoding_invalid_length() {
         let bin = vec![0, 1, 2, 3];
-        CipherText::<OREAES128, 8>::from_bytes(&bin).unwrap();
+        CipherText::<OREAES128>::from_bytes(&bin).unwrap();
     }
 
     #[test]
@@ -634,5 +636,5 @@ mod tests {
         let b = 1000u32.encrypt(&mut ore2).unwrap().to_bytes();
 
         assert_ne!(Some(Ordering::Equal), OREAES128::compare_raw_slices(&a, &b));
-    }*/
+    }
 }

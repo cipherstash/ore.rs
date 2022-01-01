@@ -12,8 +12,8 @@ pub type SEED64 = [u8; 8];
 use aes::Block;
 
 pub type PRFKey = GenericArray<u8, U16>;
-pub type HashKey = GenericArray<u8, U16>;
-pub type Nonce = Block;
+pub type HashKey = [u8; 16];
+pub type Nonce = [u8; 16];
 
 pub trait Prf {
     fn new(key: &PRFKey) -> Self;

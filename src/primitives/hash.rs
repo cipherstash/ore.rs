@@ -69,9 +69,8 @@ mod tests {
     use hex_literal::hex;
 
     fn init_hash() -> AES128Z2Hash {
-        let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-        let key_array = GenericArray::from_slice(&key);
-        Hash::new(key_array)
+        let key = hex!("00010203 04050607 08090a0b 0c0d0e0f");
+        Hash::new(&key)
     }
 
     #[test]
