@@ -30,8 +30,39 @@ pub struct OREAES128 {
 }
 
 /* Define some convenience types */
-type EncryptLeftResult = Result<Left, OREError>;
-type EncryptResult = Result<CipherText, OREError>;
+type EncryptLeftResult = Result<MyLeft, OREError>;
+type EncryptResult = Result<CipherText<MyLeft>, OREError>;
+
+// TODO: Rename this to something sensible
+#[derive(Debug)]
+pub struct MyLeft {
+    pub num_blocks: usize,
+    // TODO: Prob easier if we keep x as it's own struct mem
+    pub data: Vec<u8> // TODO: Don't make this pub
+}
+
+impl LeftCipherText for MyLeft {
+    const BLOCK_SIZE: usize = 17;
+
+    fn init(blocks: usize) -> Self {
+        Self {
+            data: vec![0; blocks * Self::BLOCK_SIZE],
+            num_blocks: blocks
+        }
+    }
+
+    #[inline]
+    fn block(&self, index: usize) -> &[u8] {
+        let offset = self.num_blocks + (index * 16); // TODO: LEFT_F_BLOCK_SIZE
+        &self.data[offset..(offset + 16)]
+    }
+
+    #[inline]
+    fn block_mut(&mut self, index: usize) -> &mut [u8] {
+        let offset = self.num_blocks + (index * 16); // TODO: LEFT_F_BLOCK_SIZE
+        &mut self.data[offset..(offset + 16)]
+    }
+}
 
 fn cmp(a: u8, b: u8) -> u8 {
     if a > b {
@@ -85,6 +116,7 @@ fn right_get_bit(block: &[u8], bit: usize) -> u8 {
 }
 
 impl ORECipher for OREAES128 {
+    type LeftType = MyLeft;
 
     fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64) -> Result<Self, OREError> {
         // TODO: k1 and k2 should be Key types and we should have a set of traits to abstract the
@@ -98,29 +130,27 @@ impl ORECipher for OREAES128 {
         });
     }
 
+    // TODO: Eventually, this will be the default implementation for ORECipher
+    // and we'll provide associated types for the Left and Right CipherText impls
     fn encrypt_left<const N: usize>(&mut self, x: &PlainText<N>) -> EncryptLeftResult {
         // First N-bytes for the "x" values, the rest for the "f" blocks
-        let mut output = Left::init(N * 17); // TODO: N * LEFT_BLOCK_SIZE
+        let mut output = Self::LeftType::init(N);
 
+        // Build the prefixes
         // TODO: Include the block number in the prefix to avoid repeating values for common
         // blocks in a long prefix
         // e.g. when plaintext is 4700 (2-bytes/blocks)
         // xt = [17, 17, 17, 17, 17, 17, 223, 76]
         for (n, _) in x.iter().enumerate() {
-            left_block_mut(&mut output.data[N..], n)[..n].clone_from_slice(&x[..n]);
+            output.block_mut(n)[..n].clone_from_slice(&x[..n]);
         }
-        // Build the prefixes
-        // TODO: Don't modify struct values directly - use a function on a "Left" trait
-        /*output.f.iter_mut().enumerate().for_each(|(n, block)| {
-            block[0..n].clone_from_slice(&x[0..n]);
-        });*/
 
         self.prf2.encrypt_all(&mut output.data[N..]);
 
         for (n, xn) in x.iter().enumerate().take(N) {
             // Set prefix and create PRP for the block
             let prp: KnuthShufflePRP<u8, 256> =
-                Prp::new(left_block(&output.data[N..], n), &self.prp_seed).map_err(|_| OREError)?;
+                Prp::new(output.block(n), &self.prp_seed).map_err(|_| OREError)?;
 
             output.data[n] = prp.permute(*xn).map_err(|_| OREError)?;
         }
@@ -134,18 +164,12 @@ impl ORECipher for OREAES128 {
 
         for n in 0..N {
             let block_n = output.data[n];
-            let block = left_block_mut(&mut output.data[N..], n);
+            let block = output.block_mut(n);
             block[0..n].clone_from_slice(&x[0..n]);
             block[n] = block_n;
             // Include the block number in the value passed to the Random Oracle
             block[N] = n as u8;
-
-            /*output.f[n][0..n].clone_from_slice(&x[0..n]);
-            output.f[n][n] = output.xt[n];
-            // Include the block number in the value passed to the Random Oracle
-            output.f[n][N] = n as u8;*/
         }
-        //self.prf1.encrypt_all(&mut output.f);
         self.prf1.encrypt_all(&mut output.data[N..]);
 
         Ok(output)
@@ -156,14 +180,14 @@ impl ORECipher for OREAES128 {
         // checks (and avoid things like comparison of different sized ciphertexts)
         // For example, we could have a PartialOrd implemented from Left<130> to a Right<280> but
         // nothing else (we may need to keep the scheme on the struct as well!)
-        let mut left = Left::init(N * 17); // TODO: N * LEFT_BLOCK_SIZE
+        let mut left = Self::LeftType::init(N);
         let mut right = Right::init(N * 32); // TODO: N * RIGHT_BLOCK_SIZE
         // Generate a 16-byte random nonce
         self.rng.fill_bytes(&mut right.nonce);
 
         // TODO: This should be a function on Left
         for (n, _) in x.iter().enumerate() {
-            left_block_mut(&mut left.data[N..], n)[..n].clone_from_slice(&x[..n]);
+            left.block_mut(n)[..n].clone_from_slice(&x[..n]);
         }
 
         self.prf2.encrypt_all(&mut left.data[N..]);
@@ -171,21 +195,12 @@ impl ORECipher for OREAES128 {
         for (n, xn) in x.iter().enumerate().take(N) {
             // Set prefix and create PRP for the block
             let prp: KnuthShufflePRP<u8, 256> =
-                Prp::new(left_block(&left.data[N..], n), &self.prp_seed).map_err(|_| OREError)?;
+                Prp::new(left.block(n), &self.prp_seed).map_err(|_| OREError)?;
 
             left.data[n] = prp.permute(*xn).map_err(|_| OREError)?;
 
-            // Reset the f block
-            // TODO: Do we need to zeroize the old data before it is dropped due to de-assignment?
-            //left.f[n] = Default::default(); // TODO: Use fill(0);
-
-            /*left.f[n][0..n].clone_from_slice(&x[0..n]);
-            left.f[n][n] = left.xt[n];
-            // Include the block number in the value passed to the Random Oracle
-            left.f[n][N] = n as u8;*/
-
             let block_n = left.data[n];
-            let block = left_block_mut(&mut left.data[N..], n);
+            let block = left.block_mut(n);
             block.fill(0);
             block[0..n].clone_from_slice(&x[0..n]);
             block[n] = block_n;
@@ -297,13 +312,14 @@ fn get_bit(block: &[u8], bit: usize) -> u8 {
     (block[byte_index] & v) >> position
 }
 
-impl PartialEq for CipherText {
+// TODO: This could possibly be generic (same with Eq)
+impl PartialEq for CipherText<MyLeft> {
     fn eq(&self, b: &Self) -> bool {
         matches!(self.cmp(b), Ordering::Equal)
     }
 }
 
-impl Ord for CipherText {
+impl Ord for CipherText<MyLeft> {
     fn cmp(&self, b: &Self) -> Ordering {
         let mut is_equal = true;
         let mut l = 0; // Unequal block
@@ -338,7 +354,7 @@ impl Ord for CipherText {
     }
 }
 
-impl PartialOrd for CipherText {
+impl PartialOrd for CipherText<MyLeft> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
@@ -348,7 +364,7 @@ impl PartialOrd for CipherText {
  * (From the Rust docs)
  * This property cannot be checked by the compiler, and therefore Eq implies PartialEq, and has no extra methods.
  */
-impl Eq for CipherText {}
+impl Eq for CipherText<MyLeft> {}
 
 #[cfg(test)]
 mod tests {

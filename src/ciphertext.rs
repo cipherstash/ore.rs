@@ -13,10 +13,19 @@ pub struct Right {
 }
 
 #[derive(Debug, Clone)]
-pub struct CipherText(pub Left, pub Right);
+pub struct CipherText<L: LeftCipherText>(pub L, pub Right);
 
 #[derive(Debug)]
 pub struct ParseError;
+
+pub trait LeftCipherText {
+    const BLOCK_SIZE: usize;
+
+    fn init(blocks: usize) -> Self;
+
+    fn block(&self, index: usize) -> &[u8];
+    fn block_mut(&mut self, index: usize) -> &mut [u8];
+}
 
 impl Left {
     pub(crate) fn init(len: usize) -> Self {
@@ -61,7 +70,7 @@ impl Right {
     }
 }
 
-impl CipherText {
+impl <L: LeftCipherText> CipherText<L> {
     pub fn to_bytes(&self) -> Vec<u8> {
         // TODO - or do we just use serde?
         //[self.0.to_bytes(), self.1.to_bytes()].concat()
