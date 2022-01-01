@@ -25,6 +25,11 @@ pub trait LeftCipherText {
 
     fn block(&self, index: usize) -> &[u8];
     fn block_mut(&mut self, index: usize) -> &mut [u8];
+
+    /* Returns a mutable slice for the whole "F" block.
+     * This must be suitable for passing to a PRF.
+     * TODO: Perhaps we should consider a trait bound here? */
+    fn f_mut(&mut self) -> &mut [u8];
 }
 
 impl Left {

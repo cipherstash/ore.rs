@@ -62,6 +62,11 @@ impl LeftCipherText for MyLeft {
         let offset = self.num_blocks + (index * 16); // TODO: LEFT_F_BLOCK_SIZE
         &mut self.data[offset..(offset + 16)]
     }
+
+    #[inline]
+    fn f_mut(&mut self) -> &mut [u8] {
+        &mut self.data[self.num_blocks..]
+    }
 }
 
 fn cmp(a: u8, b: u8) -> u8 {
@@ -145,7 +150,7 @@ impl ORECipher for OREAES128 {
             output.block_mut(n)[..n].clone_from_slice(&x[..n]);
         }
 
-        self.prf2.encrypt_all(&mut output.data[N..]);
+        self.prf2.encrypt_all(output.f_mut());
 
         for (n, xn) in x.iter().enumerate().take(N) {
             // Set prefix and create PRP for the block
@@ -170,7 +175,10 @@ impl ORECipher for OREAES128 {
             // Include the block number in the value passed to the Random Oracle
             block[N] = n as u8;
         }
-        self.prf1.encrypt_all(&mut output.data[N..]);
+        // TODO: Maybe we invert this by passing the PRF to a function on the left type
+        // and making the block size generic so we can handle PRFs of different sizes with compile
+        // time checking
+        self.prf1.encrypt_all(output.f_mut());
 
         Ok(output)
     }
@@ -190,7 +198,7 @@ impl ORECipher for OREAES128 {
             left.block_mut(n)[..n].clone_from_slice(&x[..n]);
         }
 
-        self.prf2.encrypt_all(&mut left.data[N..]);
+        self.prf2.encrypt_all(left.f_mut());
 
         for (n, xn) in x.iter().enumerate().take(N) {
             // Set prefix and create PRP for the block
@@ -246,8 +254,7 @@ impl ORECipher for OREAES128 {
                 right_set_bit(right_block, j, indicator ^ h);
             }
         }
-        // TODO: left.f() ?
-        self.prf1.encrypt_all(&mut left.data[N..]);
+        self.prf1.encrypt_all(left.f_mut());
 
         // TODO: Do we need to do any zeroing? See https://lib.rs/crates/zeroize
         // Zeroize the RO Keys before re-assigning them
