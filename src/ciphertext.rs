@@ -23,6 +23,9 @@ pub trait LeftCipherText {
 
     fn init(blocks: usize) -> Self;
 
+    /* Sets the value for the nth permuted x value in the output */
+    fn set_xn(&mut self, n: usize, value: u8);
+
     fn block(&self, index: usize) -> &[u8];
     fn block_mut(&mut self, index: usize) -> &mut [u8];
 

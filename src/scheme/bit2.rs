@@ -1,5 +1,5 @@
 /*
- * Block ORE Implemenation using a 2-bit indicator function
+ * Block ORE Implementation using a 2-bit indicator function
  */
 
 use crate::{
@@ -36,9 +36,8 @@ type EncryptResult = Result<CipherText<MyLeft>, OREError>;
 // TODO: Rename this to something sensible
 #[derive(Debug)]
 pub struct MyLeft {
-    pub num_blocks: usize,
-    // TODO: Prob easier if we keep x as it's own struct mem
-    pub data: Vec<u8> // TODO: Don't make this pub
+    num_blocks: usize,
+    data: Vec<u8> // TODO: Don't make this pub
 }
 
 impl LeftCipherText for MyLeft {
@@ -49,6 +48,12 @@ impl LeftCipherText for MyLeft {
             data: vec![0; blocks * Self::BLOCK_SIZE],
             num_blocks: blocks
         }
+    }
+
+    #[inline]
+    fn set_xn(&mut self, n: usize, value: u8) {
+        debug_assert!(n < self.num_blocks);
+        self.data[n] = value
     }
 
     #[inline]
@@ -75,18 +80,6 @@ fn cmp(a: u8, b: u8) -> u8 {
     } else {
         0u8
     }
-}
-
-#[inline]
-fn left_block_mut(data: &mut [u8], index: usize) -> &mut [u8] {
-    let offset = index * 16; // TODO: LEFT_F_BLOCK_SIZE
-    &mut data[offset..(offset + 16)]
-}
-
-#[inline]
-fn left_block(data: &[u8], index: usize) -> &[u8] {
-    let offset = index * 16; // TODO: LEFT_F_BLOCK_SIZE
-    &data[offset..(offset + 16)]
 }
 
 #[inline]
@@ -165,9 +158,13 @@ impl ORECipher for OREAES128 {
         // TODO: Should we use Zeroize? We don't actually need to clear sensitive data here, we
         // just need fast "zero set". Reassigning the value will drop the old one and allocate new
         // data to the stack
-        output.data[N..].fill(0);
+        output.f_mut().fill(0);
 
+        // TODO: This could iterate the plaintext for each input block
         for n in 0..N {
+            // TODO: This code will probably need to be moved into the LeftCipherText trait
+            // (say set_block_from_plaintext or something) as it might need to work differently for
+            // different sized blocks
             let block_n = output.data[n];
             let block = output.block_mut(n);
             block[0..n].clone_from_slice(&x[0..n]);
@@ -336,7 +333,7 @@ impl Ord for CipherText<MyLeft> {
         let N = 8;
         for n in 0..N {
             // TODO: Fix me!
-            if self.0.data[n] != b.0.data[n] || left_block(&self.0.data[N..], n) != left_block(&b.0.data[N..], n) {
+            if self.0.data[n] != b.0.data[n] || &self.0.block(n) != &b.0.block(n) {
                 is_equal = false;
                 l = n;
                 // TODO: Make sure that this is constant time (i.e. don't break)
@@ -349,7 +346,7 @@ impl Ord for CipherText<MyLeft> {
         }
 
         let hash: AES128Z2Hash = Hash::new(&b.1.nonce);
-        let h = hash.hash(left_block(&self.0.data[N..], l));
+        let h = hash.hash(&self.0.block(l));
 
         let block = right_block(&b.1.data, l);
         let test = right_get_bit(block, self.0.data[l] as usize) ^ h;
@@ -428,7 +425,6 @@ mod tests {
 
             a == b
         }
-    }
 /*
         fn equality_u64_raw_slices(x: u64) -> bool {
             let mut ore = init_ore();
@@ -440,6 +436,7 @@ mod tests {
                 _ => false
             }
         }
+        */
 
         fn compare_u32(x: u32, y: u32) -> bool {
             let mut ore = init_ore();
@@ -509,7 +506,7 @@ mod tests {
 
             a == b
         }
-    }*/
+    }
 
     #[test]
     fn smallest_to_largest() {
