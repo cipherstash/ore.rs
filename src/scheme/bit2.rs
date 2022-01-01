@@ -7,7 +7,7 @@ use crate::{
     primitives::{
         hash::AES128Z2Hash, prf::AES128PRF, prp::KnuthShufflePRP, Hash, Prf, Prp, SEED64, Nonce
     },
-    ORECipher, OREError, PlainText,
+    ORECipher, OREError, PlainText, EncryptResult, EncryptLeftResult
 };
 
 use aes::cipher::generic_array::GenericArray;
@@ -24,11 +24,6 @@ pub struct OREAES128 {
     rng: OsRng,
     prp_seed: SEED64,
 }
-
-/* Define some convenience types */
-// TODO: These types could be generic in ORECipher and used in all schemes (move to lib.rs)
-type EncryptLeftResult = Result<OreAes128Left, OREError>;
-type EncryptResult = Result<CipherText<OREAES128>, OREError>;
 
 #[derive(Debug)]
 pub struct OreAes128Left {
@@ -169,7 +164,7 @@ impl ORECipher for OREAES128 {
 
     // TODO: Eventually, this will be the default implementation for ORECipher
     // and we'll provide associated types for the Left and Right CipherText impls
-    fn encrypt_left<const N: usize>(&mut self, x: &PlainText<N>) -> EncryptLeftResult {
+    fn encrypt_left<const N: usize>(&mut self, x: &PlainText<N>) -> EncryptLeftResult<Self> {
         // First N-bytes for the "x" values, the rest for the "f" blocks
         let mut output = Self::LeftType::init(N);
 
@@ -215,10 +210,10 @@ impl ORECipher for OREAES128 {
         // time checking
         self.prf1.encrypt_all(output.f_mut());
 
-        Ok(output)
+        Ok(Left { left: output })
     }
 
-    fn encrypt<const N: usize>(&mut self, x: &PlainText<N>) -> EncryptResult {
+    fn encrypt<const N: usize>(&mut self, x: &PlainText<N>) -> EncryptResult<Self> {
         let mut left = Self::LeftType::init(N);
         let mut right = Self::RightType::init(N, &mut self.rng);
 

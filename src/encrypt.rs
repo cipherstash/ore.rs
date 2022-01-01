@@ -1,7 +1,7 @@
 use crate::ciphertext::*;
 use crate::convert::ToOrderedInteger;
 use crate::PlainText;
-use crate::{ORECipher, OREError};
+use crate::{ORECipher, OREError, EncryptLeftResult, EncryptResult};
 
 pub trait OREEncrypt<T>
 where
@@ -9,8 +9,8 @@ where
     <T as ORECipher>::LeftType: LeftCipherText,
     <T as ORECipher>::RightType: RightCipherText,
 {
-    fn encrypt_left(&self, cipher: &mut T) -> Result<T::LeftType, OREError>;
-    fn encrypt(&self, input: &mut T) -> Result<CipherText<T>, OREError>;
+    fn encrypt_left(&self, cipher: &mut T) -> EncryptLeftResult<T>;
+    fn encrypt(&self, input: &mut T) -> EncryptResult<T>;
 }
 
 // FIXME: I don't like that the cipher is mutable - its private members are mutable
@@ -22,12 +22,12 @@ where
     <T as ORECipher>::LeftType: LeftCipherText,
     <T as ORECipher>::RightType: RightCipherText,
 {
-    fn encrypt_left(&self, cipher: &mut T) -> Result<T::LeftType, OREError> {
+    fn encrypt_left(&self, cipher: &mut T) -> EncryptLeftResult<T> {
         let bytes = self.to_be_bytes();
         cipher.encrypt_left(&bytes)
     }
 
-    fn encrypt(&self, cipher: &mut T) -> Result<CipherText<T>, OREError> {
+    fn encrypt(&self, cipher: &mut T) -> EncryptResult<T> {
         let bytes = self.to_be_bytes();
         cipher.encrypt(&bytes)
     }
@@ -39,12 +39,12 @@ where
     <T as ORECipher>::LeftType: LeftCipherText,
     <T as ORECipher>::RightType: RightCipherText,
 {
-    fn encrypt_left(&self, cipher: &mut T) -> Result<T::LeftType, OREError> {
+    fn encrypt_left(&self, cipher: &mut T) -> EncryptLeftResult<T> {
         let bytes = self.to_be_bytes();
         cipher.encrypt_left(&bytes)
     }
 
-    fn encrypt(&self, cipher: &mut T) -> Result<CipherText<T>, OREError> {
+    fn encrypt(&self, cipher: &mut T) -> EncryptResult<T> {
         let bytes = self.to_be_bytes();
         cipher.encrypt(&bytes)
     }
@@ -56,12 +56,12 @@ where
     <T as ORECipher>::LeftType: LeftCipherText,
     <T as ORECipher>::RightType: RightCipherText,
 {
-    fn encrypt_left(&self, cipher: &mut T) -> Result<T::LeftType, OREError> {
+    fn encrypt_left(&self, cipher: &mut T) -> EncryptLeftResult<T> {
         let plaintext: u64 = self.map_to();
         plaintext.encrypt_left(cipher)
     }
 
-    fn encrypt(&self, cipher: &mut T) -> Result<CipherText<T>, OREError> {
+    fn encrypt(&self, cipher: &mut T) -> EncryptResult<T> {
         let plaintext: u64 = self.map_to();
         plaintext.encrypt(cipher)
     }
@@ -73,11 +73,11 @@ where
     <T as ORECipher>::LeftType: LeftCipherText,
     <T as ORECipher>::RightType: RightCipherText,
 {
-    fn encrypt_left(&self, cipher: &mut T) -> Result<T::LeftType, OREError> {
+    fn encrypt_left(&self, cipher: &mut T) -> EncryptLeftResult<T> {
         cipher.encrypt_left(self)
     }
 
-    fn encrypt(&self, cipher: &mut T) -> Result<CipherText<T>, OREError> {
+    fn encrypt(&self, cipher: &mut T) -> EncryptResult<T> {
         cipher.encrypt(self)
     }
 }

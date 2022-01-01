@@ -153,6 +153,9 @@ pub type PlainText<const N: usize> = [u8; N];
 #[derive(Debug, Clone)]
 pub struct OREError;
 
+pub type EncryptLeftResult<T> = Result<Left<T>, OREError>;
+pub type EncryptResult<T> = Result<CipherText<T>, OREError>;
+
 pub trait ORECipher: Sized {
     type LeftType;
     type RightType;
@@ -162,14 +165,14 @@ pub trait ORECipher: Sized {
     fn encrypt_left<const N: usize>(
         &mut self,
         input: &PlainText<N>,
-    ) -> Result<Self::LeftType, OREError>
+    ) -> EncryptLeftResult<Self>
     where
         <Self as ORECipher>::LeftType: LeftCipherText;
 
     fn encrypt<const N: usize>(
         &mut self,
         input: &PlainText<N>,
-    ) -> Result<CipherText<Self>, OREError>
+    ) -> EncryptResult<Self>
     where
         <Self as ORECipher>::LeftType: LeftCipherText,
         <Self as ORECipher>::RightType: RightCipherText;

@@ -1,12 +1,5 @@
-use crate::primitives::AesBlock;
 use rand::Rng;
 pub use crate::ORECipher;
-
-#[derive(Debug, Clone)]
-pub struct Right {
-    pub nonce: AesBlock,
-    pub data: Vec<u8>,
-}
 
 #[derive(Debug, Clone)]
 pub struct CipherText<S: ORECipher>
@@ -18,10 +11,17 @@ where
     pub right: S::RightType
 }
 
+pub struct Left<S: ORECipher>
+where
+    <S as ORECipher>::LeftType: LeftCipherText
+{
+    pub left: S::LeftType
+}
+
+// TODO: Remove this
 #[derive(Debug)]
 pub struct ParseError;
 
-// TODO: Create a Left wrapper type so we can do Left<OREAES128>
 pub trait LeftCipherText {
     const BLOCK_SIZE: usize;
 
@@ -44,6 +44,7 @@ pub trait RightCipherText {
     fn init<R: Rng>(blocks: usize, rng: &mut R) -> Self;
     fn num_blocks(&self) -> usize;
     fn block(&self, index: usize) -> &[u8];
+    // TODO: Is this needed?
     fn block_mut(&mut self, index: usize) -> &mut [u8];
 
     /* Set's the jth bit (or trit) of the nth block to value */
