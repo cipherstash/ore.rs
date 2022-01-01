@@ -14,6 +14,7 @@ use aes::Block;
 pub type AesBlock = Block;
 pub type PRFKey = GenericArray<u8, U16>;
 pub type HashKey = GenericArray<u8, U16>;
+pub type Nonce = Block;
 
 pub trait Prf {
     fn new(key: &PRFKey) -> Self;

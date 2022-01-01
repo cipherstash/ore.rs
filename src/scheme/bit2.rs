@@ -5,7 +5,7 @@
 use crate::{
     ciphertext::*,
     primitives::{
-        hash::AES128Z2Hash, prf::AES128PRF, prp::KnuthShufflePRP, Hash, Prf, Prp, SEED64,
+        hash::AES128Z2Hash, prf::AES128PRF, prp::KnuthShufflePRP, Hash, Prf, Prp, SEED64, Nonce
     },
     ORECipher, OREError, PlainText,
 };
@@ -29,17 +29,25 @@ pub struct OREAES128 {
 }
 
 /* Define some convenience types */
+// TODO: These types could be generic in ORECipher and used in all schemes (move to lib.rs)
 type EncryptLeftResult = Result<OreAes128Left, OREError>;
-type EncryptResult = Result<CipherText<OreAes128Left>, OREError>;
+type EncryptResult = Result<CipherText<OREAES128>, OREError>;
 
 #[derive(Debug)]
 pub struct OreAes128Left {
     num_blocks: usize,
+    data: Vec<u8>
+}
+
+#[derive(Debug)]
+pub struct OreAes128Right {
+    num_blocks: usize,
     data: Vec<u8>,
+    nonce: Nonce
 }
 
 impl LeftCipherText for OreAes128Left {
-    const BLOCK_SIZE: usize = 17;
+    const BLOCK_SIZE: usize = 17; // TODO: Make this 16
 
     fn init(blocks: usize) -> Self {
         Self {
@@ -73,6 +81,25 @@ impl LeftCipherText for OreAes128Left {
     #[inline]
     fn f_mut(&mut self) -> &mut [u8] {
         &mut self.data[self.num_blocks..]
+    }
+}
+
+impl RightCipherText for OreAes128Right {
+    const BLOCK_SIZE: usize = 32;
+
+    fn init<R: Rng>(blocks: usize, rng: &mut R) -> Self {
+        let mut ret = Self {
+            data: vec![0; blocks * Self::BLOCK_SIZE],
+            num_blocks: blocks,
+            nonce: Default::default()
+        };
+        // Generate a 16-byte random nonce
+        rng.fill_bytes(&mut ret.nonce);
+        ret
+    }
+
+    fn num_blocks(&self) -> usize {
+        self.num_blocks
     }
 }
 
@@ -117,6 +144,7 @@ fn right_get_bit(block: &[u8], bit: usize) -> u8 {
 
 impl ORECipher for OREAES128 {
     type LeftType = OreAes128Left;
+    type RightType = OreAes128Right;
 
     fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64) -> Result<Self, OREError> {
         // TODO: k1 and k2 should be Key types and we should have a set of traits to abstract the
@@ -182,14 +210,8 @@ impl ORECipher for OREAES128 {
     }
 
     fn encrypt<const N: usize>(&mut self, x: &PlainText<N>) -> EncryptResult {
-        // TODO: We can probably make Left generic in S (not N) so that we can use static compile
-        // checks (and avoid things like comparison of different sized ciphertexts)
-        // For example, we could have a PartialOrd implemented from Left<130> to a Right<280> but
-        // nothing else (we may need to keep the scheme on the struct as well!)
         let mut left = Self::LeftType::init(N);
-        let mut right = Right::init(N * 32); // TODO: N * RIGHT_BLOCK_SIZE
-                                             // Generate a 16-byte random nonce
-        self.rng.fill_bytes(&mut right.nonce);
+        let mut right = Self::RightType::init(N, &mut self.rng);
 
         // TODO: This should be a function on Left
         for (n, _) in x.iter().enumerate() {
@@ -256,7 +278,7 @@ impl ORECipher for OREAES128 {
         // TODO: Do we need to do any zeroing? See https://lib.rs/crates/zeroize
         // Zeroize the RO Keys before re-assigning them
 
-        Ok(CipherText(left, right))
+        Ok(CipherText { left, right })
     }
 
     fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering> {
@@ -306,13 +328,13 @@ impl ORECipher for OREAES128 {
 }
 
 // TODO: This could possibly be generic (same with Eq)
-impl PartialEq for CipherText<OreAes128Left> {
+impl PartialEq for CipherText<OREAES128> {
     fn eq(&self, b: &Self) -> bool {
         matches!(self.cmp(b), Ordering::Equal)
     }
 }
 
-impl Ord for CipherText<OreAes128Left> {
+impl Ord for CipherText<OREAES128> {
     fn cmp(&self, b: &Self) -> Ordering {
         let mut is_equal = true;
         let mut l = 0; // Unequal block
@@ -320,11 +342,10 @@ impl Ord for CipherText<OreAes128Left> {
         // FIXME: This probably means we can only implement PartialOrd
         // Unless we make the Left type generic on the number of input blocks, N!?
         // Some schemes may support comparing CTs of different lengths!
-        assert_eq!(self.0.num_blocks(), b.0.num_blocks());
+        assert_eq!(self.left.num_blocks(), b.left.num_blocks());
 
-        for n in 0..self.0.num_blocks() {
-            // TODO: Fix me!
-            if self.0.data[n] != b.0.data[n] || self.0.block(n) != b.0.block(n) {
+        for n in 0..self.left.num_blocks() {
+            if self.left.data[n] != b.left.data[n] || self.left.block(n) != b.left.block(n) {
                 is_equal = false;
                 l = n;
                 // TODO: Make sure that this is constant time (i.e. don't break)
@@ -336,11 +357,11 @@ impl Ord for CipherText<OreAes128Left> {
             return Ordering::Equal;
         }
 
-        let hash: AES128Z2Hash = Hash::new(&b.1.nonce);
-        let h = hash.hash(self.0.block(l));
+        let hash: AES128Z2Hash = Hash::new(&b.right.nonce);
+        let h = hash.hash(self.left.block(l));
 
-        let block = right_block(&b.1.data, l);
-        let test = right_get_bit(block, self.0.data[l] as usize) ^ h;
+        let block = right_block(&b.right.data, l);
+        let test = right_get_bit(block, self.left.data[l] as usize) ^ h;
         if test == 1 {
             return Ordering::Greater;
         }
@@ -349,7 +370,7 @@ impl Ord for CipherText<OreAes128Left> {
     }
 }
 
-impl PartialOrd for CipherText<OreAes128Left> {
+impl PartialOrd for CipherText<OREAES128> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
@@ -359,7 +380,7 @@ impl PartialOrd for CipherText<OreAes128Left> {
  * (From the Rust docs)
  * This property cannot be checked by the compiler, and therefore Eq implies PartialEq, and has no extra methods.
  */
-impl Eq for CipherText<OreAes128Left> {}
+impl Eq for CipherText<OREAES128> {}
 
 #[cfg(test)]
 mod tests {

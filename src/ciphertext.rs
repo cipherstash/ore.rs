@@ -1,4 +1,5 @@
-use crate::primitives::AesBlock;
+use crate::primitives::{AesBlock, Nonce};
+use rand::Rng;
 pub use crate::ORECipher;
 
 #[derive(Debug, Clone)]
@@ -8,11 +9,19 @@ pub struct Right {
 }
 
 #[derive(Debug, Clone)]
-pub struct CipherText<L: LeftCipherText>(pub L, pub Right);
+pub struct CipherText<S: ORECipher>
+where
+    <S as ORECipher>::LeftType: LeftCipherText,
+    <S as ORECipher>::RightType: RightCipherText
+{
+    pub left: S::LeftType,
+    pub right: S::RightType
+}
 
 #[derive(Debug)]
 pub struct ParseError;
 
+// TODO: Create a Left wrapper type so we can do Left<OREAES128>
 pub trait LeftCipherText {
     const BLOCK_SIZE: usize;
 
@@ -29,6 +38,13 @@ pub trait LeftCipherText {
      * This must be suitable for passing to a PRF.
      * TODO: Perhaps we should consider a trait bound here? */
     fn f_mut(&mut self) -> &mut [u8];
+}
+
+pub trait RightCipherText {
+    const BLOCK_SIZE: usize;
+
+    fn init<R: Rng>(blocks: usize, rng: &mut R) -> Self;
+    fn num_blocks(&self) -> usize;
 }
 
 impl Right {
@@ -52,19 +68,4 @@ impl Right {
         // TODO
         Ok(Self::init(100))
     }
-}
-
-impl<L: LeftCipherText> CipherText<L> {
-    pub fn to_bytes(&self) -> Vec<u8> {
-        // TODO - or do we just use serde?
-        //[self.0.to_bytes(), self.1.to_bytes()].concat()
-        vec![0]
-    }
-
-    // TODO: Maybe we just use serde traits instead!?
-    /*pub fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
-        // TODO: I'm not sure if this makes sense any more on it's own?
-        // You'd have to know the size of the left CT at least
-        // Maybe that value *could* be a generic parameter?
-    }*/
 }

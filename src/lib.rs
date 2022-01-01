@@ -155,7 +155,7 @@ pub struct OREError;
 
 pub trait ORECipher: Sized {
     type LeftType;
-    //type RightType;
+    type RightType;
 
     fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64) -> Result<Self, OREError>;
 
@@ -169,9 +169,10 @@ pub trait ORECipher: Sized {
     fn encrypt<const N: usize>(
         &mut self,
         input: &PlainText<N>,
-    ) -> Result<CipherText<Self::LeftType>, OREError>
+    ) -> Result<CipherText<Self>, OREError>
     where
-        <Self as ORECipher>::LeftType: LeftCipherText;
+        <Self as ORECipher>::LeftType: LeftCipherText,
+        <Self as ORECipher>::RightType: RightCipherText;
 
     fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering>;
 }

@@ -1,7 +1,5 @@
 use crate::primitives::AesBlock;
 
-pub type LeftBlock16 = AesBlock;
-
 /*
  * Block type for a Right CipherText with 32-bytes per block
  * corresponding to a plaintext block-size of 8-bits and a 2-bit indicator function.
