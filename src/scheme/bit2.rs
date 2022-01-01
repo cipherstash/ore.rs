@@ -324,7 +324,7 @@ impl Ord for CipherText<OreAes128Left> {
 
         for n in 0..self.0.num_blocks() {
             // TODO: Fix me!
-            if self.0.data[n] != b.0.data[n] || &self.0.block(n) != &b.0.block(n) {
+            if self.0.data[n] != b.0.data[n] || self.0.block(n) != b.0.block(n) {
                 is_equal = false;
                 l = n;
                 // TODO: Make sure that this is constant time (i.e. don't break)
@@ -337,7 +337,7 @@ impl Ord for CipherText<OreAes128Left> {
         }
 
         let hash: AES128Z2Hash = Hash::new(&b.1.nonce);
-        let h = hash.hash(&self.0.block(l));
+        let h = hash.hash(self.0.block(l));
 
         let block = right_block(&b.1.data, l);
         let test = right_get_bit(block, self.0.data[l] as usize) ^ h;

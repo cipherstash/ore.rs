@@ -36,7 +36,7 @@ impl Hash for AES128Z2Hash {
 
     fn hash_all(&self, data: &mut [u8]) -> Vec<u8> {
         let mut vec = Vec::with_capacity(data.len());
-        let blocks = to_blocks::<BlockSize>(&mut data[..]);
+        let blocks = to_blocks::<BlockSize>(&mut *data);
         self.cipher.encrypt_blocks(blocks);
 
         // TODO: Use a mapping iterator?

@@ -24,8 +24,8 @@ impl Prf for AES128PRF {
     }
 
     fn encrypt_all(&self, data: &mut [u8]) {
-        let mut blocks = to_blocks::<BlockSize>(&mut data[..]);
-        self.cipher.encrypt_blocks(&mut blocks);
+        let blocks = to_blocks::<BlockSize>(&mut *data);
+        self.cipher.encrypt_blocks(blocks);
     }
 }
 
