@@ -14,9 +14,6 @@ use aes::cipher::generic_array::GenericArray;
 use rand::{os::OsRng, Rng};
 use std::cmp::Ordering;
 
-pub mod block_types;
-pub use self::block_types::*;
-
 /* Define our scheme */
 #[derive(Debug)]
 pub struct OREAES128 {
@@ -145,37 +142,13 @@ impl RightCipherText for OreAes128Right {
     }
 }
 
+// TODO: Make this an indicator trait and associated type
 fn cmp(a: u8, b: u8) -> u8 {
     if a > b {
         1u8
     } else {
         0u8
     }
-}
-
-#[inline]
-fn right_block(data: &[u8], index: usize) -> &[u8] {
-    let offset = index * 32; // TODO: RIGHT_BLOCK_SIZE
-    &data[offset..(offset + 32)]
-}
-
-#[inline]
-fn right_set_bit(block: &mut [u8], bit: usize, value: u8) {
-    debug_assert!(bit < 256);
-    let byte_index = bit / 8;
-    let mask = bit % 8;
-    let v = value << mask;
-    block[byte_index] |= v;
-}
-
-#[inline]
-fn right_get_bit(block: &[u8], bit: usize) -> u8 {
-    debug_assert!(bit < 256);
-    let byte_index = bit / 8;
-    let position = bit % 8;
-    let v = 1 << position;
-
-    (block[byte_index] & v) >> position
 }
 
 impl ORECipher for OREAES128 {

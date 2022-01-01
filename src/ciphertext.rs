@@ -1,4 +1,4 @@
-use crate::primitives::{AesBlock, Nonce};
+use crate::primitives::AesBlock;
 use rand::Rng;
 pub use crate::ORECipher;
 
@@ -53,25 +53,3 @@ pub trait RightCipherText {
     fn get_n_bit(&self, index: usize, j: usize) -> u8;
 }
 
-impl Right {
-    // TODO: Pass a size value for the data
-    pub(crate) fn init(len: usize) -> Self {
-        Self {
-            nonce: Default::default(),
-            data: vec![0u8; len],
-        }
-    }
-
-    pub fn size(self) -> usize {
-        self.data.len()
-    }
-
-    pub fn to_bytes(self) -> Vec<u8> {
-        self.data
-    }
-
-    pub fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
-        // TODO
-        Ok(Self::init(100))
-    }
-}
