@@ -1,21 +1,21 @@
-use rand::Rng;
 pub use crate::ORECipher;
+use rand::Rng;
 
 #[derive(Debug, Clone)]
 pub struct CipherText<S: ORECipher>
 where
     <S as ORECipher>::LeftType: LeftCipherText,
-    <S as ORECipher>::RightType: RightCipherText
+    <S as ORECipher>::RightType: RightCipherText,
 {
     pub left: S::LeftType,
-    pub right: S::RightType
+    pub right: S::RightType,
 }
 
 pub struct Left<S: ORECipher>
 where
-    <S as ORECipher>::LeftType: LeftCipherText
+    <S as ORECipher>::LeftType: LeftCipherText,
 {
-    pub left: S::LeftType
+    pub left: S::LeftType,
 }
 
 // TODO: Remove this
@@ -53,4 +53,3 @@ pub trait RightCipherText {
     /* Get's the jth bit (or trit) of the nth block */
     fn get_n_bit(&self, index: usize, j: usize) -> u8;
 }
-

@@ -5,9 +5,9 @@
 use crate::{
     ciphertext::*,
     primitives::{
-        hash::AES128Z2Hash, prf::AES128PRF, prp::KnuthShufflePRP, Hash, Prf, Prp, SEED64, Nonce
+        hash::AES128Z2Hash, prf::AES128PRF, prp::KnuthShufflePRP, Hash, Nonce, Prf, Prp, SEED64,
     },
-    ORECipher, OREError, PlainText, EncryptResult, EncryptLeftResult
+    EncryptLeftResult, EncryptResult, ORECipher, OREError, PlainText,
 };
 
 use aes::cipher::generic_array::GenericArray;
@@ -28,14 +28,14 @@ pub struct OREAES128 {
 #[derive(Debug)]
 pub struct OreAes128Left {
     num_blocks: usize,
-    data: Vec<u8>
+    data: Vec<u8>,
 }
 
 #[derive(Debug)]
 pub struct OreAes128Right {
     num_blocks: usize,
     data: Vec<u8>,
-    nonce: Nonce
+    nonce: Nonce,
 }
 
 impl LeftCipherText for OreAes128Left {
@@ -85,7 +85,7 @@ impl RightCipherText for OreAes128Right {
         let mut ret = Self {
             data: vec![0; blocks * Self::BLOCK_SIZE],
             num_blocks: blocks,
-            nonce: Default::default()
+            nonce: Default::default(),
         };
         // Generate a 16-byte random nonce
         rng.fill_bytes(&mut ret.nonce);

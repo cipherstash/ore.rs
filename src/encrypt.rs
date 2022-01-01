@@ -1,7 +1,7 @@
 use crate::ciphertext::*;
 use crate::convert::ToOrderedInteger;
 use crate::PlainText;
-use crate::{ORECipher, EncryptLeftResult, EncryptResult};
+use crate::{EncryptLeftResult, EncryptResult, ORECipher};
 
 pub trait OREEncrypt<T>
 where
