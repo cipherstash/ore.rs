@@ -4,7 +4,7 @@ pub use crate::ORECipher;
 #[derive(Debug, Clone)]
 pub struct Right {
     pub nonce: AesBlock,
-    pub data: Vec<u8>
+    pub data: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -54,7 +54,7 @@ impl Right {
     }
 }
 
-impl <L: LeftCipherText> CipherText<L> {
+impl<L: LeftCipherText> CipherText<L> {
     pub fn to_bytes(&self) -> Vec<u8> {
         // TODO - or do we just use serde?
         //[self.0.to_bytes(), self.1.to_bytes()].concat()

@@ -5,8 +5,7 @@
 use crate::{
     ciphertext::*,
     primitives::{
-        hash::AES128Z2Hash, prf::AES128PRF, prp::KnuthShufflePRP, Hash, Prf,
-        Prp, SEED64,
+        hash::AES128Z2Hash, prf::AES128PRF, prp::KnuthShufflePRP, Hash, Prf, Prp, SEED64,
     },
     ORECipher, OREError, PlainText,
 };
@@ -36,7 +35,7 @@ type EncryptResult = Result<CipherText<OreAes128Left>, OREError>;
 #[derive(Debug)]
 pub struct OreAes128Left {
     num_blocks: usize,
-    data: Vec<u8>
+    data: Vec<u8>,
 }
 
 impl LeftCipherText for OreAes128Left {
@@ -45,7 +44,7 @@ impl LeftCipherText for OreAes128Left {
     fn init(blocks: usize) -> Self {
         Self {
             data: vec![0; blocks * Self::BLOCK_SIZE],
-            num_blocks: blocks
+            num_blocks: blocks,
         }
     }
 
@@ -156,7 +155,6 @@ impl ORECipher for OREAES128 {
             output.data[n] = prp.permute(*xn).map_err(|_| OREError)?;
         }
 
-
         // Reset the f block
         // TODO: Should we use Zeroize? We don't actually need to clear sensitive data here, we
         // just need fast "zero set". Reassigning the value will drop the old one and allocate new
@@ -190,7 +188,7 @@ impl ORECipher for OREAES128 {
         // nothing else (we may need to keep the scheme on the struct as well!)
         let mut left = Self::LeftType::init(N);
         let mut right = Right::init(N * 32); // TODO: N * RIGHT_BLOCK_SIZE
-        // Generate a 16-byte random nonce
+                                             // Generate a 16-byte random nonce
         self.rng.fill_bytes(&mut right.nonce);
 
         // TODO: This should be a function on Left
@@ -214,7 +212,6 @@ impl ORECipher for OREAES128 {
             block[n] = block_n;
             // Include the block number in the value passed to the Random Oracle
             block[N] = n as u8;
-
 
             let mut ro_keys: [u8; 256 * 16] = [0; 256 * 16];
 
@@ -242,7 +239,7 @@ impl ORECipher for OREAES128 {
              */
             let hasher: AES128Z2Hash = Hash::new(&right.nonce);
             let hashes = hasher.hash_all(&mut ro_keys);
-            
+
             // FIXME: force casting to u8 from usize could cause a panic
             for (j, h) in hashes.iter().enumerate() {
                 let jstar = prp.invert(j as u8).map_err(|_| OREError)?;
@@ -385,122 +382,122 @@ mod tests {
     }
 
     quickcheck! {
-        fn compare_u64(x: u64, y: u64) -> bool {
-            let mut ore = init_ore();
-            let a = x.encrypt(&mut ore).unwrap();
-            let b = y.encrypt(&mut ore).unwrap();
+            fn compare_u64(x: u64, y: u64) -> bool {
+                let mut ore = init_ore();
+                let a = x.encrypt(&mut ore).unwrap();
+                let b = y.encrypt(&mut ore).unwrap();
 
-            match x.cmp(&y) {
-                Ordering::Greater => a > b,
-                Ordering::Less    => a < b,
-                Ordering::Equal   => a == b
-            }
-        }
-
-/*
-        fn compare_u64_raw_slices(x: u64, y: u64) -> bool {
-            let mut ore = init_ore();
-            let a = x.encrypt(&mut ore).unwrap().to_bytes();
-            let b = y.encrypt(&mut ore).unwrap().to_bytes();
-
-            match OREAES128::compare_raw_slices(&a, &b) {
-                Some(Ordering::Greater) => x > y,
-                Some(Ordering::Less)    => x < y,
-                Some(Ordering::Equal)   => x == y,
-                None                    => false
-            }
-        }
-        */
-
-        fn equality_u64(x: u64) -> bool {
-            let mut ore = init_ore();
-            let a = x.encrypt(&mut ore).unwrap();
-            let b = x.encrypt(&mut ore).unwrap();
-
-            a == b
-        }
-/*
-        fn equality_u64_raw_slices(x: u64) -> bool {
-            let mut ore = init_ore();
-            let a = x.encrypt(&mut ore).unwrap().to_bytes();
-            let b = x.encrypt(&mut ore).unwrap().to_bytes();
-
-            match OREAES128::compare_raw_slices(&a, &b) {
-                Some(Ordering::Equal) => true,
-                _ => false
-            }
-        }
-        */
-
-        fn compare_u32(x: u32, y: u32) -> bool {
-            let mut ore = init_ore();
-            let a = x.encrypt(&mut ore).unwrap();
-            let b = y.encrypt(&mut ore).unwrap();
-
-            match x.cmp(&y) {
-                Ordering::Greater => a > b,
-                Ordering::Less    => a < b,
-                Ordering::Equal   => a == b
-            }
-        }
-
-        fn equality_u32(x: u64) -> bool {
-            let mut ore = init_ore();
-            let a = x.encrypt(&mut ore).unwrap();
-            let b = x.encrypt(&mut ore).unwrap();
-
-            a == b
-        }
-
-        fn compare_f64(x: f64, y: f64) -> TestResult {
-            if x.is_nan() || x.is_infinite() || y.is_nan() || y.is_infinite() {
-                return TestResult::discard();
+                match x.cmp(&y) {
+                    Ordering::Greater => a > b,
+                    Ordering::Less    => a < b,
+                    Ordering::Equal   => a == b
+                }
             }
 
-            let mut ore = init_ore();
-            let a = x.encrypt(&mut ore).unwrap();
-            let b = y.encrypt(&mut ore).unwrap();
+    /*
+            fn compare_u64_raw_slices(x: u64, y: u64) -> bool {
+                let mut ore = init_ore();
+                let a = x.encrypt(&mut ore).unwrap().to_bytes();
+                let b = y.encrypt(&mut ore).unwrap().to_bytes();
 
-            match x.partial_cmp(&y) {
-                Some(Ordering::Greater) => TestResult::from_bool(a > b),
-                Some(Ordering::Less)    => TestResult::from_bool(a < b),
-                Some(Ordering::Equal)   => TestResult::from_bool(a == b),
-                None                    => TestResult::failed()
+                match OREAES128::compare_raw_slices(&a, &b) {
+                    Some(Ordering::Greater) => x > y,
+                    Some(Ordering::Less)    => x < y,
+                    Some(Ordering::Equal)   => x == y,
+                    None                    => false
+                }
+            }
+            */
+
+            fn equality_u64(x: u64) -> bool {
+                let mut ore = init_ore();
+                let a = x.encrypt(&mut ore).unwrap();
+                let b = x.encrypt(&mut ore).unwrap();
+
+                a == b
+            }
+    /*
+            fn equality_u64_raw_slices(x: u64) -> bool {
+                let mut ore = init_ore();
+                let a = x.encrypt(&mut ore).unwrap().to_bytes();
+                let b = x.encrypt(&mut ore).unwrap().to_bytes();
+
+                match OREAES128::compare_raw_slices(&a, &b) {
+                    Some(Ordering::Equal) => true,
+                    _ => false
+                }
+            }
+            */
+
+            fn compare_u32(x: u32, y: u32) -> bool {
+                let mut ore = init_ore();
+                let a = x.encrypt(&mut ore).unwrap();
+                let b = y.encrypt(&mut ore).unwrap();
+
+                match x.cmp(&y) {
+                    Ordering::Greater => a > b,
+                    Ordering::Less    => a < b,
+                    Ordering::Equal   => a == b
+                }
+            }
+
+            fn equality_u32(x: u64) -> bool {
+                let mut ore = init_ore();
+                let a = x.encrypt(&mut ore).unwrap();
+                let b = x.encrypt(&mut ore).unwrap();
+
+                a == b
+            }
+
+            fn compare_f64(x: f64, y: f64) -> TestResult {
+                if x.is_nan() || x.is_infinite() || y.is_nan() || y.is_infinite() {
+                    return TestResult::discard();
+                }
+
+                let mut ore = init_ore();
+                let a = x.encrypt(&mut ore).unwrap();
+                let b = y.encrypt(&mut ore).unwrap();
+
+                match x.partial_cmp(&y) {
+                    Some(Ordering::Greater) => TestResult::from_bool(a > b),
+                    Some(Ordering::Less)    => TestResult::from_bool(a < b),
+                    Some(Ordering::Equal)   => TestResult::from_bool(a == b),
+                    None                    => TestResult::failed()
+                }
+            }
+
+            /*
+             * Note that we don't discard any values for the equality check
+             * because NaN == NaN works with the integer encoding
+             * */
+            fn equality_f64(x: f64) -> bool {
+                let mut ore = init_ore();
+                let a = x.encrypt(&mut ore).unwrap();
+                let b = x.encrypt(&mut ore).unwrap();
+
+                a == b
+            }
+
+            fn compare_plaintext(x: u64, y: u64) -> bool {
+                let mut ore = init_ore();
+                let a = x.to_be_bytes().encrypt(&mut ore).unwrap();
+                let b = y.to_be_bytes().encrypt(&mut ore).unwrap();
+
+                match x.cmp(&y) {
+                    Ordering::Greater => a > b,
+                    Ordering::Less    => a < b,
+                    Ordering::Equal   => a == b
+                }
+            }
+
+            fn equality_plaintext(x: f64) -> bool {
+                let mut ore = init_ore();
+                let a = x.to_be_bytes().encrypt(&mut ore).unwrap();
+                let b = x.to_be_bytes().encrypt(&mut ore).unwrap();
+
+                a == b
             }
         }
-
-        /*
-         * Note that we don't discard any values for the equality check
-         * because NaN == NaN works with the integer encoding
-         * */
-        fn equality_f64(x: f64) -> bool {
-            let mut ore = init_ore();
-            let a = x.encrypt(&mut ore).unwrap();
-            let b = x.encrypt(&mut ore).unwrap();
-
-            a == b
-        }
-
-        fn compare_plaintext(x: u64, y: u64) -> bool {
-            let mut ore = init_ore();
-            let a = x.to_be_bytes().encrypt(&mut ore).unwrap();
-            let b = y.to_be_bytes().encrypt(&mut ore).unwrap();
-
-            match x.cmp(&y) {
-                Ordering::Greater => a > b,
-                Ordering::Less    => a < b,
-                Ordering::Equal   => a == b
-            }
-        }
-
-        fn equality_plaintext(x: f64) -> bool {
-            let mut ore = init_ore();
-            let a = x.to_be_bytes().encrypt(&mut ore).unwrap();
-            let b = x.to_be_bytes().encrypt(&mut ore).unwrap();
-
-            a == b
-        }
-    }
 
     #[test]
     fn smallest_to_largest() {
@@ -558,7 +555,7 @@ mod tests {
         assert!(b > a);
     }
 
-/*
+    /*
     #[test]
     fn compare_raw_slices_mismatched_lengths() {
         let mut ore = init_ore();

@@ -163,13 +163,15 @@ pub trait ORECipher: Sized {
         &mut self,
         input: &PlainText<N>,
     ) -> Result<Self::LeftType, OREError>
-    where <Self as ORECipher>::LeftType: LeftCipherText;
+    where
+        <Self as ORECipher>::LeftType: LeftCipherText;
 
     fn encrypt<const N: usize>(
         &mut self,
         input: &PlainText<N>,
     ) -> Result<CipherText<Self::LeftType>, OREError>
-    where <Self as ORECipher>::LeftType: LeftCipherText;
+    where
+        <Self as ORECipher>::LeftType: LeftCipherText;
 
     fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering>;
 }

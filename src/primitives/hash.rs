@@ -1,9 +1,9 @@
 use crate::primitives::{Hash, HashKey};
-use aes::Aes128;
 use aes::cipher::{
-    BlockEncrypt, NewBlockCipher, BlockCipher,
-    generic_array::{GenericArray, ArrayLength},
+    generic_array::{ArrayLength, GenericArray},
+    BlockCipher, BlockEncrypt, NewBlockCipher,
 };
+use aes::Aes128;
 
 type BlockSize = <Aes128 as BlockCipher>::BlockSize;
 

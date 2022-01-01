@@ -17,7 +17,7 @@ pub trait OREEncrypt<T: ORECipher> {
 // with the types. Only need to override for things like floats.
 impl<T: ORECipher> OREEncrypt<T> for u64
 where
-    <T as ORECipher>::LeftType: LeftCipherText
+    <T as ORECipher>::LeftType: LeftCipherText,
 {
     fn encrypt_left(&self, cipher: &mut T) -> Result<T::LeftType, OREError> {
         let bytes = self.to_be_bytes();
@@ -32,11 +32,11 @@ where
 
 impl<T: ORECipher> OREEncrypt<T> for u32
 where
-    <T as ORECipher>::LeftType: LeftCipherText
+    <T as ORECipher>::LeftType: LeftCipherText,
 {
     fn encrypt_left(&self, cipher: &mut T) -> Result<T::LeftType, OREError>
     where
-        T::LeftType: LeftCipherText
+        T::LeftType: LeftCipherText,
     {
         let bytes = self.to_be_bytes();
         cipher.encrypt_left(&bytes)
@@ -50,11 +50,11 @@ where
 
 impl<T: ORECipher> OREEncrypt<T> for f64
 where
-    <T as ORECipher>::LeftType: LeftCipherText
+    <T as ORECipher>::LeftType: LeftCipherText,
 {
     fn encrypt_left(&self, cipher: &mut T) -> Result<T::LeftType, OREError>
     where
-        T::LeftType: LeftCipherText
+        T::LeftType: LeftCipherText,
     {
         let plaintext: u64 = self.map_to();
         plaintext.encrypt_left(cipher)
@@ -68,11 +68,11 @@ where
 
 impl<T: ORECipher, const N: usize> OREEncrypt<T> for PlainText<N>
 where
-    <T as ORECipher>::LeftType: LeftCipherText
+    <T as ORECipher>::LeftType: LeftCipherText,
 {
     fn encrypt_left(&self, cipher: &mut T) -> Result<T::LeftType, OREError>
     where
-        T::LeftType: LeftCipherText
+        T::LeftType: LeftCipherText,
     {
         cipher.encrypt_left(self)
     }
@@ -81,4 +81,3 @@ where
         cipher.encrypt(self)
     }
 }
-

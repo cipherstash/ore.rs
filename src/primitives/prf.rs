@@ -2,8 +2,8 @@ use crate::primitives::{PRFKey, Prf};
 use aes::Aes128;
 
 use aes::cipher::{
-    BlockEncrypt, NewBlockCipher, BlockCipher,
-    generic_array::{GenericArray, ArrayLength},
+    generic_array::{ArrayLength, GenericArray},
+    BlockCipher, BlockEncrypt, NewBlockCipher,
 };
 
 type BlockSize = <Aes128 as BlockCipher>::BlockSize;
@@ -68,14 +68,19 @@ mod tests {
 
     #[test]
     fn prf_test_2_blocks() {
-        let mut input = [0, 1, 2, 3, 4, 5,  6,  7,  8,  9, 10,  11,  12,  13, 14, 170,
-                         4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 170, 255, 221, 97, 170];
+        let mut input = [
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 170, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+            13, 14, 170, 255, 221, 97, 170,
+        ];
         let prf = init_prf();
 
         prf.encrypt_all(&mut input);
         assert_eq!(
-            input, [183, 103, 151, 211, 249, 253, 170, 135, 117, 243, 131, 50, 27, 15, 170, 59,
-                    100, 192,  41, 108, 208, 245, 146, 251, 188, 245, 156, 28, 33, 210, 70, 50]
+            input,
+            [
+                183, 103, 151, 211, 249, 253, 170, 135, 117, 243, 131, 50, 27, 15, 170, 59, 100,
+                192, 41, 108, 208, 245, 146, 251, 188, 245, 156, 28, 33, 210, 70, 50
+            ]
         );
     }
 }
