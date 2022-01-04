@@ -56,7 +56,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     let x_u32 = 100_u32.encrypt(&mut ore).unwrap();
     let y_u32 = 10098393_u32.encrypt(&mut ore).unwrap();
 
-    c.bench_function("encrypt-8", |b| {
+    /*c.bench_function("encrypt-8", |b| {
         b.iter(|| do_encrypt_64(25u64, black_box(&mut ore)))
     });
     c.bench_function("encrypt-left-8", |b| {
@@ -64,7 +64,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
     c.bench_function("compare-8", |b| {
         b.iter(|| do_compare(black_box(&x_u64), black_box(&y_u64)))
-    });
+    });*/
     /*c.bench_function("compare-8-slice", |b| {
         b.iter(|| do_compare_slice(black_box(&x_bytes), black_box(&y_bytes)))
     });*/

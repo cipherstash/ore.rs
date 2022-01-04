@@ -27,55 +27,53 @@ pub struct OREAES128 {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct OreAes128Left {
-    num_blocks: usize,
-    data: Vec<u8>,
-}
+pub struct OreAes128Left<const N: usize> {}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OreAes128Right {
     num_blocks: usize,
+
+    #[serde(with = "serde_bytes")]
     data: Vec<u8>,
+
+    #[serde(skip)] // TODO: Don't actually skip
     nonce: Nonce,
 }
 
-impl LeftCipherText for OreAes128Left {
+impl <const N: usize> LeftCipherText<N> for OreAes128Left<N> {
     const BLOCK_SIZE: usize = 16;
 
-    fn init(blocks: usize) -> Self {
-        Self {
-            data: vec![0; blocks * (Self::BLOCK_SIZE + 1)],
-            num_blocks: blocks,
-        }
+    fn init() -> Self {
+        Self {}
     }
 
-    fn num_blocks(&self) -> usize {
-        self.num_blocks
+    fn output_size() -> usize {
+        N * (Self::BLOCK_SIZE + 1)
     }
 
     #[inline]
-    fn set_xn(&mut self, n: usize, value: u8) {
-        debug_assert!(n < self.num_blocks);
-        self.data[n] = value
+    fn set_xn(data: &mut [u8], n: usize, value: u8) {
+        debug_assert!(n < N);
+        data[n] = value
     }
 
     #[inline]
-    fn block(&self, index: usize) -> &[u8] {
-        debug_assert!(index < self.num_blocks);
-        let offset = self.num_blocks + (index * Self::BLOCK_SIZE);
-        &self.data[offset..(offset + Self::BLOCK_SIZE)]
+    fn block(data: &[u8], index: usize) -> &[u8] {
+        debug_assert!(index < N);
+        let offset = N + (index * Self::BLOCK_SIZE);
+        &data[offset..(offset + Self::BLOCK_SIZE)]
     }
 
     #[inline]
-    fn block_mut(&mut self, index: usize) -> &mut [u8] {
-        debug_assert!(index < self.num_blocks);
-        let offset = self.num_blocks + (index * Self::BLOCK_SIZE);
-        &mut self.data[offset..(offset + Self::BLOCK_SIZE)]
+    fn block_mut(data: &mut [u8], index: usize) -> &mut [u8] {
+        debug_assert!(index < N);
+        let offset = N + (index * Self::BLOCK_SIZE);
+        &mut data[offset..(offset + Self::BLOCK_SIZE)]
     }
 
     #[inline]
-    fn f_mut(&mut self) -> &mut [u8] {
-        &mut self.data[self.num_blocks..]
+    fn f_mut(data: &mut [u8]) -> &mut [u8] {
+        &mut data[N..]
     }
 }
 
@@ -95,6 +93,10 @@ impl RightCipherText for OreAes128Right {
 
     fn num_blocks(&self) -> usize {
         self.num_blocks
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        self.data.as_slice()
     }
 
     #[inline]
@@ -139,8 +141,8 @@ fn cmp(a: u8, b: u8) -> u8 {
     }
 }
 
-impl ORECipher for OREAES128 {
-    type LeftType = OreAes128Left;
+impl <const N: usize> ORECipher<N> for OREAES128 {
+    type LeftType = OreAes128Left<N>;
     type RightType = OreAes128Right;
 
     fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64) -> Result<Self, OREError> {
@@ -157,9 +159,15 @@ impl ORECipher for OREAES128 {
 
     // TODO: Eventually, this will be the default implementation for ORECipher
     // and we'll provide associated types for the Left and Right CipherText impls
-    fn encrypt_left<const N: usize>(&mut self, x: &PlainText<N>) -> EncryptLeftResult<Self> {
+    fn encrypt_left(&mut self, x: &PlainText<N>) -> EncryptLeftResult<Self, N> {
         // First N-bytes for the "x" values, the rest for the "f" blocks
         let mut output = Self::LeftType::init(N);
+
+        // TODO: Create a function called buffer_size or something
+        let mut left = Left::init(N * (Self::LeftType::BLOCK_SIZE + 1));
+
+        // Left init could actually be generic in the LeftType and we can call functions on it
+        // directly inside the Left impl!
 
         // Build the prefixes
         // TODO: Include the block number in the prefix to avoid repeating values for common
@@ -203,10 +211,11 @@ impl ORECipher for OREAES128 {
         // time checking
         self.prf1.encrypt_all(output.f_mut());
 
-        Ok(Left { left: output })
+        //Ok(Left { left: output })
+        Ok(left)
     }
 
-    fn encrypt<const N: usize>(&mut self, x: &PlainText<N>) -> EncryptResult<Self> {
+    fn encrypt(&mut self, x: &PlainText<N>) -> EncryptResult<Self, N> {
         let mut left = Self::LeftType::init(N);
         let mut right = Self::RightType::init(N, &mut self.rng);
 
@@ -321,13 +330,13 @@ impl ORECipher for OREAES128 {
 }
 
 // TODO: This could possibly be generic (same with Eq)
-impl PartialEq for CipherText<OREAES128> {
+impl <const N: usize> PartialEq for CipherText<OREAES128, N> {
     fn eq(&self, b: &Self) -> bool {
         matches!(self.cmp(b), Ordering::Equal)
     }
 }
 
-impl Ord for CipherText<OREAES128> {
+impl <const N: usize> Ord for CipherText<OREAES128, N> {
     fn cmp(&self, b: &Self) -> Ordering {
         let mut is_equal = true;
         let mut l = 0; // Unequal block
@@ -362,7 +371,7 @@ impl Ord for CipherText<OREAES128> {
     }
 }
 
-impl PartialOrd for CipherText<OREAES128> {
+impl <const N: usize> PartialOrd for CipherText<OREAES128, N> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
@@ -372,7 +381,7 @@ impl PartialOrd for CipherText<OREAES128> {
  * (From the Rust docs)
  * This property cannot be checked by the compiler, and therefore Eq implies PartialEq, and has no extra methods.
  */
-impl Eq for CipherText<OREAES128> {}
+impl <const N: usize> Eq for CipherText<OREAES128, N> {}
 
 #[cfg(test)]
 mod tests {

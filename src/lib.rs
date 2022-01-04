@@ -153,23 +153,26 @@ pub type PlainText<const N: usize> = [u8; N];
 #[derive(Debug, Clone)]
 pub struct OREError;
 
-pub type EncryptLeftResult<T> = Result<Left<T>, OREError>;
-pub type EncryptResult<T> = Result<CipherText<T>, OREError>;
+pub type EncryptLeftResult<T, const N: usize> = Result<Left<N>, OREError>;
+pub type EncryptResult<T, const N: usize> = Result<CipherText<T, N>, OREError>;
 
-pub trait ORECipher: Sized {
+// TODO: Do we just bite the bullet and make ORECipher generic in N?
+// This would mean that one "instance" could only encrypt plaintexts of size N
+// but there will always be a new key anyway so possibly not a problem - check Node ORE
+pub trait ORECipher<const N: usize>: Sized {
     type LeftType;
     type RightType;
 
     fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64) -> Result<Self, OREError>;
 
-    fn encrypt_left<const N: usize>(&mut self, input: &PlainText<N>) -> EncryptLeftResult<Self>
+    fn encrypt_left(&mut self, input: &PlainText<N>) -> EncryptLeftResult<Self, N>
     where
-        <Self as ORECipher>::LeftType: LeftCipherText;
+        <Self as ORECipher<N>>::LeftType: LeftCipherText<N>;
 
-    fn encrypt<const N: usize>(&mut self, input: &PlainText<N>) -> EncryptResult<Self>
+    fn encrypt(&mut self, input: &PlainText<N>) -> EncryptResult<Self, N>
     where
-        <Self as ORECipher>::LeftType: LeftCipherText,
-        <Self as ORECipher>::RightType: RightCipherText;
+        <Self as ORECipher<N>>::LeftType: LeftCipherText<N>,
+        <Self as ORECipher<N>>::RightType: RightCipherText;
 
     fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering>;
 }

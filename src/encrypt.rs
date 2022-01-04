@@ -3,89 +3,87 @@ use crate::convert::ToOrderedInteger;
 use crate::PlainText;
 use crate::{EncryptLeftResult, EncryptResult, ORECipher};
 
-pub trait OREEncrypt<T: ORECipher> {
-    fn encrypt_left(&self, cipher: &mut T) -> EncryptLeftResult<T>
+pub trait OREEncrypt<T: ORECipher<N>, const N: usize> {
+    fn encrypt_left(&self, cipher: &mut T) -> EncryptLeftResult<T, N>
     where
-        <T as ORECipher>::LeftType: LeftCipherText;
+        <T as ORECipher<N>>::LeftType: LeftCipherText<N>;
 
-    fn encrypt(&self, input: &mut T) -> EncryptResult<T>
+    fn encrypt(&self, input: &mut T) -> EncryptResult<T, N>
     where
-        <T as ORECipher>::LeftType: LeftCipherText,
-        <T as ORECipher>::RightType: RightCipherText;
+        <T as ORECipher<N>>::LeftType: LeftCipherText<N>,
+        <T as ORECipher<N>>::RightType: RightCipherText;
 }
 
-// FIXME: I don't like that the cipher is mutable - its private members are mutable
-// TODO: Perhaps we could make the implementations default for the trait and control things
-// with the types. Only need to override for things like floats.
-impl<T: ORECipher> OREEncrypt<T> for u64 {
-    fn encrypt_left(&self, cipher: &mut T) -> EncryptLeftResult<T>
+// TODO: This assumes that block-size is 8 - so these will have to be handled for different schemes
+impl<T: ORECipher<8>, const N: usize> OREEncrypt<T, 8> for u64 {
+    fn encrypt_left(&self, cipher: &mut T) -> EncryptLeftResult<T, 8>
     where
-        <T as ORECipher>::LeftType: LeftCipherText,
+        <T as ORECipher<N>>::LeftType: LeftCipherText<8>,
     {
         let bytes = self.to_be_bytes();
         cipher.encrypt_left(&bytes)
     }
 
-    fn encrypt(&self, cipher: &mut T) -> EncryptResult<T>
+    fn encrypt(&self, cipher: &mut T) -> EncryptResult<T, N>
     where
-        <T as ORECipher>::LeftType: LeftCipherText,
-        <T as ORECipher>::RightType: RightCipherText,
+        <T as ORECipher<N>>::LeftType: LeftCipherText<N>,
+        <T as ORECipher<N>>::RightType: RightCipherText,
     {
         let bytes = self.to_be_bytes();
         cipher.encrypt(&bytes)
     }
 }
 
-impl<T: ORECipher> OREEncrypt<T> for u32 {
-    fn encrypt_left(&self, cipher: &mut T) -> EncryptLeftResult<T>
+impl<T: ORECipher<N>, const N: usize> OREEncrypt<T, N> for u32 {
+    fn encrypt_left(&self, cipher: &mut T) -> EncryptLeftResult<T, N>
     where
-        <T as ORECipher>::LeftType: LeftCipherText,
+        <T as ORECipher<N>>::LeftType: LeftCipherText<N>,
     {
         let bytes = self.to_be_bytes();
         cipher.encrypt_left(&bytes)
     }
 
-    fn encrypt(&self, cipher: &mut T) -> EncryptResult<T>
+    fn encrypt(&self, cipher: &mut T) -> EncryptResult<T, N>
     where
-        <T as ORECipher>::LeftType: LeftCipherText,
-        <T as ORECipher>::RightType: RightCipherText,
+        <T as ORECipher<N>>::LeftType: LeftCipherText<N>,
+        <T as ORECipher<N>>::RightType: RightCipherText,
     {
         let bytes = self.to_be_bytes();
         cipher.encrypt(&bytes)
     }
 }
 
-impl<T: ORECipher> OREEncrypt<T> for f64 {
-    fn encrypt_left(&self, cipher: &mut T) -> EncryptLeftResult<T>
+impl<T: ORECipher<N>, const N: usize> OREEncrypt<T, N> for f64 {
+    fn encrypt_left(&self, cipher: &mut T) -> EncryptLeftResult<T, N>
     where
-        <T as ORECipher>::LeftType: LeftCipherText,
+        <T as ORECipher<N>>::LeftType: LeftCipherText<N>,
     {
         let plaintext: u64 = self.map_to();
         plaintext.encrypt_left(cipher)
     }
 
-    fn encrypt(&self, cipher: &mut T) -> EncryptResult<T>
+    fn encrypt(&self, cipher: &mut T) -> EncryptResult<T, N>
     where
-        <T as ORECipher>::LeftType: LeftCipherText,
-        <T as ORECipher>::RightType: RightCipherText,
+        <T as ORECipher<N>>::LeftType: LeftCipherText<N>,
+        <T as ORECipher<N>>::RightType: RightCipherText,
     {
         let plaintext: u64 = self.map_to();
         plaintext.encrypt(cipher)
     }
 }
 
-impl<T: ORECipher, const N: usize> OREEncrypt<T> for PlainText<N> {
-    fn encrypt_left(&self, cipher: &mut T) -> EncryptLeftResult<T>
+impl<T: ORECipher<N>, const N: usize> OREEncrypt<T, N> for PlainText<N> {
+    fn encrypt_left(&self, cipher: &mut T) -> EncryptLeftResult<T, N>
     where
-        <T as ORECipher>::LeftType: LeftCipherText,
+        <T as ORECipher<N>>::LeftType: LeftCipherText<N>,
     {
         cipher.encrypt_left(self)
     }
 
-    fn encrypt(&self, cipher: &mut T) -> EncryptResult<T>
+    fn encrypt(&self, cipher: &mut T) -> EncryptResult<T, N>
     where
-        <T as ORECipher>::LeftType: LeftCipherText,
-        <T as ORECipher>::RightType: RightCipherText,
+        <T as ORECipher<N>>::LeftType: LeftCipherText<N>,
+        <T as ORECipher<N>>::RightType: RightCipherText,
     {
         cipher.encrypt(self)
     }
