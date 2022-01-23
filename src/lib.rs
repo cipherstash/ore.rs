@@ -153,7 +153,7 @@ pub type PlainText<const N: usize> = [u8; N];
 #[derive(Debug, Clone)]
 pub struct OREError;
 
-pub type EncryptLeftResult<T, const N: usize> = Result<Left<N>, OREError>;
+pub type EncryptLeftResult<T, const N: usize> = Result<Left<T, N>, OREError>;
 pub type EncryptResult<T, const N: usize> = Result<CipherText<T, N>, OREError>;
 
 // TODO: Do we just bite the bullet and make ORECipher generic in N?

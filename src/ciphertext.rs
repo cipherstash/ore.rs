@@ -2,15 +2,15 @@ pub use crate::ORECipher;
 use rand::Rng;
 use serde::{Serialize, Deserialize, de::DeserializeOwned};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CipherText<S, const N: usize>
 where
     S: ORECipher<N>,
     <S as ORECipher<N>>::LeftType: LeftCipherText<N>,
     <S as ORECipher<N>>::RightType: RightCipherText,
 {
-    pub left: S::LeftType,
-    pub right: S::RightType,
+    pub left: Left<S, N>,
+    pub right: S::RightType, // TODO: Use a Right wrapper type
 }
 
 // TODO: Is DeserializeOwned slower than Deserialize? Will we have lifetime problems if we don't
@@ -18,16 +18,17 @@ where
 impl <S, const N: usize> CipherText<S, N>
 where
     S: ORECipher<N>,
-    <S as ORECipher<N>>::LeftType: LeftCipherText<N> + DeserializeOwned,
+    <S as ORECipher<N>>::LeftType: LeftCipherText<N>,
     <S as ORECipher<N>>::RightType: RightCipherText + DeserializeOwned,
 {
     // TODO: Deprecate these
     pub fn to_bytes(&self) -> Vec<u8> {
-        bincode::serialize(&self).unwrap()
+        //bincode::serialize(&self).unwrap()
         /*let slice = self.right.as_slice();
         let mut vec = vec![0; slice.len()];
         vec.copy_from_slice(slice);
         vec*/
+        vec![0u8]
     }
 
     pub fn as_slice(&self) -> &[u8] {
@@ -35,12 +36,13 @@ where
     }
 
     pub fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
-        let decoded: Self = bincode::deserialize(&data).or_else(|_| Err(ParseError))?;
-        Ok(decoded)
+        //let decoded: Self = bincode::deserialize(&data).or_else(|_| Err(ParseError))?;
+        //Ok(decoded)
+        Err(ParseError)
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Left<S, const N: usize>
 where
     S: ORECipher<N>,
@@ -59,7 +61,7 @@ where
     S: ORECipher<N>,
     <S as ORECipher<N>>::LeftType: LeftCipherText<N>
 {
-    pub fn init(num_blocks: usize) -> Self {
+    pub fn init() -> Self {
         Self {
             // TODO: Could this be an array? What is better?
             data: vec![0; S::LeftType::output_size()],
@@ -75,13 +77,22 @@ where
     pub fn block(&self, index: usize) -> &[u8] {
         S::LeftType::block(&self.data, index)
     }
+
+    pub fn f_mut(&mut self) -> &mut [u8] {
+        S::LeftType::f_mut(&mut self.data)
+    }
+
+    pub fn xn(&self, n: usize) -> u8 {
+        S::LeftType::xn(&self.data, n)
+    }
 }
 
 // TODO: Remove this
 #[derive(Debug)]
 pub struct ParseError;
 
-pub trait LeftCipherText<const N: usize>: Serialize {
+// TODO: Rename this to LeftInner or something? Or LeftData?
+pub trait LeftCipherText<const N: usize>: Clone + Serialize + std::fmt::Debug {
     const BLOCK_SIZE: usize;
 
     fn init() -> Self;
@@ -92,6 +103,9 @@ pub trait LeftCipherText<const N: usize>: Serialize {
 
     /* Sets the value for the nth permuted x value in the output */
     fn set_xn(data: &mut [u8], n: usize, value: u8);
+
+    /* Gets the value for the nth permuted x value in the output */
+    fn xn(data: &[u8], n: usize) -> u8;
 
     /* Returns a mutable slice for the whole "F" block.
      * This must be suitable for passing to a PRF.
