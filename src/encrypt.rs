@@ -14,11 +14,7 @@ pub trait OREEncrypt<T: ORECipher> {
 // FIXME: I don't like that the cipher is mutable - its private members are mutable
 // TODO: Perhaps we could make the implementations default for the trait and control things
 // with the types. Only need to override for things like floats.
-impl<T: ORECipher> OREEncrypt<T> for u64
-where
-    <T as ORECipher>::LeftBlockType: CipherTextBlock,
-    <T as ORECipher>::RightBlockType: CipherTextBlock,
-{
+impl<T: ORECipher> OREEncrypt<T> for u64 {
     /* Note that Rust currently doesn't allow
      * generic associated types so this ia a bit verbose! */
     type LeftOutput = Left<T, 8>;
@@ -42,11 +38,7 @@ where
     }
 }
 
-impl<T: ORECipher> OREEncrypt<T> for u32
-where
-    <T as ORECipher>::LeftBlockType: CipherTextBlock,
-    <T as ORECipher>::RightBlockType: CipherTextBlock,
-{
+impl<T: ORECipher> OREEncrypt<T> for u32 {
     type LeftOutput = Left<T, 4>;
     type FullOutput = CipherText<T, 4>;
 
@@ -61,11 +53,7 @@ where
     }
 }
 
-impl<T: ORECipher> OREEncrypt<T> for f64
-where
-    <T as ORECipher>::LeftBlockType: CipherTextBlock,
-    <T as ORECipher>::RightBlockType: CipherTextBlock,
-{
+impl<T: ORECipher> OREEncrypt<T> for f64 {
     type LeftOutput = Left<T, 8>;
     type FullOutput = CipherText<T, 8>;
 
@@ -80,11 +68,7 @@ where
     }
 }
 
-impl<T: ORECipher, const N: usize> OREEncrypt<T> for PlainText<N>
-where
-    <T as ORECipher>::LeftBlockType: CipherTextBlock,
-    <T as ORECipher>::RightBlockType: CipherTextBlock,
-{
+impl<T: ORECipher, const N: usize> OREEncrypt<T> for PlainText<N> {
     type LeftOutput = Left<T, N>;
     type FullOutput = CipherText<T, N>;
 
