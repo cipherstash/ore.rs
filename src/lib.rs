@@ -154,25 +154,20 @@ pub type PlainText<const N: usize> = [u8; N];
 pub struct OREError;
 
 pub trait ORECipher: Sized {
-    type LeftBlockType;
-    type RightBlockType;
+    type LeftBlockType: CipherTextBlock;
+    type RightBlockType: CipherTextBlock;
 
     fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64) -> Result<Self, OREError>;
 
     fn encrypt_left<const N: usize>(
         &mut self,
         input: &PlainText<N>,
-    ) -> Result<Left<Self, N>, OREError>
-    where
-        <Self as ORECipher>::LeftBlockType: CipherTextBlock;
+    ) -> Result<Left<Self, N>, OREError>;
 
     fn encrypt<const N: usize>(
         &mut self,
         input: &PlainText<N>,
-    ) -> Result<CipherText<Self, N>, OREError>
-    where
-        <Self as ORECipher>::RightBlockType: CipherTextBlock,
-        <Self as ORECipher>::LeftBlockType: ciphertext::CipherTextBlock;
+    ) -> Result<CipherText<Self, N>, OREError>;
 
     fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering>;
 }
