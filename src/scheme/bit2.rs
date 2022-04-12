@@ -286,7 +286,9 @@ impl <const N: usize> ORECipher<N> for OREAES128 {
 
         Ok(CipherText { left, right })
     }
+}
 
+impl OREAES128 {
     fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering> {
         /*if a.len() != b.len() {
             return None;
@@ -388,7 +390,7 @@ mod tests {
     use crate::encrypt::OREEncrypt;
     use quickcheck::TestResult;
 
-    fn init_ore() -> OREAES128 {
+    fn init_ore<const N: usize>() -> OREAES128 {
         let mut k1: [u8; 16] = Default::default();
         let mut k2: [u8; 16] = Default::default();
 
@@ -399,26 +401,25 @@ mod tests {
         rng.fill_bytes(&mut k1);
         rng.fill_bytes(&mut k2);
 
-        // FIXME: ORECipher shouldn't be generic in N, the encrypt function should be
-        ORECipher::<8>::init(k1, k2, &seed).unwrap()
+        ORECipher::<N>::init(k1, k2, &seed).unwrap()
     }
 
     quickcheck! {
-            fn compare_u64(x: u64, y: u64) -> bool {
-                let mut ore = init_ore();
-                let a = x.encrypt(&mut ore).unwrap();
-                let b = y.encrypt(&mut ore).unwrap();
+        fn compare_u64(x: u64, y: u64) -> bool {
+            let mut ore = init_ore::<8>();
+            let a = x.encrypt(&mut ore).unwrap();
+            let b = y.encrypt(&mut ore).unwrap();
 
-                match x.cmp(&y) {
-                    Ordering::Greater => a > b,
-                    Ordering::Less    => a < b,
-                    Ordering::Equal   => a == b
-                }
+            match x.cmp(&y) {
+                Ordering::Greater => a > b,
+                Ordering::Less    => a < b,
+                Ordering::Equal   => a == b
             }
+        }
 
     /*
             fn compare_u64_raw_slices(x: u64, y: u64) -> bool {
-                let mut ore = init_ore();
+                let mut ore = init_ore::<8>();
                 let a = x.encrypt(&mut ore).unwrap().to_bytes();
                 let b = y.encrypt(&mut ore).unwrap().to_bytes();
 
@@ -432,15 +433,18 @@ mod tests {
             */
 
             fn equality_u64(x: u64) -> bool {
-                let mut ore = init_ore();
+                let mut ore = init_ore::<4>();
                 let a = x.encrypt(&mut ore).unwrap();
                 let b = x.encrypt(&mut ore).unwrap();
+
+                println!("{:?}", a);
+
 
                 a == b
             }
     /*
             fn equality_u64_raw_slices(x: u64) -> bool {
-                let mut ore = init_ore();
+                let mut ore = init_ore::<8>();
                 let a = x.encrypt(&mut ore).unwrap().to_bytes();
                 let b = x.encrypt(&mut ore).unwrap().to_bytes();
 
@@ -451,8 +455,8 @@ mod tests {
             }
             */
 
-            /*fn compare_u32(x: u32, y: u32) -> bool {
-                let mut ore = init_ore();
+            fn compare_u32(x: u32, y: u32) -> bool {
+                let mut ore = init_ore::<4>();
                 let a = x.encrypt(&mut ore).unwrap();
                 let b = y.encrypt(&mut ore).unwrap();
 
@@ -463,8 +467,8 @@ mod tests {
                 }
             }
 
-            fn equality_u32(x: u64) -> bool {
-                let mut ore = init_ore();
+            /*fn equality_u32(x: u64) -> bool {
+                let mut ore = init_ore::<4>();
                 let a = x.encrypt(&mut ore).unwrap();
                 let b = x.encrypt(&mut ore).unwrap();
 
@@ -476,7 +480,7 @@ mod tests {
                     return TestResult::discard();
                 }
 
-                let mut ore = init_ore();
+                let mut ore = init_ore::<8>();
                 let a = x.encrypt(&mut ore).unwrap();
                 let b = y.encrypt(&mut ore).unwrap();
 
@@ -493,7 +497,7 @@ mod tests {
              * because NaN == NaN works with the integer encoding
              * */
             fn equality_f64(x: f64) -> bool {
-                let mut ore = init_ore();
+                let mut ore = init_ore::<8>();
                 let a = x.encrypt(&mut ore).unwrap();
                 let b = x.encrypt(&mut ore).unwrap();
 
@@ -501,7 +505,7 @@ mod tests {
             }
 
             fn compare_plaintext(x: u64, y: u64) -> bool {
-                let mut ore = init_ore();
+                let mut ore = init_ore::<8>();
                 let a = x.to_be_bytes().encrypt(&mut ore).unwrap();
                 let b = y.to_be_bytes().encrypt(&mut ore).unwrap();
 
@@ -513,7 +517,7 @@ mod tests {
             }
 
             fn equality_plaintext(x: f64) -> bool {
-                let mut ore = init_ore();
+                let mut ore = init_ore::<8>();
                 let a = x.to_be_bytes().encrypt(&mut ore).unwrap();
                 let b = x.to_be_bytes().encrypt(&mut ore).unwrap();
 
@@ -523,7 +527,7 @@ mod tests {
 
     #[test]
     fn smallest_to_largest() {
-        let mut ore = init_ore();
+        let mut ore = init_ore::<8>();
         let a = 0u64.encrypt(&mut ore).unwrap();
         let b = 18446744073709551615u64.encrypt(&mut ore).unwrap();
 
@@ -532,7 +536,7 @@ mod tests {
 
     #[test]
     fn largest_to_smallest() {
-        let mut ore = init_ore();
+        let mut ore = init_ore::<8>();
         let a = 18446744073709551615u64.encrypt(&mut ore).unwrap();
         let b = 0u64.encrypt(&mut ore).unwrap();
 
@@ -541,7 +545,7 @@ mod tests {
 
     #[test]
     fn smallest_to_smallest() {
-        let mut ore = init_ore();
+        let mut ore = init_ore::<8>();
         let a = 0u64.encrypt(&mut ore).unwrap();
         let b = 0u64.encrypt(&mut ore).unwrap();
 
@@ -550,7 +554,7 @@ mod tests {
 
     #[test]
     fn largest_to_largest() {
-        let mut ore = init_ore();
+        let mut ore = init_ore::<8>();
         let a = 18446744073709551615u64.encrypt(&mut ore).unwrap();
         let b = 18446744073709551615u64.encrypt(&mut ore).unwrap();
 
@@ -559,7 +563,7 @@ mod tests {
 
     #[test]
     fn comparisons_in_first_block() {
-        let mut ore = init_ore();
+        let mut ore = init_ore::<8>();
         let a = 18446744073709551615u64.encrypt(&mut ore).unwrap();
         let b = 18446744073709551612u64.encrypt(&mut ore).unwrap();
 
@@ -569,7 +573,7 @@ mod tests {
 
     #[test]
     fn comparisons_in_last_block() {
-        let mut ore = init_ore();
+        let mut ore = init_ore::<8>();
         let a = 10u64.encrypt(&mut ore).unwrap();
         let b = 73u64.encrypt(&mut ore).unwrap();
 
@@ -588,19 +592,19 @@ mod tests {
     }
     */
 
-    #[test]
+    /*#[test]
     fn binary_encoding() {
         let mut ore = init_ore();
         let a = 10u64.encrypt(&mut ore).unwrap();
         let bin = a.to_bytes();
-        assert_eq!(a, CipherText::<OREAES128>::from_bytes(&bin).unwrap());
-    }
+        assert_eq!(a, CipherText::<OREAES128, 8>::from_bytes(&bin).unwrap());
+    }*/
 
     #[test]
     #[should_panic(expected = "ParseError")]
     fn binary_encoding_invalid_length() {
         let bin = vec![0, 1, 2, 3];
-        CipherText::<OREAES128>::from_bytes(&bin).unwrap();
+        CipherText::<OREAES128, 8>::from_bytes(&bin).unwrap();
     }
 
     #[test]
@@ -616,8 +620,8 @@ mod tests {
         ];
         let seed: [u8; 8] = [119, 104, 41, 110, 199, 157, 235, 169];
 
-        let mut ore1: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
-        let mut ore2: OREAES128 = ORECipher::init(k3, k2, &seed).unwrap();
+        let mut ore1: OREAES128 = ORECipher::<8>::init(k1, k2, &seed).unwrap();
+        let mut ore2: OREAES128 = ORECipher::<8>::init(k3, k2, &seed).unwrap();
 
         let a = 1000u32.encrypt(&mut ore1).unwrap().to_bytes();
         let b = 1000u32.encrypt(&mut ore2).unwrap().to_bytes();
@@ -638,8 +642,8 @@ mod tests {
         ];
         let seed: [u8; 8] = [119, 104, 41, 110, 199, 157, 235, 169];
 
-        let mut ore1: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
-        let mut ore2: OREAES128 = ORECipher::init(k1, k3, &seed).unwrap();
+        let mut ore1: OREAES128 = ORECipher::<8>::init(k1, k2, &seed).unwrap();
+        let mut ore2: OREAES128 = ORECipher::<8>::init(k1, k3, &seed).unwrap();
 
         let a = 1000u32.encrypt(&mut ore1).unwrap().to_bytes();
         let b = 1000u32.encrypt(&mut ore2).unwrap().to_bytes();

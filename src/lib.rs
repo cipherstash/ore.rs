@@ -37,7 +37,7 @@
 //! let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! let seed = hex!("00010203 04050607");
-//! let mut ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
+//! let mut ore: OREAES128 = ORECipher::<8>::init(k1, k2, &seed).unwrap();
 //!
 //! // Encryption takes a mutable reference to the cipher and returns a `Result`
 //! let a = 456u64.encrypt(&mut ore).unwrap();
@@ -65,7 +65,7 @@
 //! # let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let seed = hex!("00010203 04050607");
-//! # let mut ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
+//! # let mut ore: OREAES128 = ORECipher::<8>::init(k1, k2, &seed).unwrap();
 //! let a = 456u64.encrypt(&mut ore).unwrap();
 //! let b = 1024u64.encrypt(&mut ore).unwrap();
 //!
@@ -110,7 +110,7 @@
 //! # let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let seed = hex!("00010203 04050607");
-//! # let mut ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
+//! # let mut ore: OREAES128 = ORECipher::<8>::init(k1, k2, &seed).unwrap();
 //! let a = 456u64.encrypt(&mut ore).unwrap();
 //! let bytes: Vec<u8> = a.to_bytes();
 //! ```
@@ -129,13 +129,13 @@
 //! # let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let seed = hex!("00010203 04050607");
-//! # let mut ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
+//! # let mut ore: OREAES128 = ORECipher::<8>::init(k1, k2, &seed).unwrap();
 //! # let a = 456u64.encrypt(&mut ore).unwrap();
 //! # let bytes: Vec<u8> = a.to_bytes();
 //!
 //! let ct = CipherText::<OREAES128, 8>::from_bytes(&bytes).unwrap();
-//! # assert!(ct == a);
 //! ```
+//! # assert!(ct == a);
 
 mod ciphertext;
 mod convert;
@@ -174,7 +174,7 @@ pub trait ORECipher<const N: usize>: Sized {
         <Self as ORECipher<N>>::LeftType: LeftCipherText<N>,
         <Self as ORECipher<N>>::RightType: RightCipherText;
 
-    fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering>;
+    //fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering>;
 }
 
 #[cfg(test)]
