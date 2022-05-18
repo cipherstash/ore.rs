@@ -3,7 +3,7 @@ name = "ore-rs"
 version = "0.2.0"
 authors = ["Dan Draper <dan@cipherstash.com>"]
 edition = "2018"
-homepage = "http://ore.rs"
+homepage = "https://cipherstash.com"
 description = "Order-revealing encryption library used by the CipherStash searchable encryption platform"
 license-file = "COPYING"
 
