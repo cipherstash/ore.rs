@@ -8,7 +8,7 @@
 //!
 //!
 //! # Usage
-//! This crate is [on crates.io](https://crates.io/crates/regex) and can be
+//! This crate is [on crates.io](https://crates.io/crates/ore-rs) and can be
 //! used by adding `ore-rs` to your dependencies in your project's `Cargo.toml`.
 //! ```toml
 //! [dependencies]
