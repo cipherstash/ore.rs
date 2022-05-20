@@ -11,20 +11,19 @@ pub type SEED64 = [u8; 8];
 
 use aes::Block;
 
-pub type AesBlock = Block;
 pub type PRFKey = GenericArray<u8, U16>;
-pub type HashKey = GenericArray<u8, U16>;
-pub const NONCE_SIZE: usize = 16;
+pub type HashKey = [u8; 16];
+pub type Nonce = [u8; 16];
 
 pub trait Prf {
     fn new(key: &PRFKey) -> Self;
-    fn encrypt_all(&self, data: &mut [AesBlock]);
+    fn encrypt_all(&self, data: &mut [u8]);
 }
 
 pub trait Hash {
     fn new(key: &HashKey) -> Self;
     fn hash(&self, data: &[u8]) -> u8;
-    fn hash_all(&self, input: &mut [AesBlock]) -> Vec<u8>;
+    fn hash_all(&self, data: &mut [u8]) -> Vec<u8>;
 }
 
 #[derive(Debug, Clone)]

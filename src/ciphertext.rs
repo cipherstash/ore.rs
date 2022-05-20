@@ -1,140 +1,129 @@
-use crate::primitives::{AesBlock, NONCE_SIZE};
 pub use crate::ORECipher;
+use rand::Rng;
+use serde::{Serialize, Deserialize, de::DeserializeOwned};
 
-#[derive(Debug, Copy, Clone)]
-pub struct Left<S: ORECipher, const N: usize>
+#[derive(Debug, Clone, Serialize)]
+pub struct CipherText<S, const N: usize>
 where
-    <S as ORECipher>::LeftBlockType: CipherTextBlock,
-{
-    /* Array of Left blocks of size N */
-    pub f: [S::LeftBlockType; N],
-
-    /* Transformed input array of size N (x̃ = π(F (k_2 , x|i−1 ), x_i )) */
-    pub xt: [u8; N],
-}
-
-#[derive(Debug, Copy, Clone)]
-pub struct Right<S: ORECipher, const N: usize>
-where
-    <S as ORECipher>::RightBlockType: CipherTextBlock,
-{
-    pub nonce: AesBlock,
-    pub data: [S::RightBlockType; N],
-}
-
-#[derive(Debug, Copy, Clone)]
-pub struct CipherText<S: ORECipher, const N: usize>
-where
-    <S as ORECipher>::LeftBlockType: CipherTextBlock,
-    <S as ORECipher>::RightBlockType: CipherTextBlock,
+    S: ORECipher<N>,
+    <S as ORECipher<N>>::LeftType: LeftCipherText<N>,
+    <S as ORECipher<N>>::RightType: RightCipherText,
 {
     pub left: Left<S, N>,
-    pub right: Right<S, N>,
+    pub right: S::RightType, // TODO: Use a Right wrapper type
 }
 
-pub trait CipherTextBlock: Default + Copy + std::fmt::Debug {
-    const BLOCK_SIZE: usize;
+// TODO: Is DeserializeOwned slower than Deserialize? Will we have lifetime problems if we don't
+// use it?
+impl <S, const N: usize> CipherText<S, N>
+where
+    S: ORECipher<N>,
+    <S as ORECipher<N>>::LeftType: LeftCipherText<N>,
+    <S as ORECipher<N>>::RightType: RightCipherText + DeserializeOwned,
+{
+    // TODO: Deprecate these
+    pub fn to_bytes(&self) -> Vec<u8> {
+        //bincode::serialize(&self).unwrap()
+        /*let slice = self.right.as_slice();
+        let mut vec = vec![0; slice.len()];
+        vec.copy_from_slice(slice);
+        vec*/
+        vec![0u8]
+    }
 
-    // TODO: I wonder if we should be using &[u8] slices with lifetimes? (See pgx for inspo)
-    fn to_bytes(self) -> Vec<u8>;
-    fn from_bytes(data: &[u8]) -> Result<Self, ParseError>;
+    pub fn as_slice(&self) -> &[u8] {
+        self.right.as_slice()
+    }
+
+    pub fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
+        //let decoded: Self = bincode::deserialize(&data).or_else(|_| Err(ParseError))?;
+        //Ok(decoded)
+        Err(ParseError)
+    }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct Left<S, const N: usize>
+where
+    S: ORECipher<N>,
+    <S as ORECipher<N>>::LeftType: LeftCipherText<N>
+{
+    pub data: Vec<u8>,
+    inner: S::LeftType
+}
+
+// TODO: This is just meant to be a convenience type that wraps
+// the underlying implementation
+// It doesn't need the ORECipher but it does need the underlying type
+//
+impl <S, const N: usize> Left<S, N>
+where
+    S: ORECipher<N>,
+    <S as ORECipher<N>>::LeftType: LeftCipherText<N>
+{
+    pub fn init() -> Self {
+        Self {
+            // TODO: Could this be an array? What is better?
+            data: vec![0; S::LeftType::output_size()],
+            // TODO: We can pass the slice to init
+            inner: S::LeftType::init()
+        }
+    }
+
+    pub fn block_mut(&mut self, index: usize) -> &mut [u8] {
+        S::LeftType::block_mut(&mut self.data, index)
+    }
+
+    pub fn block(&self, index: usize) -> &[u8] {
+        S::LeftType::block(&self.data, index)
+    }
+
+    pub fn f_mut(&mut self) -> &mut [u8] {
+        S::LeftType::f_mut(&mut self.data)
+    }
+
+    pub fn xn(&self, n: usize) -> u8 {
+        S::LeftType::xn(&self.data, n)
+    }
+}
+
+// TODO: Remove this
 #[derive(Debug)]
 pub struct ParseError;
 
-impl<S: ORECipher, const N: usize> Left<S, N>
-where
-    <S as ORECipher>::LeftBlockType: CipherTextBlock,
-{
-    pub(crate) fn init() -> Self {
-        Self {
-            xt: [0; N],
-            f: [S::LeftBlockType::default(); N],
-        }
-    }
+// TODO: Rename this to LeftInner or something? Or LeftData?
+pub trait LeftCipherText<const N: usize>: Clone + Serialize + std::fmt::Debug {
+    const BLOCK_SIZE: usize;
 
-    pub fn size() -> usize {
-        N * (S::LeftBlockType::BLOCK_SIZE + 1)
-    }
+    fn init() -> Self;
 
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut vec = Vec::with_capacity(N * S::LeftBlockType::BLOCK_SIZE);
-        self.f
-            .iter()
-            .for_each(|&block| vec.append(&mut block.to_bytes()));
+    fn output_size() -> usize;
+    fn block(data: &[u8], index: usize) -> &[u8];
+    fn block_mut(data: &mut [u8], index: usize) -> &mut [u8];
 
-        [self.xt.to_vec(), vec].concat()
-    }
+    /* Sets the value for the nth permuted x value in the output */
+    fn set_xn(data: &mut [u8], n: usize, value: u8);
 
-    pub fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
-        let mut out = Self::init();
-        out.xt.copy_from_slice(&data[0..N]);
-        for i in 0..N {
-            let block_start_index = N + (i * S::LeftBlockType::BLOCK_SIZE);
-            out.f[i] = S::LeftBlockType::from_bytes(
-                &data[block_start_index..(block_start_index + S::LeftBlockType::BLOCK_SIZE)],
-            )?;
-        }
+    /* Gets the value for the nth permuted x value in the output */
+    fn xn(data: &[u8], n: usize) -> u8;
 
-        Ok(out)
-    }
+    /* Returns a mutable slice for the whole "F" block.
+     * This must be suitable for passing to a PRF.
+     * TODO: Perhaps we should consider a trait bound here? */
+    fn f_mut(data: &mut [u8]) -> &mut [u8];
 }
 
-impl<S: ORECipher, const N: usize> Right<S, N>
-where
-    <S as ORECipher>::RightBlockType: CipherTextBlock,
-{
-    pub(crate) fn init() -> Self {
-        Self {
-            nonce: Default::default(),
-            data: [Default::default(); N],
-        }
-    }
+pub trait RightCipherText: Serialize {
+    const BLOCK_SIZE: usize;
+    fn init<R: Rng>(blocks: usize, rng: &mut R) -> Self;
+    fn num_blocks(&self) -> usize;
+    fn block(&self, index: usize) -> &[u8];
 
-    pub fn size() -> usize {
-        (N * S::RightBlockType::BLOCK_SIZE) + NONCE_SIZE
-    }
+    fn as_slice(&self) -> &[u8];
 
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut vec = Vec::with_capacity(N * S::RightBlockType::BLOCK_SIZE);
-        self.data
-            .iter()
-            .for_each(|&block| vec.append(&mut block.to_bytes()));
+    /* Set's the jth bit (or trit) of the nth block to value */
+    fn set_n_bit(&mut self, index: usize, j: usize, value: u8);
 
-        [self.nonce.to_vec(), vec].concat()
-    }
-
-    pub fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
-        let mut out = Self::init();
-        out.nonce.copy_from_slice(&data[0..NONCE_SIZE]);
-        for i in 0..N {
-            let block_start_index = NONCE_SIZE + (i * S::RightBlockType::BLOCK_SIZE);
-            out.data[i] = S::RightBlockType::from_bytes(
-                &data[block_start_index..(block_start_index + S::RightBlockType::BLOCK_SIZE)],
-            )?;
-        }
-        Ok(out)
-    }
-}
-
-impl<S: ORECipher, const N: usize> CipherText<S, N>
-where
-    <S as ORECipher>::LeftBlockType: CipherTextBlock,
-    <S as ORECipher>::RightBlockType: CipherTextBlock,
-{
-    pub fn to_bytes(&self) -> Vec<u8> {
-        [self.left.to_bytes(), self.right.to_bytes()].concat()
-    }
-
-    pub fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
-        if data.len() != (Left::<S, N>::size() + Right::<S, N>::size()) {
-            return Err(ParseError);
-        }
-        let (left, right) = data.split_at(Left::<S, N>::size());
-        let left = Left::<S, N>::from_bytes(left)?;
-        let right = Right::<S, N>::from_bytes(right)?;
-
-        Ok(Self { left, right })
-    }
+    /* Get's the jth bit (or trit) of the nth block */
+    fn get_n_bit(&self, index: usize, j: usize) -> u8;
 }
