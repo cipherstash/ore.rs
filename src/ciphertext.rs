@@ -2,10 +2,7 @@ use crate::primitives::{AesBlock, NONCE_SIZE};
 pub use crate::ORECipher;
 
 #[derive(Debug, Copy, Clone)]
-pub struct Left<S: ORECipher, const N: usize>
-where
-    <S as ORECipher>::LeftBlockType: CipherTextBlock,
-{
+pub struct Left<S: ORECipher, const N: usize> {
     /* Array of Left blocks of size N */
     pub f: [S::LeftBlockType; N],
 
@@ -14,20 +11,13 @@ where
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct Right<S: ORECipher, const N: usize>
-where
-    <S as ORECipher>::RightBlockType: CipherTextBlock,
-{
+pub struct Right<S: ORECipher, const N: usize> {
     pub nonce: AesBlock,
     pub data: [S::RightBlockType; N],
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct CipherText<S: ORECipher, const N: usize>
-where
-    <S as ORECipher>::LeftBlockType: CipherTextBlock,
-    <S as ORECipher>::RightBlockType: CipherTextBlock,
-{
+pub struct CipherText<S: ORECipher, const N: usize> {
     pub left: Left<S, N>,
     pub right: Right<S, N>,
 }
@@ -37,16 +27,14 @@ pub trait CipherTextBlock: Default + Copy + std::fmt::Debug {
 
     // TODO: I wonder if we should be using &[u8] slices with lifetimes? (See pgx for inspo)
     fn to_bytes(self) -> Vec<u8>;
+
     fn from_bytes(data: &[u8]) -> Result<Self, ParseError>;
 }
 
 #[derive(Debug)]
 pub struct ParseError;
 
-impl<S: ORECipher, const N: usize> Left<S, N>
-where
-    <S as ORECipher>::LeftBlockType: CipherTextBlock,
-{
+impl<S: ORECipher, const N: usize> Left<S, N> {
     pub(crate) fn init() -> Self {
         Self {
             xt: [0; N],
@@ -81,10 +69,7 @@ where
     }
 }
 
-impl<S: ORECipher, const N: usize> Right<S, N>
-where
-    <S as ORECipher>::RightBlockType: CipherTextBlock,
-{
+impl<S: ORECipher, const N: usize> Right<S, N> {
     pub(crate) fn init() -> Self {
         Self {
             nonce: Default::default(),
@@ -118,11 +103,7 @@ where
     }
 }
 
-impl<S: ORECipher, const N: usize> CipherText<S, N>
-where
-    <S as ORECipher>::LeftBlockType: CipherTextBlock,
-    <S as ORECipher>::RightBlockType: CipherTextBlock,
-{
+impl<S: ORECipher, const N: usize> CipherText<S, N> {
     pub fn to_bytes(&self) -> Vec<u8> {
         [self.left.to_bytes(), self.right.to_bytes()].concat()
     }
