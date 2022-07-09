@@ -1,6 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hex_literal::hex;
 use ore_rs::{scheme::bit2::OREAES128, CipherText, ORECipher, OREEncrypt};
+use rand_chacha::ChaCha20Rng;
 
 #[inline]
 fn do_encrypt_64(input: u64, ore: &mut OREAES128) {
@@ -19,7 +20,7 @@ fn do_compare<const N: usize>(a: &CipherText<OREAES128, N>, b: &CipherText<OREAE
 
 #[inline]
 fn do_compare_slice(a: &[u8], b: &[u8]) {
-    let _ret = OREAES128::compare_raw_slices(a, b);
+    let _ret = OREAES128::<ChaCha20Rng>::compare_raw_slices(a, b);
 }
 
 #[inline]
