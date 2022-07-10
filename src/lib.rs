@@ -37,10 +37,10 @@
 //! let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! let seed = hex!("00010203 04050607");
-//! let mut ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
+//! let ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
 //!
 //! // Encryption takes a mutable reference to the cipher and returns a `Result`
-//! let a = 456u64.encrypt(&mut ore).unwrap();
+//! let a = 456u64.encrypt(&ore).unwrap();
 //! ```
 //!
 //! *Note that a cipher must be mutable as it manages internal state*.
@@ -65,9 +65,9 @@
 //! # let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let seed = hex!("00010203 04050607");
-//! # let mut ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
-//! let a = 456u64.encrypt(&mut ore).unwrap();
-//! let b = 1024u64.encrypt(&mut ore).unwrap();
+//! # let ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
+//! let a = 456u64.encrypt(&ore).unwrap();
+//! let b = 1024u64.encrypt(&ore).unwrap();
 //!
 //! // This is fine
 //! let result = a > b; // false because 456 < 1024
@@ -84,10 +84,10 @@
 //! # let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let seed = hex!("00010203 04050607");
-//! # let mut ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
+//! # let ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
 //! // This isn't
-//! let a = 456u64.encrypt(&mut ore).unwrap();
-//! let b = 1024u32.encrypt(&mut ore).unwrap(); // note the u32
+//! let a = 456u64.encrypt(&ore).unwrap();
+//! let b = 1024u32.encrypt(&ore).unwrap(); // note the u32
 //!
 //! let result = a > b; // compilation error
 //! ```
@@ -110,8 +110,8 @@
 //! # let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let seed = hex!("00010203 04050607");
-//! # let mut ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
-//! let a = 456u64.encrypt(&mut ore).unwrap();
+//! # let ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
+//! let a = 456u64.encrypt(&ore).unwrap();
 //! let bytes: Vec<u8> = a.to_bytes();
 //! ```
 //!
@@ -129,8 +129,8 @@
 //! # let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let seed = hex!("00010203 04050607");
-//! # let mut ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
-//! # let a = 456u64.encrypt(&mut ore).unwrap();
+//! # let ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
+//! # let a = 456u64.encrypt(&ore).unwrap();
 //! # let bytes: Vec<u8> = a.to_bytes();
 //!
 //! let ct = CipherText::<OREAES128, 8>::from_bytes(&bytes).unwrap();
@@ -160,12 +160,12 @@ pub trait ORECipher: Sized {
     fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64) -> Result<Self, OREError>;
 
     fn encrypt_left<const N: usize>(
-        &mut self,
+        &self,
         input: &PlainText<N>,
     ) -> Result<Left<Self, N>, OREError>;
 
     fn encrypt<const N: usize>(
-        &mut self,
+        &self,
         input: &PlainText<N>,
     ) -> Result<CipherText<Self, N>, OREError>;
 
