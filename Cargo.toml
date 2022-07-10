@@ -17,7 +17,7 @@ aes = { version = "0.7.5", features = ["armv8"]}
 block-modes = "0.8.1"
 byteorder = "1.4.3"
 hex-literal = "0.3.2"
-rand = "0.3.1"
+rand = "0.8.5"
 rand_chacha = "0.3.1"
 num = "0.4.0"
 

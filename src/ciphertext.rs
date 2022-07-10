@@ -1,4 +1,4 @@
-use crate::primitives::{AesBlock, NONCE_SIZE};
+use crate::primitives::NONCE_SIZE;
 pub use crate::ORECipher;
 
 #[derive(Debug, Copy, Clone)]
@@ -12,7 +12,7 @@ pub struct Left<S: ORECipher, const N: usize> {
 
 #[derive(Debug, Copy, Clone)]
 pub struct Right<S: ORECipher, const N: usize> {
-    pub nonce: AesBlock,
+    pub nonce: [u8; NONCE_SIZE],
     pub data: [S::RightBlockType; N],
 }
 
