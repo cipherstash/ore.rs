@@ -22,16 +22,18 @@ pub use self::block_types::*;
 
 /* Define our scheme */
 #[derive(Debug)]
-pub struct OREAES128<R=ChaCha20Rng> {
+pub struct OreAes128<R: Rng + SeedableRng> {
     prf1: AES128PRF,
     prf2: AES128PRF,
     rng: RefCell<R>,
     prp_seed: SEED64,
 }
 
+pub type OREAES128 = OreAes128<ChaCha20Rng>;
+
 /* Define some convenience types */
-type EncryptLeftResult<R, const N: usize> = Result<Left<OREAES128<R>, N>, OREError>;
-type EncryptResult<R, const N: usize> = Result<CipherText<OREAES128<R>, N>, OREError>;
+type EncryptLeftResult<R, const N: usize> = Result<Left<OreAes128<R>, N>, OREError>;
+type EncryptResult<R, const N: usize> = Result<CipherText<OreAes128<R>, N>, OREError>;
 
 fn cmp(a: u8, b: u8) -> u8 {
     if a > b {
@@ -41,7 +43,7 @@ fn cmp(a: u8, b: u8) -> u8 {
     }
 }
 
-impl<R: Rng + SeedableRng> ORECipher for OREAES128<R> {
+impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
     type LeftBlockType = LeftBlock16;
     type RightBlockType = RightBlock32;
 
@@ -51,7 +53,7 @@ impl<R: Rng + SeedableRng> ORECipher for OREAES128<R> {
 
         let rng: R = SeedableRng::from_entropy();
 
-        return Ok(OREAES128 {
+        return Ok(OreAes128 {
             prf1: Prf::new(GenericArray::from_slice(&k1)),
             prf2: Prf::new(GenericArray::from_slice(&k2)),
             rng: RefCell::new(rng),
@@ -296,7 +298,7 @@ mod tests {
     use crate::encrypt::OREEncrypt;
     use quickcheck::TestResult;
 
-    type ORE = OREAES128::<ChaCha20Rng>;
+    type ORE = OREAES128;
 
     fn init_ore() -> ORE {
         let mut k1: [u8; 16] = Default::default();

@@ -20,7 +20,7 @@ fn do_compare<const N: usize>(a: &CipherText<OREAES128, N>, b: &CipherText<OREAE
 
 #[inline]
 fn do_compare_slice(a: &[u8], b: &[u8]) {
-    let _ret = OREAES128::<ChaCha20Rng>::compare_raw_slices(a, b);
+    let _ret = OREAES128::compare_raw_slices(a, b);
 }
 
 #[inline]
