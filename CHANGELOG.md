@@ -6,7 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0]
+
 * ORE Ciphers no longer need to be mutable!
+* Defined OreAes128 to be generic on Rng
+* OREAES128 implementation now uses ChaCha20Rng
 
 ## [0.2.0]
 
