@@ -19,6 +19,10 @@ It makes the following improvements on the original scheme:
 
 Reference documentation is on [docs.rs/ore-rs](https://docs.rs/ore-rs).
 
+## Need help?
+
+Head over to our [support forum](https://discuss.cipherstash.com/), and we'll get back to you super quick! 
+
 ## Build, Test and Bench
 
 To build, run:
