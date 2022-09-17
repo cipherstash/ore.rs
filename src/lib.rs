@@ -151,24 +151,40 @@ use std::cmp::Ordering;
 pub type PlainText<const N: usize> = [u8; N];
 
 #[derive(Debug, Clone)]
-pub struct OREError;
+pub struct CREError;
 
-pub trait ORECipher: Sized {
+pub trait CRECipherInit: Sized {
+    fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64, cmp: fn(u8, u8) -> u8) -> Result<Self, CREError>;
+}
+
+pub trait CRECipher: Sized {
     type LeftBlockType: CipherTextBlock;
     type RightBlockType: CipherTextBlock;
-
-    fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64) -> Result<Self, OREError>;
 
     fn encrypt_left<const N: usize>(
         &self,
         input: &PlainText<N>,
-    ) -> Result<Left<Self, N>, OREError>;
+    ) -> Result<Left<Self, N>, CREError>;
 
     fn encrypt<const N: usize>(
         &self,
         input: &PlainText<N>,
-    ) -> Result<CipherText<Self, N>, OREError>;
+    ) -> Result<CipherText<Self, N>, CREError>;
+}
 
+pub type OREError = CREError;
+
+pub trait ORECipher: CRECipher {
+    fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64) -> Result<Self, OREError>;
+    fn encrypt_left<const N: usize>(
+        &self,
+        input: &PlainText<N>,
+    ) -> Result<Left<Self, N>, CREError>;
+
+    fn encrypt<const N: usize>(
+        &self,
+        input: &PlainText<N>,
+    ) -> Result<CipherText<Self, N>, CREError>;
     fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering>;
 }
 

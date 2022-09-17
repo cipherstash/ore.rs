@@ -25,7 +25,7 @@ impl<T: ORECipher> OREEncrypt<T> for u64 {
         T::LeftBlockType: CipherTextBlock,
     {
         let bytes = self.to_be_bytes();
-        cipher.encrypt_left(&bytes)
+        ORECipher::encrypt_left(&cipher, &bytes)
     }
 
     fn encrypt(&self, cipher: &T) -> Result<Self::FullOutput, OREError>
@@ -34,7 +34,7 @@ impl<T: ORECipher> OREEncrypt<T> for u64 {
         T::RightBlockType: CipherTextBlock,
     {
         let bytes = self.to_be_bytes();
-        cipher.encrypt(&bytes)
+        ORECipher::encrypt(&cipher, &bytes)
     }
 }
 
@@ -44,12 +44,12 @@ impl<T: ORECipher> OREEncrypt<T> for u32 {
 
     fn encrypt_left(&self, cipher: &T) -> Result<Self::LeftOutput, OREError> {
         let bytes = self.to_be_bytes();
-        cipher.encrypt_left(&bytes)
+        ORECipher::encrypt_left(&cipher, &bytes)
     }
 
     fn encrypt(&self, cipher: &T) -> Result<Self::FullOutput, OREError> {
         let bytes = self.to_be_bytes();
-        cipher.encrypt(&bytes)
+        ORECipher::encrypt(&cipher, &bytes)
     }
 }
 
@@ -73,10 +73,10 @@ impl<T: ORECipher, const N: usize> OREEncrypt<T> for PlainText<N> {
     type FullOutput = CipherText<T, N>;
 
     fn encrypt_left(&self, cipher: &T) -> Result<Self::LeftOutput, OREError> {
-        cipher.encrypt_left(self)
+        ORECipher::encrypt_left(&cipher, self)
     }
 
     fn encrypt(&self, cipher: &T) -> Result<Self::FullOutput, OREError> {
-        cipher.encrypt(self)
+        ORECipher::encrypt(&cipher, self)
     }
 }

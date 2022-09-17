@@ -1,8 +1,8 @@
 use crate::primitives::NONCE_SIZE;
-pub use crate::ORECipher;
+pub use crate::CRECipher;
 
 #[derive(Debug, Copy, Clone)]
-pub struct Left<S: ORECipher, const N: usize> {
+pub struct Left<S: CRECipher, const N: usize> {
     /* Array of Left blocks of size N */
     pub f: [S::LeftBlockType; N],
 
@@ -11,13 +11,13 @@ pub struct Left<S: ORECipher, const N: usize> {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct Right<S: ORECipher, const N: usize> {
+pub struct Right<S: CRECipher, const N: usize> {
     pub nonce: [u8; NONCE_SIZE],
     pub data: [S::RightBlockType; N],
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct CipherText<S: ORECipher, const N: usize> {
+pub struct CipherText<S: CRECipher, const N: usize> {
     pub left: Left<S, N>,
     pub right: Right<S, N>,
 }
@@ -34,7 +34,7 @@ pub trait CipherTextBlock: Default + Copy + std::fmt::Debug {
 #[derive(Debug)]
 pub struct ParseError;
 
-impl<S: ORECipher, const N: usize> Left<S, N> {
+impl<S: CRECipher, const N: usize> Left<S, N> {
     pub(crate) fn init() -> Self {
         Self {
             xt: [0; N],
@@ -69,7 +69,7 @@ impl<S: ORECipher, const N: usize> Left<S, N> {
     }
 }
 
-impl<S: ORECipher, const N: usize> Right<S, N> {
+impl<S: CRECipher, const N: usize> Right<S, N> {
     pub(crate) fn init() -> Self {
         Self {
             nonce: Default::default(),
@@ -103,7 +103,7 @@ impl<S: ORECipher, const N: usize> Right<S, N> {
     }
 }
 
-impl<S: ORECipher, const N: usize> CipherText<S, N> {
+impl<S: CRECipher, const N: usize> CipherText<S, N> {
     pub fn to_bytes(&self) -> Vec<u8> {
         [self.left.to_bytes(), self.right.to_bytes()].concat()
     }
