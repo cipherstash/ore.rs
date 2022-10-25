@@ -6,12 +6,16 @@ pub struct AES128Z2Hash {
     cipher: Aes128,
 }
 
-impl Hash for AES128Z2Hash {
-    fn new(key: &HashKey) -> Self {
+impl AES128Z2Hash {
+    pub fn new(key: &HashKey) -> Self {
         let key_array = GenericArray::from_slice(key);
         let cipher = Aes128::new(key_array);
         Self { cipher }
     }
+}
+
+impl Hash for AES128Z2Hash {
+
 
     fn hash(&self, data: &[u8]) -> u8 {
         /*
@@ -51,7 +55,7 @@ mod tests {
     fn init_hash() -> AES128Z2Hash {
         let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
         let key_array = GenericArray::from_slice(&key);
-        Hash::new(key_array)
+        AES128Z2Hash::new(key_array)
     }
 
     #[test]

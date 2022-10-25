@@ -5,7 +5,7 @@
 use crate::{
     ciphertext::*,
     primitives::{
-        hash::AES128Z2Hash, prf::AES128PRF, prp::KnuthShufflePRP, AesBlock, Hash, HashKey, Prf,
+        aes128z2hash::AES128Z2Hash, prf::AES128PRF, prp::KnuthShufflePRP, AesBlock, Hash, HashKey, Prf,
         Prp, NONCE_SIZE, SEED64,
     },
     ORECipher, OREError, PlainText,
@@ -156,7 +156,7 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
              * If not, we will probably need to implement our own parallel encrypt using intrisics
              * like in the AES crate: https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/ni/aes128.rs#L26
              */
-            let hasher: AES128Z2Hash = Hash::new(AesBlock::from_slice(&right.nonce));
+            let hasher = AES128Z2Hash::new(AesBlock::from_slice(&right.nonce));
             let hashes = hasher.hash_all(&mut ro_keys);
 
             // FIXME: force casting to u8 from usize could cause a panic
@@ -206,7 +206,7 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
 
         let b_right = &b[num_blocks * (left_size + 1)..];
         let hash_key = HashKey::from_slice(&b_right[0..NONCE_SIZE]);
-        let hash: AES128Z2Hash = Hash::new(hash_key);
+        let hash = AES128Z2Hash::new(hash_key);
         let h = hash.hash(left_block(a_f, l));
 
         let target_block = right_block(&b_right[NONCE_SIZE..], l);
@@ -268,7 +268,7 @@ impl<const N: usize> Ord for CipherText<OREAES128, N> {
             return Ordering::Equal;
         }
 
-        let hash: AES128Z2Hash = Hash::new(AesBlock::from_slice(&b.right.nonce));
+        let hash = AES128Z2Hash::new(AesBlock::from_slice(&b.right.nonce));
         let h = hash.hash(&self.left.f[l]);
 
         let test = b.right.data[l].get_bit(self.left.xt[l] as usize) ^ h;
