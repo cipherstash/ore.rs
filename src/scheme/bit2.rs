@@ -5,8 +5,17 @@
 use crate::{
     ciphertext::*,
     primitives::{
-        aes128z2hash::AES128Z2Hash, prf::AES128PRF, prp::KnuthShufflePRP, AesBlock, Hash, HashKey, Prf,
-        Prp, NONCE_SIZE, SEED64,
+        aes128z2hash::AES128Z2Hash,
+        hmac256z2hash::HmacSha256Z2Hash,
+        prf::AES128PRF,
+        prp::KnuthShufflePRP,
+        AesBlock,
+        Hash,
+        HashKey,
+        Prf,
+        Prp,
+        NONCE_SIZE,
+        SEED64,
     },
     ORECipher, OREError, PlainText,
 };
@@ -14,7 +23,7 @@ use crate::{
 use aes::cipher::generic_array::GenericArray;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
-use std::cell::RefCell;
+use std::{cell::RefCell, marker::PhantomData};
 use std::cmp::Ordering;
 
 pub mod block_types;
@@ -22,18 +31,20 @@ pub use self::block_types::*;
 
 /* Define our scheme */
 #[derive(Debug)]
-pub struct OreAes128<R: Rng + SeedableRng> {
+pub struct OreAes128<R: Rng + SeedableRng, H: Hash> {
     prf1: AES128PRF,
     prf2: AES128PRF,
     rng: RefCell<R>,
     prp_seed: SEED64,
+    phantom: PhantomData<H>
 }
 
-pub type OREAES128 = OreAes128<ChaCha20Rng>;
+pub type OREAES128 = OreAes128<ChaCha20Rng, AES128Z2Hash>;
+pub type OreHmac256 = OreAes128<ChaCha20Rng, HmacSha256Z2Hash>;
 
 /* Define some convenience types */
-type EncryptLeftResult<R, const N: usize> = Result<Left<OreAes128<R>, N>, OREError>;
-type EncryptResult<R, const N: usize> = Result<CipherText<OreAes128<R>, N>, OREError>;
+type EncryptLeftResult<R, H, const N: usize> = Result<Left<OreAes128<R, H>, N>, OREError>;
+type EncryptResult<R, H, const N: usize> = Result<CipherText<OreAes128<R, H>, N>, OREError>;
 
 fn cmp(a: u8, b: u8) -> u8 {
     if a > b {
@@ -43,9 +54,10 @@ fn cmp(a: u8, b: u8) -> u8 {
     }
 }
 
-impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
+impl<R: Rng + SeedableRng, H: Hash> ORECipher for OreAes128<R, H> {
     type LeftBlockType = LeftBlock16;
     type RightBlockType = RightBlock32;
+    type RandomOracle = H;
 
     fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64) -> Result<Self, OREError> {
         // TODO: k1 and k2 should be Key types and we should have a set of traits to abstract the
@@ -58,10 +70,11 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
             prf2: Prf::new(GenericArray::from_slice(&k2)),
             rng: RefCell::new(rng),
             prp_seed: *seed,
+            phantom: PhantomData
         });
     }
 
-    fn encrypt_left<const N: usize>(&self, x: &PlainText<N>) -> EncryptLeftResult<R, N> {
+    fn encrypt_left<const N: usize>(&self, x: &PlainText<N>) -> EncryptLeftResult<R, H, N> {
         let mut output = Left::<Self, N>::init();
 
         // Build the prefixes
@@ -101,7 +114,7 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
         Ok(output)
     }
 
-    fn encrypt<const N: usize>(&self, x: &PlainText<N>) -> EncryptResult<R, N> {
+    fn encrypt<const N: usize>(&self, x: &PlainText<N>) -> EncryptResult<R, H, N> {
         let mut left = Left::<Self, N>::init();
         let mut right = Right::<Self, N>::init();
 
@@ -156,7 +169,7 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
              * If not, we will probably need to implement our own parallel encrypt using intrisics
              * like in the AES crate: https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/ni/aes128.rs#L26
              */
-            let hasher = AES128Z2Hash::new(AesBlock::from_slice(&right.nonce));
+            let hasher = Self::RandomOracle::new(AesBlock::from_slice(&right.nonce));
             let hashes = hasher.hash_all(&mut ro_keys);
 
             // FIXME: force casting to u8 from usize could cause a panic
@@ -206,7 +219,7 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
 
         let b_right = &b[num_blocks * (left_size + 1)..];
         let hash_key = HashKey::from_slice(&b_right[0..NONCE_SIZE]);
-        let hash = AES128Z2Hash::new(hash_key);
+        let hash = Self::RandomOracle::new(hash_key);
         let h = hash.hash(left_block(a_f, l));
 
         let target_block = right_block(&b_right[NONCE_SIZE..], l);
@@ -244,13 +257,13 @@ fn get_bit(block: &[u8], bit: usize) -> u8 {
     (block[byte_index] & v) >> position
 }
 
-impl<const N: usize> PartialEq for CipherText<OREAES128, N> {
+impl<R: SeedableRng + Rng, H: Hash, const N: usize> PartialEq for CipherText<OreAes128<R, H>, N> {
     fn eq(&self, b: &Self) -> bool {
         matches!(self.cmp(b), Ordering::Equal)
     }
 }
 
-impl<const N: usize> Ord for CipherText<OREAES128, N> {
+impl<R: SeedableRng + Rng, H: Hash, const N: usize> Ord for CipherText<OreAes128<R, H>, N> {
     fn cmp(&self, b: &Self) -> Ordering {
         let mut is_equal = true;
         let mut l = 0; // Unequal block
@@ -268,7 +281,7 @@ impl<const N: usize> Ord for CipherText<OREAES128, N> {
             return Ordering::Equal;
         }
 
-        let hash = AES128Z2Hash::new(AesBlock::from_slice(&b.right.nonce));
+        let hash = H::new(AesBlock::from_slice(&b.right.nonce));
         let h = hash.hash(&self.left.f[l]);
 
         let test = b.right.data[l].get_bit(self.left.xt[l] as usize) ^ h;
@@ -280,7 +293,7 @@ impl<const N: usize> Ord for CipherText<OREAES128, N> {
     }
 }
 
-impl<const N: usize> PartialOrd for CipherText<OREAES128, N> {
+impl<R: SeedableRng + Rng, H: Hash, const N: usize> PartialOrd for CipherText<OreAes128<R, H>, N> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
@@ -290,7 +303,7 @@ impl<const N: usize> PartialOrd for CipherText<OREAES128, N> {
  * (From the Rust docs)
  * This property cannot be checked by the compiler, and therefore Eq implies PartialEq, and has no extra methods.
  */
-impl<const N: usize> Eq for CipherText<OREAES128, N> {}
+impl<R: SeedableRng + Rng, H: Hash, const N: usize> Eq for CipherText<OreAes128<R, H>, N> {}
 
 #[cfg(test)]
 mod tests {
@@ -298,7 +311,7 @@ mod tests {
     use crate::encrypt::OREEncrypt;
     use quickcheck::TestResult;
 
-    type ORE = OREAES128;
+    type ORE = OreHmac256;
 
     fn init_ore() -> ORE {
         let mut k1: [u8; 16] = Default::default();
@@ -499,7 +512,7 @@ mod tests {
         let ore = init_ore();
         let a = 10u64.encrypt(&ore).unwrap();
         let bin = a.to_bytes();
-        assert_eq!(a, CipherText::<OREAES128, 8>::from_bytes(&bin).unwrap());
+        assert_eq!(a, CipherText::<ORE, 8>::from_bytes(&bin).unwrap());
     }
 
     #[test]

@@ -140,9 +140,10 @@
 mod ciphertext;
 mod convert;
 mod encrypt;
-mod primitives;
+pub mod primitives;
 pub mod scheme;
 
+use primitives::Hash;
 pub use crate::ciphertext::*;
 pub use crate::encrypt::OREEncrypt;
 use crate::primitives::SEED64;
@@ -156,6 +157,7 @@ pub struct OREError;
 pub trait ORECipher: Sized {
     type LeftBlockType: CipherTextBlock;
     type RightBlockType: CipherTextBlock;
+    type RandomOracle: Hash;
 
     fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64) -> Result<Self, OREError>;
 

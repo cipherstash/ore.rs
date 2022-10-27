@@ -1,5 +1,5 @@
 pub mod aes128z2hash;
-pub mod sha256z2hash;
+pub mod hmac256z2hash;
 pub mod prf;
 pub mod prp;
 
@@ -23,7 +23,7 @@ pub trait Prf {
 }
 
 pub trait Hash {
-    //fn new(key: &HashKey) -> Self;
+    fn new(key: &HashKey) -> Self;
     fn hash(&self, data: &[u8]) -> u8;
     fn hash_all(&self, input: &mut [AesBlock]) -> Vec<u8>;
 }

@@ -1,45 +1,42 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hex_literal::hex;
-use ore_rs::{scheme::bit2::OREAES128, CipherText, ORECipher, OREEncrypt};
+use ore_rs::{scheme::bit2::{OREAES128, OreHmac256, OreAes128}, CipherText, ORECipher, OREEncrypt, primitives::{Hash, hmac256z2hash::HmacSha256Z2Hash}};
+use rand::{SeedableRng, Rng};
 use rand_chacha::ChaCha20Rng;
 
 #[inline]
-fn do_encrypt_64(input: u64, ore: &mut OREAES128) {
+fn do_encrypt_64<R: SeedableRng + Rng, H: Hash>(input: u64, ore: &mut OreAes128<R, H>) {
     input.encrypt(ore).unwrap();
 }
 
 #[inline]
-fn do_encrypt_left_64(input: u64, ore: &mut OREAES128) {
+fn do_encrypt_left_64<R: SeedableRng + Rng, H: Hash>(input: u64, ore: &mut OreAes128<R, H>) {
     input.encrypt_left(ore).unwrap();
 }
 
 #[inline]
-fn do_compare<const N: usize>(a: &CipherText<OREAES128, N>, b: &CipherText<OREAES128, N>) {
+fn do_compare<R, H, const N: usize>(a: &CipherText<OreAes128<R, H>, N>, b: &CipherText<OreAes128<R, H>, N>)
+    where R: Rng + SeedableRng, H: Hash {
     let _ret = a.partial_cmp(b);
 }
 
 #[inline]
-fn do_compare_slice(a: &[u8], b: &[u8]) {
-    let _ret = OREAES128::compare_raw_slices(a, b);
-}
-
-#[inline]
-fn do_serialize<const N: usize>(a: &CipherText<OREAES128, N>) {
+fn do_serialize<R: SeedableRng + Rng, H: Hash, const N: usize>(a: &CipherText<OreAes128<R, H>, N>) {
     let _ret = a.to_bytes();
 }
 
 #[inline]
-fn do_deserialize(bytes: &Vec<u8>) {
-    let _ret = CipherText::<OREAES128, 8>::from_bytes(bytes).unwrap();
+fn do_deserialize<R: SeedableRng + Rng, H: Hash>(bytes: &Vec<u8>) {
+    let _ret = CipherText::<OreAes128<R, H>, 8>::from_bytes(bytes).unwrap();
 }
 
 #[inline]
-fn do_encrypt_32(input: u32, ore: &mut OREAES128) {
+fn do_encrypt_32<R: SeedableRng + Rng, H: Hash>(input: u32, ore: &mut OreAes128<R, H>) {
     input.encrypt(ore).unwrap();
 }
 
 #[inline]
-fn do_encrypt_left_32(input: u32, ore: &mut OREAES128) {
+fn do_encrypt_left_32<R: SeedableRng + Rng, H: Hash>(input: u32, ore: &mut OreAes128<R, H>) {
     input.encrypt_left(ore).unwrap();
 }
 
@@ -48,7 +45,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     let k2 = hex!("d0d007a5 3f9a6848 83bc1f21 0f6595a3");
     let seed = hex!("d0d007a5 3f9a6848");
 
-    let mut ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
+    let mut ore: OreHmac256 = ORECipher::init(k1, k2, &seed).unwrap();
     let x_u64 = 100_u64.encrypt(&mut ore).unwrap();
     let y_u64 = 100983939290192_u64.encrypt(&mut ore).unwrap();
 
@@ -68,13 +65,13 @@ fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| do_compare(black_box(&x_u64), black_box(&y_u64)))
     });
     c.bench_function("compare-8-slice", |b| {
-        b.iter(|| do_compare_slice(black_box(&x_bytes), black_box(&y_bytes)))
+        b.iter(|| OreHmac256::compare_raw_slices(black_box(&x_bytes), black_box(&y_bytes)))
     });
     c.bench_function("serialize-8", |b| {
         b.iter(|| do_serialize(black_box(&x_u64)))
     });
     c.bench_function("deserialize-8", |b| {
-        b.iter(|| do_deserialize(black_box(&x_bytes)))
+        b.iter(|| CipherText::<OreHmac256, 8>::from_bytes(black_box(&x_bytes)).unwrap())
     });
 
     c.bench_function("encrypt-4", |b| {
