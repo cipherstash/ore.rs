@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use super::Hash;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -17,16 +19,22 @@ impl Hash for HmacSha256Z2Hash {
     }
 
     fn hash(&self, data: &[u8]) -> u8 {
-        let mut cipher = Hmac::<Sha256>::new_from_slice(&self.key).unwrap(); // TODO: Make new return a result
-        cipher.update(data);
-        let ret = cipher.finalize().into_bytes()[0];
+        let mut mac = Hmac::<Sha256>::new_from_slice(&self.key).unwrap(); // TODO: Handle result
+        mac.update(data);
+        let ret = mac.finalize().into_bytes()[0];
         ret & 1u8
     }
 
     fn hash_all(&self, input: &mut [super::AesBlock]) -> Vec<u8> {
-        input.iter().map(|f| {
-            self.hash(f)
-        }).collect()
+        let mac = RefCell::new(Hmac::<Sha256>::new_from_slice(&self.key).unwrap()); // TODO: Handle result
+        let mut output = vec![0u8; input.len()];
+
+        for (i, data) in input.iter().enumerate() {
+            mac.borrow_mut().update(data);
+            output[i] = mac.borrow_mut().finalize_reset().into_bytes()[0] & 1u8;
+        }
+
+        output
     }
 }
 
