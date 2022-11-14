@@ -7,6 +7,18 @@ pub struct KnuthShufflePRP<T, const N: usize> {
     permutation: Vec<T>,
 }
 
+fn const_position(input: &[u8], val: u8) -> Option<usize> {
+    let mut position = None;
+
+    for (index, elem) in input.iter().enumerate() {
+        if *elem == val && position == None {
+            position = Some(index);
+        }
+    }
+
+    position
+}
+
 impl Prp<u8> for KnuthShufflePRP<u8, 256> {
     /*
      * Initialize an 8-bit (256 element) PRP using a KnuthShuffle
@@ -31,11 +43,7 @@ impl Prp<u8> for KnuthShufflePRP<u8, 256> {
      * Forward permutations are only used once in the ORE scheme so this is OK
      */
     fn permute(&self, input: u8) -> PRPResult<u8> {
-        let u = self
-            .permutation
-            .iter()
-            .position(|&x| x == input)
-            .ok_or(PRPError)?;
+        let u = const_position(&self.permutation, input).ok_or(PRPError)?;
 
         u8::try_from(u).map_err(|_| PRPError)
     }
