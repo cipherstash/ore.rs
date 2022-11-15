@@ -47,7 +47,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     let k2 = hex!("d0d007a5 3f9a6848 83bc1f21 0f6595a3");
     let seed = hex!("d0d007a5 3f9a6848");
 
-    let mut ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
+    let mut ore: OREAES128 = ORECipher::init(&k1, &k2, &seed).unwrap();
     let x_u64 = 100_u64.encrypt(&mut ore).unwrap();
     let y_u64 = 100983939290192_u64.encrypt(&mut ore).unwrap();
 
