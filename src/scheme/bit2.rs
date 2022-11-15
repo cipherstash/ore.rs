@@ -6,7 +6,7 @@ use crate::{
     ciphertext::*,
     primitives::{
         hash::AES128Z2Hash, prf::AES128PRF, prp::KnuthShufflePRP, AesBlock, Hash, HashKey, Prf,
-        Prp, NONCE_SIZE, SEED64,
+        Prp, NONCE_SIZE,
     },
     ORECipher, OREError, PlainText,
 };
@@ -30,7 +30,6 @@ pub struct OreAes128<R: Rng + SeedableRng> {
     prf2: AES128PRF,
     #[zeroize(skip)]
     rng: RefCell<R>,
-    prp_seed: Box<SEED64>,
 }
 
 pub type OREAES128 = OreAes128<ChaCha20Rng>;
@@ -51,7 +50,7 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
     type LeftBlockType = LeftBlock16;
     type RightBlockType = RightBlock32;
 
-    fn init(k1: &[u8; 16], k2: &[u8; 16], seed: &SEED64) -> Result<Self, OREError> {
+    fn init(k1: &[u8; 16], k2: &[u8; 16]) -> Result<Self, OREError> {
         // TODO: k1 and k2 should be Key types and we should have a set of traits to abstract the
         // behaviour ro parsing/loading etc
 
@@ -61,7 +60,6 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
             prf1: Prf::new(GenericArray::from_slice(k1)),
             prf2: Prf::new(GenericArray::from_slice(k2)),
             rng: RefCell::new(rng),
-            prp_seed: Box::new(*seed),
         });
     }
 
@@ -83,7 +81,7 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
         for (n, xn) in x.iter().enumerate().take(N) {
             // Set prefix and create PRP for the block
             let prp: KnuthShufflePRP<u8, 256> =
-                Prp::new(&output.f[n], &self.prp_seed).map_err(|_| OREError)?;
+                Prp::new(&output.f[n]).map_err(|_| OREError)?;
 
             output.xt[n] = prp.permute(*xn).map_err(|_| OREError)?;
         }
@@ -134,7 +132,7 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
         for n in 0..N {
             // Set prefix and create PRP for the block
             let prp: KnuthShufflePRP<u8, 256> =
-                Prp::new(&left.f[n], &self.prp_seed).map_err(|_| OREError)?;
+                Prp::new(&left.f[n]).map_err(|_| OREError)?;
 
             left.xt[n] = prp.permute(x[n]).map_err(|_| OREError)?;
 
@@ -322,13 +320,11 @@ mod tests {
         let mut k2: [u8; 16] = Default::default();
 
         let mut rng = ChaCha20Rng::from_entropy();
-        let mut seed: [u8; 8] = [0; 8];
 
-        rng.fill(&mut seed);
         rng.fill(&mut k1);
         rng.fill(&mut k2);
 
-        ORECipher::init(&k1, &k2, &seed).unwrap()
+        ORECipher::init(&k1, &k2).unwrap()
     }
 
     quickcheck! {
@@ -537,10 +533,9 @@ mod tests {
         let k3: [u8; 16] = [
             49, 50, 51, 52, 53, 54, 55, 56, 57, 48, 97, 98, 99, 100, 101, 102,
         ];
-        let seed: [u8; 8] = [119, 104, 41, 110, 199, 157, 235, 169];
 
-        let ore1: OREAES128 = ORECipher::init(&k1, &k2, &seed).unwrap();
-        let ore2: OREAES128 = ORECipher::init(&k3, &k2, &seed).unwrap();
+        let ore1: OREAES128 = ORECipher::init(&k1, &k2).unwrap();
+        let ore2: OREAES128 = ORECipher::init(&k3, &k2).unwrap();
 
         let a = 1000u32.encrypt(&ore1).unwrap().to_bytes();
         let b = 1000u32.encrypt(&ore2).unwrap().to_bytes();
@@ -559,10 +554,9 @@ mod tests {
         let k3: [u8; 16] = [
             49, 50, 51, 52, 53, 54, 55, 56, 57, 48, 97, 98, 99, 100, 101, 102,
         ];
-        let seed: [u8; 8] = [119, 104, 41, 110, 199, 157, 235, 169];
 
-        let ore1: OREAES128 = ORECipher::init(&k1, &k2, &seed).unwrap();
-        let ore2: OREAES128 = ORECipher::init(&k1, &k3, &seed).unwrap();
+        let ore1: OREAES128 = ORECipher::init(&k1, &k2).unwrap();
+        let ore2: OREAES128 = ORECipher::init(&k1, &k3).unwrap();
 
         let a = 1000u32.encrypt(&ore1).unwrap().to_bytes();
         let b = 1000u32.encrypt(&ore2).unwrap().to_bytes();

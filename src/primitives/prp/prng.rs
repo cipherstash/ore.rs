@@ -1,4 +1,3 @@
-use crate::primitives::SEED64;
 use aes::cipher::{consts::U16, generic_array::GenericArray, BlockEncrypt, KeyInit};
 use aes::Aes128;
 use zeroize::Zeroize;
@@ -8,7 +7,6 @@ pub struct AES128PRNG {
     data: [GenericArray<u8, U16>; 16],
     ptr: (usize, usize), // ptr to block and byte within block
     ctr: u32,            // increments with each new encryption
-    seed: SEED64,
 }
 
 impl Zeroize for AES128PRNG {
@@ -16,8 +14,6 @@ impl Zeroize for AES128PRNG {
         for d in self.data.iter_mut() {
             d.as_mut_slice().zeroize();
         }
-
-        self.seed.zeroize();
     }
 }
 
@@ -26,7 +22,7 @@ impl Zeroize for AES128PRNG {
  * before it panics. Should _only_ be used inside the PRP.
  */
 impl AES128PRNG {
-    pub fn init(key: &[u8], seed: &SEED64) -> Self {
+    pub fn init(key: &[u8]) -> Self {
         let key_array = GenericArray::from_slice(key);
         let cipher = Aes128::new(key_array);
         let mut prng = Self {
@@ -34,7 +30,6 @@ impl AES128PRNG {
             data: Default::default(),
             ctr: 0,
             ptr: (0, 0),
-            seed: *seed,
         };
         prng.generate();
         prng
@@ -68,7 +63,6 @@ impl AES128PRNG {
             // Counter
             self.data[i][0..4].copy_from_slice(&self.ctr.to_be_bytes());
             self.ctr += 1;
-            self.data[i][8..16].copy_from_slice(&self.seed);
         }
         self.cipher.encrypt_blocks(&mut self.data);
     }
@@ -94,16 +88,15 @@ mod tests {
 
     fn init_prng() -> AES128PRNG {
         let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-        let seed: SEED64 = hex!("00010203 04050607");
 
-        AES128PRNG::init(&key, &seed)
+        AES128PRNG::init(&key)
     }
 
     #[test]
     fn prg_next_byte() {
         let mut prg = init_prng();
-        assert_eq!(244, prg.next_byte());
-        assert_eq!(39, prg.next_byte());
+        assert_eq!(198, prg.next_byte());
+        assert_eq!(161, prg.next_byte());
 
         for _i in 3..=255 {
             prg.next_byte();
