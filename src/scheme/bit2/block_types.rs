@@ -1,3 +1,5 @@
+use zeroize::Zeroize;
+
 use crate::ciphertext::{CipherTextBlock, ParseError};
 use crate::primitives::AesBlock;
 
@@ -48,6 +50,10 @@ impl CipherTextBlock for LeftBlock16 {
             Ok(Self::clone_from_slice(data))
         }
     }
+
+    fn default_in_place(&mut self) {
+        self.zeroize()
+    }
 }
 
 impl CipherTextBlock for RightBlock32 {
@@ -68,6 +74,10 @@ impl CipherTextBlock for RightBlock32 {
             Ok(Self { data: arr })
         }
     }
+
+    fn default_in_place(&mut self) {
+        self.data.zeroize()
+    }
 }
 
 #[cfg(test)]
@@ -85,5 +95,20 @@ mod tests {
 
         block.set_bit(255, 1);
         assert_eq!(block.get_bit(255), 1);
+    }
+
+    #[test]
+    fn right_default_in_place_without_new_data() {
+        let mut right = RightBlock32::default();
+        right.data.copy_from_slice(&[1; 32]);
+
+        let ptr: *const [u8] = &right.data;
+
+        assert_eq!(unsafe { &*ptr }, &[1; 32]);
+
+        right.default_in_place();
+
+        assert_eq!(unsafe { &*ptr }, &[0; 32]);
+        assert_eq!(right.data, [0; 32]);
     }
 }

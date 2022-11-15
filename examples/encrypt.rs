@@ -1,13 +1,12 @@
 use hex_literal::hex;
 use ore_rs::{scheme::bit2::OREAES128, ORECipher, OREEncrypt};
 
-
 fn main() {
     let k1 = hex!("00010203 04050607 08090a0b 0c0d0e0f");
     let k2 = hex!("d0d007a5 3f9a6848 83bc1f21 0f6595a3");
     let seed = hex!("d0d007a5 3f9a6848");
 
-    let ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
+    let ore: OREAES128 = ORECipher::init(&k1, &k2, &seed).unwrap();
 
     let i = 10000u64;
     let x_u64 = i.encrypt(&ore).unwrap().to_bytes();

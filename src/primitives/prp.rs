@@ -2,11 +2,23 @@ pub mod prng;
 use crate::primitives::prp::prng::AES128PRNG;
 use crate::primitives::{PRPError, PRPResult, Prp, SEED64};
 use std::convert::TryFrom;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
-pub struct KnuthShufflePRP<T, const N: usize> {
+#[derive(Zeroize)]
+pub struct KnuthShufflePRP<T: Zeroize, const N: usize> {
     permutation: [T; N],
-    inverse: [T; N]
+    inverse: [T; N],
 }
+
+// For some reason ZeroizeOnDrop doesn't work - so manually do it
+impl<T: Zeroize, const N: usize> Drop for KnuthShufflePRP<T, N> {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+// Impl the ZeroizeOnDrop marker trait since we're zeroizing above
+impl<T: Zeroize, const N: usize> ZeroizeOnDrop for KnuthShufflePRP<T, N> {}
 
 impl Prp<u8> for KnuthShufflePRP<u8, 256> {
     /*
@@ -18,7 +30,7 @@ impl Prp<u8> for KnuthShufflePRP<u8, 256> {
 
         let mut perm = Self {
             permutation: [0u8; 256],
-            inverse: [0u8; 256]
+            inverse: [0u8; 256],
         };
 
         // Initialize values
@@ -52,8 +64,8 @@ impl Prp<u8> for KnuthShufflePRP<u8, 256> {
         }
     }
 
-    /* 
-     * Performs the inverse permutation in constant time.     * 
+    /*
+     * Performs the inverse permutation in constant time.
      */
     fn invert(&self, input: u8) -> PRPResult<u8> {
         let index = usize::try_from(input).map_err(|_| PRPError)?;
@@ -82,7 +94,11 @@ mod tests {
         let prp = init_prp()?;
 
         for i in 0..=255 {
-            assert_eq!(i, prp.invert(prp.permute(i)?)?, "permutation round-trip failed");
+            assert_eq!(
+                i,
+                prp.invert(prp.permute(i)?)?,
+                "permutation round-trip failed"
+            );
         }
 
         Ok(())

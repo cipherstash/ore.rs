@@ -1,13 +1,24 @@
 use crate::primitives::SEED64;
-use aes::cipher::{consts::U16, generic_array::GenericArray, BlockEncrypt, NewBlockCipher};
+use aes::cipher::{consts::U16, generic_array::GenericArray, BlockEncrypt, KeyInit};
 use aes::Aes128;
+use zeroize::Zeroize;
 
 pub struct AES128PRNG {
     cipher: Aes128,
     data: [GenericArray<u8, U16>; 16],
     ptr: (usize, usize), // ptr to block and byte within block
-    ctr: u32, // increments with each new encryption
+    ctr: u32,            // increments with each new encryption
     seed: SEED64,
+}
+
+impl Zeroize for AES128PRNG {
+    fn zeroize(&mut self) {
+        for d in self.data.iter_mut() {
+            d.as_mut_slice().zeroize();
+        }
+
+        self.seed.zeroize();
+    }
 }
 
 /*
@@ -75,7 +86,6 @@ impl AES128PRNG {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

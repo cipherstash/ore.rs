@@ -12,22 +12,25 @@ use crate::{
 };
 
 use aes::cipher::generic_array::GenericArray;
+use lazy_static::lazy_static;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use subtle_ng::{Choice, ConstantTimeEq, ConditionallySelectable};
+use subtle_ng::{Choice, ConditionallySelectable, ConstantTimeEq};
+use zeroize::ZeroizeOnDrop;
 
 pub mod block_types;
 pub use self::block_types::*;
 
 /* Define our scheme */
-#[derive(Debug)]
+#[derive(Debug, ZeroizeOnDrop)]
 pub struct OreAes128<R: Rng + SeedableRng> {
     prf1: AES128PRF,
     prf2: AES128PRF,
+    #[zeroize(skip)]
     rng: RefCell<R>,
-    prp_seed: SEED64,
+    prp_seed: Box<SEED64>,
 }
 
 pub type OREAES128 = OreAes128<ChaCha20Rng>;
@@ -48,17 +51,17 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
     type LeftBlockType = LeftBlock16;
     type RightBlockType = RightBlock32;
 
-    fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64) -> Result<Self, OREError> {
+    fn init(k1: &[u8; 16], k2: &[u8; 16], seed: &SEED64) -> Result<Self, OREError> {
         // TODO: k1 and k2 should be Key types and we should have a set of traits to abstract the
         // behaviour ro parsing/loading etc
 
         let rng: R = SeedableRng::from_entropy();
 
         return Ok(OreAes128 {
-            prf1: Prf::new(GenericArray::from_slice(&k1)),
-            prf2: Prf::new(GenericArray::from_slice(&k2)),
+            prf1: Prf::new(GenericArray::from_slice(k1)),
+            prf2: Prf::new(GenericArray::from_slice(k2)),
             rng: RefCell::new(rng),
-            prp_seed: *seed,
+            prp_seed: Box::new(*seed),
         });
     }
 
@@ -86,7 +89,7 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
         }
 
         // Reset the f block
-        // TODO: Should we use Zeroize? We don't actually need to clear sensitive data here, we
+        // We don't actually need to clear sensitive data here, we
         // just need fast "zero set". Reassigning the value will drop the old one and allocate new
         // data to the stack
         output.f = [Default::default(); N];
@@ -120,6 +123,14 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
 
         self.prf2.encrypt_all(&mut left.f);
 
+        // To make zeroizing / resetting the RO keys
+        // Since the AesBlock type is stack allocated this should get optimised to a single memcpy
+        lazy_static! {
+            static ref ZEROED_RO_KEYS: [AesBlock; 256] = [Default::default(); 256];
+        }
+
+        let mut ro_keys = *ZEROED_RO_KEYS;
+
         for n in 0..N {
             // Set prefix and create PRP for the block
             let prp: KnuthShufflePRP<u8, 256> =
@@ -128,15 +139,12 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
             left.xt[n] = prp.permute(x[n]).map_err(|_| OREError)?;
 
             // Reset the f block
-            // TODO: Do we need to zeroize the old data before it is dropped due to de-assignment?
-            left.f[n] = Default::default();
+            left.f[n].default_in_place();
 
             left.f[n][0..n].clone_from_slice(&x[0..n]);
             left.f[n][n] = left.xt[n];
             // Include the block number in the value passed to the Random Oracle
             left.f[n][N] = n as u8;
-
-            let mut ro_keys: [AesBlock; 256] = [Default::default(); 256];
 
             for (j, ro_key) in ro_keys.iter_mut().enumerate() {
                 /*
@@ -169,11 +177,12 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
                 let indicator = cmp(jstar, x[n]);
                 right.data[n].set_bit(j, indicator ^ h);
             }
-        }
-        self.prf1.encrypt_all(&mut left.f);
 
-        // TODO: Do we need to do any zeroing? See https://lib.rs/crates/zeroize
-        // Zeroize the RO Keys before re-assigning them
+            // Zeroize / reset the RO keys before the next loop iteration
+            ro_keys.clone_from_slice(&*ZEROED_RO_KEYS);
+        }
+
+        self.prf1.encrypt_all(&mut left.f);
 
         Ok(CipherText { left, right })
     }
@@ -264,7 +273,7 @@ impl<const N: usize> Ord for CipherText<OREAES128, N> {
 
         for n in 0..N {
             let condition: Choice =
-             !(self.left.xt[n].ct_eq(&b.left.xt[n])) | !(self.left.f[n].ct_eq(&b.left.f[n]));
+                !(self.left.xt[n].ct_eq(&b.left.xt[n])) | !(self.left.f[n].ct_eq(&b.left.f[n]));
 
             l.conditional_assign(&(n as u64), is_equal & condition);
             is_equal.conditional_assign(&Choice::from(0), is_equal & condition);
@@ -319,7 +328,7 @@ mod tests {
         rng.fill(&mut k1);
         rng.fill(&mut k2);
 
-        ORECipher::init(k1, k2, &seed).unwrap()
+        ORECipher::init(&k1, &k2, &seed).unwrap()
     }
 
     quickcheck! {
@@ -530,8 +539,8 @@ mod tests {
         ];
         let seed: [u8; 8] = [119, 104, 41, 110, 199, 157, 235, 169];
 
-        let ore1: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
-        let ore2: OREAES128 = ORECipher::init(k3, k2, &seed).unwrap();
+        let ore1: OREAES128 = ORECipher::init(&k1, &k2, &seed).unwrap();
+        let ore2: OREAES128 = ORECipher::init(&k3, &k2, &seed).unwrap();
 
         let a = 1000u32.encrypt(&ore1).unwrap().to_bytes();
         let b = 1000u32.encrypt(&ore2).unwrap().to_bytes();
@@ -552,8 +561,8 @@ mod tests {
         ];
         let seed: [u8; 8] = [119, 104, 41, 110, 199, 157, 235, 169];
 
-        let ore1: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
-        let ore2: OREAES128 = ORECipher::init(k1, k3, &seed).unwrap();
+        let ore1: OREAES128 = ORECipher::init(&k1, &k2, &seed).unwrap();
+        let ore2: OREAES128 = ORECipher::init(&k1, &k3, &seed).unwrap();
 
         let a = 1000u32.encrypt(&ore1).unwrap().to_bytes();
         let b = 1000u32.encrypt(&ore2).unwrap().to_bytes();

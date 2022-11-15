@@ -13,7 +13,7 @@ criterion = "0.3.5"
 quickcheck = "1.0.3"
 
 [dependencies]
-aes = { version = "0.7.5", features = ["armv8"]}
+aes = { version = "0.8.2", features = ["zeroize"]}
 block-modes = "0.8.1"
 byteorder = "1.4.3"
 hex-literal = "0.3.2"
@@ -22,7 +22,8 @@ rand_chacha = "0.3.1"
 num = "0.4.0"
 hex = "0.4.3"
 subtle-ng = "2.5.0"
-
+zeroize = { version = "1.5.7", features = [ "zeroize_derive", "alloc" ] }
+lazy_static = "1.4.0"
 
 [[bench]]
 name = "oreaes128"
