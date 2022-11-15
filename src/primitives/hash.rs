@@ -1,7 +1,9 @@
 use crate::primitives::{AesBlock, Hash, HashKey};
-use aes::cipher::{generic_array::GenericArray, BlockEncrypt, NewBlockCipher};
+use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
 use aes::Aes128;
+use zeroize::ZeroizeOnDrop;
 
+#[derive(ZeroizeOnDrop)]
 pub struct AES128Z2Hash {
     cipher: Aes128,
 }

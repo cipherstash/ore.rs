@@ -37,7 +37,7 @@
 //! let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! let seed = hex!("00010203 04050607");
-//! let ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
+//! let ore: OREAES128 = ORECipher::init(&k1, &k2, &seed).unwrap();
 //!
 //! // Encryption takes a mutable reference to the cipher and returns a `Result`
 //! let a = 456u64.encrypt(&ore).unwrap();
@@ -65,7 +65,7 @@
 //! # let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let seed = hex!("00010203 04050607");
-//! # let ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
+//! # let ore: OREAES128 = ORECipher::init(&k1, &k2, &seed).unwrap();
 //! let a = 456u64.encrypt(&ore).unwrap();
 //! let b = 1024u64.encrypt(&ore).unwrap();
 //!
@@ -84,7 +84,7 @@
 //! # let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let seed = hex!("00010203 04050607");
-//! # let ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
+//! # let ore: OREAES128 = ORECipher::init(&k1, &k2, &seed).unwrap();
 //! // This isn't
 //! let a = 456u64.encrypt(&ore).unwrap();
 //! let b = 1024u32.encrypt(&ore).unwrap(); // note the u32
@@ -110,7 +110,7 @@
 //! # let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let seed = hex!("00010203 04050607");
-//! # let ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
+//! # let ore: OREAES128 = ORECipher::init(&k1, &k2, &seed).unwrap();
 //! let a = 456u64.encrypt(&ore).unwrap();
 //! let bytes: Vec<u8> = a.to_bytes();
 //! ```
@@ -129,7 +129,7 @@
 //! # let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let seed = hex!("00010203 04050607");
-//! # let ore: OREAES128 = ORECipher::init(k1, k2, &seed).unwrap();
+//! # let ore: OREAES128 = ORECipher::init(&k1, &k2, &seed).unwrap();
 //! # let a = 456u64.encrypt(&ore).unwrap();
 //! # let bytes: Vec<u8> = a.to_bytes();
 //!
@@ -157,7 +157,7 @@ pub trait ORECipher: Sized {
     type LeftBlockType: CipherTextBlock;
     type RightBlockType: CipherTextBlock;
 
-    fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64) -> Result<Self, OREError>;
+    fn init(k1: &[u8; 16], k2: &[u8; 16], seed: &SEED64) -> Result<Self, OREError>;
 
     fn encrypt_left<const N: usize>(&self, input: &PlainText<N>)
         -> Result<Left<Self, N>, OREError>;
