@@ -7,7 +7,7 @@ pub struct AES128PRNG {
     cipher: Aes128,
     data: [GenericArray<u8, U16>; 16],
     ptr: (usize, usize), // ptr to block and byte within block
-    ctr: u32, // increments with each new encryption
+    ctr: u32,            // increments with each new encryption
     seed: SEED64,
 }
 
@@ -86,7 +86,6 @@ impl AES128PRNG {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
