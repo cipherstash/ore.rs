@@ -7,7 +7,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 #[derive(Zeroize)]
 pub struct KnuthShufflePRP<T: Zeroize, const N: usize> {
     permutation: [T; N],
-    inverse: [T; N]
+    inverse: [T; N],
 }
 
 // For some reason ZeroizeOnDrop doesn't work - so manually do it
@@ -30,7 +30,7 @@ impl Prp<u8> for KnuthShufflePRP<u8, 256> {
 
         let mut perm = Self {
             permutation: [0u8; 256],
-            inverse: [0u8; 256]
+            inverse: [0u8; 256],
         };
 
         // Initialize values
@@ -64,8 +64,8 @@ impl Prp<u8> for KnuthShufflePRP<u8, 256> {
         }
     }
 
-    /* 
-     * Performs the inverse permutation in constant time.     * 
+    /*
+     * Performs the inverse permutation in constant time.
      */
     fn invert(&self, input: u8) -> PRPResult<u8> {
         let index = usize::try_from(input).map_err(|_| PRPError)?;
@@ -94,7 +94,11 @@ mod tests {
         let prp = init_prp()?;
 
         for i in 0..=255 {
-            assert_eq!(i, prp.invert(prp.permute(i)?)?, "permutation round-trip failed");
+            assert_eq!(
+                i,
+                prp.invert(prp.permute(i)?)?,
+                "permutation round-trip failed"
+            );
         }
 
         Ok(())
