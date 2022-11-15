@@ -12,12 +12,13 @@ use crate::{
 };
 
 use aes::cipher::generic_array::GenericArray;
+use lazy_static::lazy_static;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use subtle_ng::{Choice, ConstantTimeEq, ConditionallySelectable};
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use subtle_ng::{Choice, ConditionallySelectable, ConstantTimeEq};
+use zeroize::ZeroizeOnDrop;
 
 pub mod block_types;
 pub use self::block_types::*;
@@ -122,6 +123,14 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
 
         self.prf2.encrypt_all(&mut left.f);
 
+        // To make zeroizing / resetting the RO keys
+        // Since the AesBlock type is stack allocated this should get optimised to a single memcpy
+        lazy_static! {
+            static ref ZEROED_RO_KEYS: [AesBlock; 256] = [Default::default(); 256];
+        }
+
+        let mut ro_keys = ZEROED_RO_KEYS.clone();
+
         for n in 0..N {
             // Set prefix and create PRP for the block
             let prp: KnuthShufflePRP<u8, 256> =
@@ -136,8 +145,6 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
             left.f[n][n] = left.xt[n];
             // Include the block number in the value passed to the Random Oracle
             left.f[n][N] = n as u8;
-
-            let mut ro_keys = [AesBlock::default(); 256];
 
             for (j, ro_key) in ro_keys.iter_mut().enumerate() {
                 /*
@@ -171,8 +178,8 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
                 right.data[n].set_bit(j, indicator ^ h);
             }
 
-            // Zeroize RO keys before the next loop iteration
-            ro_keys.iter_mut().for_each(|x| x.as_mut_slice().zeroize());
+            // Zeroize / reset the RO keys before the next loop iteration
+            ro_keys.clone_from_slice(&*ZEROED_RO_KEYS);
         }
 
         self.prf1.encrypt_all(&mut left.f);
@@ -266,7 +273,7 @@ impl<const N: usize> Ord for CipherText<OREAES128, N> {
 
         for n in 0..N {
             let condition: Choice =
-             !(self.left.xt[n].ct_eq(&b.left.xt[n])) | !(self.left.f[n].ct_eq(&b.left.f[n]));
+                !(self.left.xt[n].ct_eq(&b.left.xt[n])) | !(self.left.f[n].ct_eq(&b.left.f[n]));
 
             l.conditional_assign(&(n as u64), is_equal & condition);
             is_equal.conditional_assign(&Choice::from(0), is_equal & condition);
