@@ -59,9 +59,26 @@ asdf local rust nightly
 cargo +nightly bench
 ```
 
-## TODO
+## Security Warning
 
-- Constant time analysis to ensure that encryption or comparison time does not vary with input size
-- Zeroing and careful cleaning up of memory where appropriate
-- Support longer AES keys for the PRF and hash (if possible)
-- Get rid of GenericArray and replace with const generics (blocked by support in the AES crate)
+This package is a pre-1.0 release and has not yet had significant scrutiny (although ORE generally has been quite well studied).
+We are planning to have a 3rd party audit performed prior to the release of 1.0.
+
+In the mean-time: Use at your own risk!
+
+## 1.0 Roadmap
+
+- External Audit
+- Simpler ciphertext internals (which should improve performance)
+- Further constant time improvements
+- Additional block sizes
+- Trinary indicator function support (avoids needing to store left-ciphertexts)
+
+## License
+
+Licensed under the GPLv3.
+ore.rs will be available commercially under the CipherStash 1.0 licence.
+
+## Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the GPLv3 license, shall be licensed as above, without any additional terms or conditions.
