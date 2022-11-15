@@ -96,4 +96,19 @@ mod tests {
         block.set_bit(255, 1);
         assert_eq!(block.get_bit(255), 1);
     }
+
+    #[test]
+    fn right_default_in_place_without_new_data() {
+        let mut right = RightBlock32::default();
+        right.data.copy_from_slice(&[1; 32]);
+
+        let ptr: *const [u8] = &right.data;
+
+        assert_eq!(unsafe { &*ptr }, &[1; 32]);
+
+        right.default_in_place();
+
+        assert_eq!(unsafe { &*ptr }, &[0; 32]);
+        assert_eq!(right.data, [0; 32]);
+    }
 }
