@@ -81,7 +81,7 @@ mod tests {
     fn test_invert() -> Result<(), PRPError> {
         let prp = init_prp()?;
 
-        for i in 0..255 {
+        for i in 0..=255 {
             assert_eq!(i, prp.invert(prp.permute(i)?)?, "permutation round-trip failed");
         }
 
