@@ -4,7 +4,8 @@ use crate::primitives::{PRPError, PRPResult, Prp, SEED64};
 use std::convert::TryFrom;
 
 pub struct KnuthShufflePRP<T, const N: usize> {
-    permutation: Vec<T>,
+    permutation: [T; N],
+    inverse: [T; N]
 }
 
 impl Prp<u8> for KnuthShufflePRP<u8, 256> {
@@ -14,38 +15,50 @@ impl Prp<u8> for KnuthShufflePRP<u8, 256> {
      */
     fn new(key: &[u8], seed: &SEED64) -> PRPResult<Self> {
         let mut prg = AES128PRNG::init(key, seed); // TODO: Use Result type here, too
-        let mut permutation: Vec<u8> = (0..=255).collect();
 
-        for elem in 0..permutation.len() {
-            let j = prg.next_byte();
-            permutation.swap(elem, usize::try_from(j).map_err(|_| PRPError)?);
+        let mut perm = Self {
+            permutation: [0u8; 256],
+            inverse: [0u8; 256]
+        };
+
+        // Initialize values
+        for i in 0..=255 {
+            perm.permutation[i] = i as u8;
         }
 
-        Ok(Self { permutation })
+        for elem in 0..perm.permutation.len() {
+            let j = prg.next_byte();
+            perm.permutation.swap(elem, usize::try_from(j).map_err(|_| PRPError)?);
+        }
+
+        for (index, val) in perm.permutation.iter().enumerate() {
+            perm.inverse[*val as usize] = index as u8;
+        }
+
+        Ok(perm)
     }
 
     /*
-     * Permutes a number under the Pseudo-Random Permutation.
-     * Permution is worst case a linear search in 2^d (where d is the block size)
+     * Permutes a number under the Pseudo-Random Permutation in constant time.
      *
      * Forward permutations are only used once in the ORE scheme so this is OK
      */
     fn permute(&self, input: u8) -> PRPResult<u8> {
-        let u = self
-            .permutation
-            .iter()
-            .position(|&x| x == input)
-            .ok_or(PRPError)?;
+        let index = usize::try_from(input).map_err(|_| PRPError)?;
 
-        u8::try_from(u).map_err(|_| PRPError)
+        match self.inverse.get(index) {
+            Some(i) => Ok(*i),
+            None => Err(PRPError),
+        }
     }
 
-    /* Performs the inverse permutation. This operation is constant time
-     * and is designed that way because there are d (block size) inverse
-     * permutations in the ORE scheme */
+    /* 
+     * Performs the inverse permutation in constant time.     * 
+     */
     fn invert(&self, input: u8) -> PRPResult<u8> {
         let index = usize::try_from(input).map_err(|_| PRPError)?;
 
+        // Forward an inverse permutations are reversed for historical reasons
         match self.permutation.get(index) {
             Some(i) => Ok(*i),
             None => Err(PRPError),
