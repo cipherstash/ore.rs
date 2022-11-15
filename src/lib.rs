@@ -138,7 +138,6 @@
 //! ```
 
 mod ciphertext;
-mod convert;
 mod encrypt;
 mod primitives;
 pub mod scheme;

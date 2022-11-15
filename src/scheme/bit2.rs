@@ -313,7 +313,6 @@ impl<const N: usize> Eq for CipherText<OREAES128, N> {}
 mod tests {
     use super::*;
     use crate::encrypt::OREEncrypt;
-    use quickcheck::TestResult;
 
     type ORE = OREAES128;
 
@@ -376,55 +375,6 @@ mod tests {
             }
         }
 
-        fn compare_u32(x: u32, y: u32) -> bool {
-            let ore = init_ore();
-            let a = x.encrypt(&ore).unwrap();
-            let b = y.encrypt(&ore).unwrap();
-
-            match x.cmp(&y) {
-                Ordering::Greater => a > b,
-                Ordering::Less    => a < b,
-                Ordering::Equal   => a == b
-            }
-        }
-
-        fn equality_u32(x: u64) -> bool {
-            let ore = init_ore();
-            let a = x.encrypt(&ore).unwrap();
-            let b = x.encrypt(&ore).unwrap();
-
-            a == b
-        }
-
-        fn compare_f64(x: f64, y: f64) -> TestResult {
-            if x.is_nan() || x.is_infinite() || y.is_nan() || y.is_infinite() {
-                return TestResult::discard();
-            }
-
-            let ore = init_ore();
-            let a = x.encrypt(&ore).unwrap();
-            let b = y.encrypt(&ore).unwrap();
-
-            match x.partial_cmp(&y) {
-                Some(Ordering::Greater) => TestResult::from_bool(a > b),
-                Some(Ordering::Less)    => TestResult::from_bool(a < b),
-                Some(Ordering::Equal)   => TestResult::from_bool(a == b),
-                None                    => TestResult::failed()
-            }
-        }
-
-        /*
-         * Note that we don't discard any values for the equality check
-         * because NaN == NaN works with the integer encoding
-         * */
-        fn equality_f64(x: f64) -> bool {
-            let ore = init_ore();
-            let a = x.encrypt(&ore).unwrap();
-            let b = x.encrypt(&ore).unwrap();
-
-            a == b
-        }
-
         fn compare_plaintext(x: u64, y: u64) -> bool {
             let ore = init_ore();
             let a = x.to_be_bytes().encrypt(&ore).unwrap();
@@ -435,14 +385,6 @@ mod tests {
                 Ordering::Less    => a < b,
                 Ordering::Equal   => a == b
             }
-        }
-
-        fn equality_plaintext(x: f64) -> bool {
-            let ore = init_ore();
-            let a = x.to_be_bytes().encrypt(&ore).unwrap();
-            let b = x.to_be_bytes().encrypt(&ore).unwrap();
-
-            a == b
         }
     }
 
@@ -504,11 +446,10 @@ mod tests {
 
     #[test]
     fn compare_raw_slices_mismatched_lengths() {
-        let ore = init_ore();
-        let a_64 = 10u64.encrypt(&ore).unwrap().to_bytes();
-        let a_32 = 10u32.encrypt(&ore).unwrap().to_bytes();
+        let a = [0u8; 100];
+        let b = [0u8; 200];
 
-        assert_eq!(ORE::compare_raw_slices(&a_64, &a_32), Option::None);
+        assert_eq!(ORE::compare_raw_slices(&a, &b), Option::None);
     }
 
     #[test]
@@ -542,8 +483,8 @@ mod tests {
         let ore1: OREAES128 = ORECipher::init(&k1, &k2, &seed).unwrap();
         let ore2: OREAES128 = ORECipher::init(&k3, &k2, &seed).unwrap();
 
-        let a = 1000u32.encrypt(&ore1).unwrap().to_bytes();
-        let b = 1000u32.encrypt(&ore2).unwrap().to_bytes();
+        let a = 1000u64.encrypt(&ore1).unwrap().to_bytes();
+        let b = 1000u64.encrypt(&ore2).unwrap().to_bytes();
 
         assert_ne!(Some(Ordering::Equal), ORE::compare_raw_slices(&a, &b));
     }
@@ -564,8 +505,8 @@ mod tests {
         let ore1: OREAES128 = ORECipher::init(&k1, &k2, &seed).unwrap();
         let ore2: OREAES128 = ORECipher::init(&k1, &k3, &seed).unwrap();
 
-        let a = 1000u32.encrypt(&ore1).unwrap().to_bytes();
-        let b = 1000u32.encrypt(&ore2).unwrap().to_bytes();
+        let a = 1000u64.encrypt(&ore1).unwrap().to_bytes();
+        let b = 1000u64.encrypt(&ore2).unwrap().to_bytes();
 
         assert_ne!(Some(Ordering::Equal), ORE::compare_raw_slices(&a, &b));
     }
