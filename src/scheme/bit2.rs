@@ -16,6 +16,7 @@ use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use std::cell::RefCell;
 use std::cmp::Ordering;
+use subtle_ng::{Choice, ConstantTimeEq, ConditionallySelectable};
 
 pub mod block_types;
 pub use self::block_types::*;
@@ -106,7 +107,10 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
         let mut right = Right::<Self, N>::init();
 
         // Generate a 16-byte random nonce
-        self.rng.borrow_mut().try_fill(&mut right.nonce).map_err(|_| OREError)?;
+        self.rng
+            .borrow_mut()
+            .try_fill(&mut right.nonce)
+            .map_err(|_| OREError)?;
 
         // Build the prefixes
         // TODO: Don't modify struct values directly - use a function on a "Left"
@@ -185,22 +189,25 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
         // first byte?
         let num_blocks = (a.len() - NONCE_SIZE) / (left_size + right_size + 1);
 
-        let mut is_equal = true;
-        let mut l = 0; // Unequal block
+        let mut is_equal = Choice::from(1);
+        let mut l: u64 = 0; // Unequal block
 
         // Slices for the PRF ("f") blocks
         let a_f = &a[num_blocks..];
         let b_f = &b[num_blocks..];
 
         for n in 0..num_blocks {
-            if a[n] != b[n] || left_block(a_f, n) != left_block(b_f, n) {
-                is_equal = false;
-                l = n;
-                break;
-            }
+            let prp_eq: Choice = !a[n].ct_eq(&b[n]);
+            let left_block_comparison: Choice = !left_block(a_f, n).ct_eq(left_block(b_f, n));
+            let condition: Choice = prp_eq | left_block_comparison;
+
+            l.conditional_assign(&(n as u64), is_equal & condition);
+            is_equal.conditional_assign(&Choice::from(0), is_equal & condition);
         }
 
-        if is_equal {
+        let l: usize = l as usize;
+
+        if bool::from(is_equal) {
             return Some(Ordering::Equal);
         }
 
@@ -252,19 +259,20 @@ impl<const N: usize> PartialEq for CipherText<OREAES128, N> {
 
 impl<const N: usize> Ord for CipherText<OREAES128, N> {
     fn cmp(&self, b: &Self) -> Ordering {
-        let mut is_equal = true;
-        let mut l = 0; // Unequal block
+        let mut is_equal = Choice::from(1);
+        let mut l: u64 = 0; // Unequal block
 
         for n in 0..N {
-            if self.left.xt[n] != b.left.xt[n] || self.left.f[n] != b.left.f[n] {
-                is_equal = false;
-                l = n;
-                // TODO: Make sure that this is constant time (i.e. don't break)
-                break;
-            }
+            let condition: Choice =
+             !(self.left.xt[n].ct_eq(&b.left.xt[n])) | !(self.left.f[n].ct_eq(&b.left.f[n]));
+
+            l.conditional_assign(&(n as u64), is_equal & condition);
+            is_equal.conditional_assign(&Choice::from(0), is_equal & condition);
         }
 
-        if is_equal {
+        let l: usize = l as usize;
+
+        if bool::from(is_equal) {
             return Ordering::Equal;
         }
 
