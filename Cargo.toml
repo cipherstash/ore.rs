@@ -21,6 +21,7 @@ rand = "0.8.5"
 rand_chacha = "0.3.1"
 num = "0.4.0"
 hex = "0.4.3"
+subtle-ng = "2.5.0"
 
 
 [[bench]]
