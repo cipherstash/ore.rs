@@ -10,13 +10,14 @@ pub struct KnuthShufflePRP<T: Zeroize, const N: usize> {
     inverse: [T; N]
 }
 
-// For some reason ZeroizeOnDrop doesn't work - so manually
+// For some reason ZeroizeOnDrop doesn't work - so manually do it
 impl<T: Zeroize, const N: usize> Drop for KnuthShufflePRP<T, N> {
     fn drop(&mut self) {
         self.zeroize();
     }
 }
 
+// Impl the ZeroizeOnDrop marker trait since we're zeroizing above
 impl<T: Zeroize, const N: usize> ZeroizeOnDrop for KnuthShufflePRP<T, N> {}
 
 impl Prp<u8> for KnuthShufflePRP<u8, 256> {
