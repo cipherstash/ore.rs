@@ -5,7 +5,8 @@ use aes::Aes128;
 pub struct AES128PRNG {
     cipher: Aes128,
     data: [GenericArray<u8, U16>; 16],
-    ptr: (usize, usize),
+    ptr: (usize, usize), // ptr to block and byte within block
+    ctr: u32, // increments with each new encryption
     seed: SEED64,
 }
 
@@ -20,6 +21,7 @@ impl AES128PRNG {
         let mut prng = Self {
             cipher,
             data: Default::default(),
+            ctr: 0,
             ptr: (0, 0),
             seed: *seed,
         };
@@ -37,26 +39,34 @@ impl AES128PRNG {
         value
     }
 
+    /* Find a uniform random number up to and including max */
+    pub fn gen_range(&mut self, max: u8) -> u8 {
+        loop {
+            let candidate = self.next_byte();
+
+            // If next_byte is less than the max we return
+            if candidate <= max {
+                return candidate;
+            }
+        }
+    }
+
     fn generate(&mut self) {
         self.ptr = (0, 0);
         for i in 0..16 {
-            self.data[i][0] = i as u8;
-
-            // Random seed (we do it this way because GenericArray is a bit shit)
-            self.data[i][8] = self.seed[0];
-            self.data[i][9] = self.seed[1];
-            self.data[i][10] = self.seed[2];
-            self.data[i][11] = self.seed[3];
-            self.data[i][12] = self.seed[4];
-            self.data[i][13] = self.seed[5];
-            self.data[i][14] = self.seed[6];
-            self.data[i][15] = self.seed[7];
+            // Counter
+            self.data[i][0..4].copy_from_slice(&self.ctr.to_be_bytes());
+            self.ctr = self.ctr + 1;
+            self.data[i][8..16].copy_from_slice(&self.seed);
         }
         self.cipher.encrypt_blocks(&mut self.data);
     }
 
     #[inline]
     fn inc_ptr(&mut self) {
+        if self.ptr == (15, 15) {
+            self.generate();
+        }
         if self.ptr.1 < 15 {
             self.ptr.1 += 1;
         } else {
@@ -65,6 +75,7 @@ impl AES128PRNG {
         }
     }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -91,12 +102,11 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "assertion failed")]
-    fn prg_entropy_exceeded() {
+    fn prg_many_generations() {
         let mut prg = init_prng();
 
-        /* Ask for one more byte than is available */
-        for _i in 0..=256 {
+        /* Ask for enough bytes that more data needs to be generated */
+        for _i in 0..=100_000 {
             prg.next_byte();
         }
     }
