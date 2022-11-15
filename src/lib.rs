@@ -159,10 +159,8 @@ pub trait ORECipher: Sized {
 
     fn init(k1: [u8; 16], k2: [u8; 16], seed: &SEED64) -> Result<Self, OREError>;
 
-    fn encrypt_left<const N: usize>(
-        &self,
-        input: &PlainText<N>,
-    ) -> Result<Left<Self, N>, OREError>;
+    fn encrypt_left<const N: usize>(&self, input: &PlainText<N>)
+        -> Result<Left<Self, N>, OREError>;
 
     fn encrypt<const N: usize>(
         &self,
