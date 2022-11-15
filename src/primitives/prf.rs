@@ -1,8 +1,9 @@
 use crate::primitives::{AesBlock, PRFKey, Prf};
-use aes::cipher::{BlockEncrypt, NewBlockCipher};
+use aes::cipher::{BlockEncrypt, KeyInit};
 use aes::Aes128;
+use zeroize::ZeroizeOnDrop;
 
-#[derive(Debug)]
+#[derive(Debug, ZeroizeOnDrop)]
 pub struct AES128PRF {
     cipher: Aes128,
 }
