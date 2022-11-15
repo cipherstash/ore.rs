@@ -5,7 +5,6 @@ use zeroize::ZeroizeOnDrop;
 
 #[derive(Debug, ZeroizeOnDrop)]
 pub struct AES128PRF {
-    // The "zeroize" feature is enabled this will zeroize on it's own
     cipher: Aes128,
 }
 
