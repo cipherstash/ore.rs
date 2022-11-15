@@ -36,8 +36,7 @@
 //! // Initalize an ORE Cipher with the OREAES128 scheme
 //! let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-//! let seed = hex!("00010203 04050607");
-//! let ore: OREAES128 = ORECipher::init(&k1, &k2, &seed).unwrap();
+//! let ore: OREAES128 = ORECipher::init(&k1, &k2).unwrap();
 //!
 //! // Encryption takes a mutable reference to the cipher and returns a `Result`
 //! let a = 456u64.encrypt(&ore).unwrap();
@@ -64,8 +63,7 @@
 //! # use hex_literal::hex;
 //! # let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-//! # let seed = hex!("00010203 04050607");
-//! # let ore: OREAES128 = ORECipher::init(&k1, &k2, &seed).unwrap();
+//! # let ore: OREAES128 = ORECipher::init(&k1, &k2).unwrap();
 //! let a = 456u64.encrypt(&ore).unwrap();
 //! let b = 1024u64.encrypt(&ore).unwrap();
 //!
@@ -83,8 +81,7 @@
 //! # use hex_literal::hex;
 //! # let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-//! # let seed = hex!("00010203 04050607");
-//! # let ore: OREAES128 = ORECipher::init(&k1, &k2, &seed).unwrap();
+//! # let ore: OREAES128 = ORECipher::init(&k1, &k2).unwrap();
 //! // This isn't
 //! let a = 456u64.encrypt(&ore).unwrap();
 //! let b = 1024u32.encrypt(&ore).unwrap(); // note the u32
@@ -109,8 +106,7 @@
 //! # use hex_literal::hex;
 //! # let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-//! # let seed = hex!("00010203 04050607");
-//! # let ore: OREAES128 = ORECipher::init(&k1, &k2, &seed).unwrap();
+//! # let ore: OREAES128 = ORECipher::init(&k1, &k2).unwrap();
 //! let a = 456u64.encrypt(&ore).unwrap();
 //! let bytes: Vec<u8> = a.to_bytes();
 //! ```
@@ -128,8 +124,7 @@
 //! # use hex_literal::hex;
 //! # let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-//! # let seed = hex!("00010203 04050607");
-//! # let ore: OREAES128 = ORECipher::init(&k1, &k2, &seed).unwrap();
+//! # let ore: OREAES128 = ORECipher::init(&k1, &k2).unwrap();
 //! # let a = 456u64.encrypt(&ore).unwrap();
 //! # let bytes: Vec<u8> = a.to_bytes();
 //!
@@ -145,7 +140,6 @@ pub mod scheme;
 
 pub use crate::ciphertext::*;
 pub use crate::encrypt::OREEncrypt;
-use crate::primitives::SEED64;
 use std::cmp::Ordering;
 
 pub type PlainText<const N: usize> = [u8; N];
@@ -157,7 +151,7 @@ pub trait ORECipher: Sized {
     type LeftBlockType: CipherTextBlock;
     type RightBlockType: CipherTextBlock;
 
-    fn init(k1: &[u8; 16], k2: &[u8; 16], seed: &SEED64) -> Result<Self, OREError>;
+    fn init(k1: &[u8; 16], k2: &[u8; 16]) -> Result<Self, OREError>;
 
     fn encrypt_left<const N: usize>(&self, input: &PlainText<N>)
         -> Result<Left<Self, N>, OREError>;
