@@ -56,7 +56,7 @@ impl AES128PRNG {
         for i in 0..16 {
             // Counter
             self.data[i][0..4].copy_from_slice(&self.ctr.to_be_bytes());
-            self.ctr = self.ctr + 1;
+            self.ctr += 1;
             self.data[i][8..16].copy_from_slice(&self.seed);
         }
         self.cipher.encrypt_blocks(&mut self.data);
