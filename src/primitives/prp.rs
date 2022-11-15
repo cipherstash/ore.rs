@@ -1,6 +1,6 @@
 pub mod prng;
 use crate::primitives::prp::prng::AES128PRNG;
-use crate::primitives::{PRPError, PRPResult, Prp, SEED64};
+use crate::primitives::{PRPError, PRPResult, Prp};
 use std::convert::TryFrom;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -25,8 +25,8 @@ impl Prp<u8> for KnuthShufflePRP<u8, 256> {
      * Initialize an 8-bit (256 element) PRP using a KnuthShuffle
      * and a 64-bit random seed
      */
-    fn new(key: &[u8], seed: &SEED64) -> PRPResult<Self> {
-        let mut rng = AES128PRNG::init(key, seed); // TODO: Use Result type here, too
+    fn new(key: &[u8]) -> PRPResult<Self> {
+        let mut rng = AES128PRNG::init(key); // TODO: Use Result type here, too
 
         let mut perm = Self {
             permutation: [0u8; 256],
@@ -85,8 +85,7 @@ mod tests {
 
     fn init_prp() -> PRPResult<KnuthShufflePRP<u8, 256>> {
         let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0eaa");
-        let seed: [u8; 8] = hex!("00010203 04050607");
-        Prp::new(&key, &seed)
+        Prp::new(&key)
     }
 
     #[test]
