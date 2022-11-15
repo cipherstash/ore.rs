@@ -2,11 +2,22 @@ pub mod prng;
 use crate::primitives::prp::prng::AES128PRNG;
 use crate::primitives::{PRPError, PRPResult, Prp, SEED64};
 use std::convert::TryFrom;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
-pub struct KnuthShufflePRP<T, const N: usize> {
+#[derive(Zeroize)]
+pub struct KnuthShufflePRP<T: Zeroize, const N: usize> {
     permutation: [T; N],
     inverse: [T; N]
 }
+
+// For some reason ZeroizeOnDrop doesn't work - so manually
+impl<T: Zeroize, const N: usize> Drop for KnuthShufflePRP<T, N> {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl<T: Zeroize, const N: usize> ZeroizeOnDrop for KnuthShufflePRP<T, N> {}
 
 impl Prp<u8> for KnuthShufflePRP<u8, 256> {
     /*
