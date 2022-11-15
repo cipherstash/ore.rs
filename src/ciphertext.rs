@@ -29,6 +29,8 @@ pub trait CipherTextBlock: Default + Copy + std::fmt::Debug {
     fn to_bytes(self) -> Vec<u8>;
 
     fn from_bytes(data: &[u8]) -> Result<Self, ParseError>;
+
+    fn default_in_place(&mut self);
 }
 
 #[derive(Debug)]
