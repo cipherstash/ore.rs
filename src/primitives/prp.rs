@@ -5,18 +5,7 @@ use std::convert::TryFrom;
 
 pub struct KnuthShufflePRP<T, const N: usize> {
     permutation: Vec<T>,
-}
-
-fn const_position(input: &[u8], val: u8) -> Option<usize> {
-    let mut position = None;
-
-    for (index, elem) in input.iter().enumerate() {
-        if *elem == val && position == None {
-            position = Some(index);
-        }
-    }
-
-    position
+    inverse: Vec<T>
 }
 
 impl Prp<u8> for KnuthShufflePRP<u8, 256> {
@@ -27,13 +16,18 @@ impl Prp<u8> for KnuthShufflePRP<u8, 256> {
     fn new(key: &[u8], seed: &SEED64) -> PRPResult<Self> {
         let mut prg = AES128PRNG::init(key, seed); // TODO: Use Result type here, too
         let mut permutation: Vec<u8> = (0..=255).collect();
+        let mut inverse: [u8; 256] = [0u8; 256];
 
         for elem in 0..permutation.len() {
             let j = prg.next_byte();
             permutation.swap(elem, usize::try_from(j).map_err(|_| PRPError)?);
         }
 
-        Ok(Self { permutation })
+        for (index, val) in permutation.iter().enumerate() {
+            inverse[*val as usize] = index as u8;
+        }
+
+        Ok(Self { permutation, inverse: inverse.to_vec() })
     }
 
     /*
@@ -43,9 +37,12 @@ impl Prp<u8> for KnuthShufflePRP<u8, 256> {
      * Forward permutations are only used once in the ORE scheme so this is OK
      */
     fn permute(&self, input: u8) -> PRPResult<u8> {
-        let u = const_position(&self.permutation, input).ok_or(PRPError)?;
+        let index = usize::try_from(input).map_err(|_| PRPError)?;
 
-        u8::try_from(u).map_err(|_| PRPError)
+        match self.inverse.get(index) {
+            Some(i) => Ok(*i),
+            None => Err(PRPError),
+        }
     }
 
     /* Performs the inverse permutation. This operation is constant time
