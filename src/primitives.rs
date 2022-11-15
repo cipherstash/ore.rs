@@ -3,14 +3,7 @@ pub mod prf;
 pub mod prp;
 
 use aes::cipher::{consts::U16, generic_array::GenericArray};
-
-/*
- * Represents a 64-bit (8-byte) random seed.
- */
-pub type SEED64 = [u8; 8];
-
 use aes::Block;
-
 pub type AesBlock = Block;
 pub type PRFKey = GenericArray<u8, U16>;
 pub type HashKey = GenericArray<u8, U16>;
@@ -32,7 +25,7 @@ pub struct PRPError;
 pub type PRPResult<T> = Result<T, PRPError>;
 
 pub trait Prp<T>: Sized {
-    fn new(key: &[u8], seed: &SEED64) -> PRPResult<Self>;
+    fn new(key: &[u8]) -> PRPResult<Self>;
     fn permute(&self, data: T) -> PRPResult<T>;
     fn invert(&self, data: T) -> PRPResult<T>;
 }
