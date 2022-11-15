@@ -14,7 +14,7 @@ impl Prp<u8> for KnuthShufflePRP<u8, 256> {
      * and a 64-bit random seed
      */
     fn new(key: &[u8], seed: &SEED64) -> PRPResult<Self> {
-        let mut prg = AES128PRNG::init(key, seed); // TODO: Use Result type here, too
+        let mut rng = AES128PRNG::init(key, seed); // TODO: Use Result type here, too
 
         let mut perm = Self {
             permutation: [0u8; 256],
@@ -26,10 +26,10 @@ impl Prp<u8> for KnuthShufflePRP<u8, 256> {
             perm.permutation[i] = i as u8;
         }
 
-        for elem in 0..perm.permutation.len() {
-            let j = prg.next_byte();
-            perm.permutation.swap(elem, usize::try_from(j).map_err(|_| PRPError)?);
-        }
+        (0..=255usize).into_iter().rev().for_each(|i| {
+            let j = rng.gen_range(i as u8);
+            perm.permutation.swap(i, j as usize);
+        });
 
         for (index, val) in perm.permutation.iter().enumerate() {
             perm.inverse[*val as usize] = index as u8;
@@ -81,8 +81,8 @@ mod tests {
     fn test_invert() -> Result<(), PRPError> {
         let prp = init_prp()?;
 
-        for i in 0..255 {
-            assert_eq!(i, prp.invert(prp.permute(i)?)?);
+        for i in 0..=255 {
+            assert_eq!(i, prp.invert(prp.permute(i)?)?, "permutation round-trip failed");
         }
 
         Ok(())
