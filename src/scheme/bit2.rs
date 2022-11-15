@@ -129,7 +129,7 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
             static ref ZEROED_RO_KEYS: [AesBlock; 256] = [Default::default(); 256];
         }
 
-        let mut ro_keys = ZEROED_RO_KEYS.clone();
+        let mut ro_keys = *ZEROED_RO_KEYS;
 
         for n in 0..N {
             // Set prefix and create PRP for the block
