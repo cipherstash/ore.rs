@@ -1,7 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hex_literal::hex;
 use ore_rs::{scheme::bit2::OREAES128, CipherText, ORECipher, OREEncrypt};
-use rand_chacha::ChaCha20Rng;
 
 #[inline]
 fn do_encrypt_64(input: u64, ore: &mut OREAES128) {
