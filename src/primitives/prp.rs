@@ -1,4 +1,5 @@
 pub mod prng;
+use crate::Left;
 use crate::primitives::prp::prng::AES128PRNG;
 use crate::primitives::{PRPError, PRPResult, Prp};
 use std::convert::TryFrom;
@@ -15,6 +16,53 @@ impl<T: Zeroize, const N: usize> Drop for KnuthShufflePRP<T, N> {
     fn drop(&mut self) {
         self.zeroize();
     }
+}
+
+fn cmp(a: u8, b: u8) -> u8 {
+    if a > b {
+        1u8
+    } else {
+        0u8
+    }
+}
+
+// FIXME: To get this right, we need to change the "Left" type to be a Vec
+pub(crate) fn block_shuffle(key: &[u8], forward_target: u8) -> (u8, Vec<u8>) {
+    let mut input = [0u8; 256];
+    for i in 0..=255 {
+        input[i] = i as u8;
+    }
+
+    let mut rng = AES128PRNG::init(key); // TODO: Use Result type here, too
+
+    (0..=255usize).into_iter().rev().for_each(|i| {
+        let j = rng.gen_range(i as u8);
+        input.swap(i, j as usize);
+    });
+
+    let block: Vec<u8> = input.chunks(8).map(|chunk| {
+        let mut out: u8 = 0;
+        // Build a u8
+        for &jstar in chunk[1..].iter().rev() {
+            out |= cmp(jstar, forward_target);
+            out <<= 1;
+        }
+        out | cmp(chunk[0], forward_target)
+    }).collect();
+
+    let mut forward_permuted = None;
+    for (index, val) in input.iter().enumerate() {
+        match forward_permuted {
+            None => {
+                if (*val as u8) == forward_target {
+                    forward_permuted = Some(index as u8)
+                }
+            },
+            _ => ()
+        };
+    }
+        
+    (forward_permuted.unwrap(), block)
 }
 
 // Impl the ZeroizeOnDrop marker trait since we're zeroizing above
@@ -87,6 +135,17 @@ mod tests {
         let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0eaa");
         Prp::new(&key)
     }
+
+    #[test]
+    /*fn test_block_shuffle() -> Result<(), PRPError> {
+        let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0eaa");  
+
+        // TODO: Test all values
+        let (permuted, _) = block_shuffle(&key, 10);
+        assert_eq!(10, input[permuted as usize]);
+
+        Ok(())
+    }*/
 
     #[test]
     fn test_invert() -> Result<(), PRPError> {

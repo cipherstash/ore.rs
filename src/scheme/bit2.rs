@@ -5,8 +5,10 @@
 use crate::{
     ciphertext::*,
     primitives::{
-        hash::AES128Z2Hash, prf::AES128PRF, prp::KnuthShufflePRP, AesBlock, Hash, HashKey, Prf,
-        Prp, NONCE_SIZE,
+        hash::{hash_all, AES128Z2Hash},
+        prf::AES128PRF,
+        prp::{block_shuffle, KnuthShufflePRP},
+        AesBlock, Hash, HashKey, Prf, Prp, NONCE_SIZE,
     },
     ORECipher, OREError, PlainText,
 };
@@ -18,7 +20,7 @@ use rand_chacha::ChaCha20Rng;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use subtle_ng::{Choice, ConditionallySelectable, ConstantTimeEq};
-use zeroize::ZeroizeOnDrop;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub mod block_types;
 pub use self::block_types::*;
@@ -37,10 +39,6 @@ pub type OREAES128 = OreAes128<ChaCha20Rng>;
 /* Define some convenience types */
 type EncryptLeftResult<R, const N: usize> = Result<Left<OreAes128<R>, N>, OREError>;
 type EncryptResult<R, const N: usize> = Result<CipherText<OreAes128<R>, N>, OREError>;
-
-fn cmp(a: u8, b: u8) -> u8 {
-    u8::from(a > b)
-}
 
 impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
     type LeftBlockType = LeftBlock16;
@@ -75,11 +73,7 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
         self.prf2.encrypt_all(&mut output.f);
 
         for (n, xn) in x.iter().enumerate().take(N) {
-            // Set prefix and create PRP for the block
-            let prp: KnuthShufflePRP<u8, 256> =
-                Prp::new(&output.f[n]).map_err(|_| OREError)?;
-
-            output.xt[n] = prp.permute(*xn).map_err(|_| OREError)?;
+            (output.xt[n], _) = block_shuffle(&output.f[n], *xn);
         }
 
         // Reset the f block
@@ -113,6 +107,7 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
         // TODO: Don't modify struct values directly - use a function on a "Left"
         left.f.iter_mut().enumerate().for_each(|(n, block)| {
             block[0..n].clone_from_slice(&x[0..n]);
+            // TODO: Include the block number
         });
 
         self.prf2.encrypt_all(&mut left.f);
@@ -126,11 +121,9 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
         let mut ro_keys = *ZEROED_RO_KEYS;
 
         for n in 0..N {
-            // Set prefix and create PRP for the block
-            let prp: KnuthShufflePRP<u8, 256> =
-                Prp::new(&left.f[n]).map_err(|_| OREError)?;
-
-            left.xt[n] = prp.permute(x[n]).map_err(|_| OREError)?;
+            // TODO: Make the left and right one big vector/array
+            let shuffled = block_shuffle(&left.f[n], x[n]);
+            left.xt[n] = shuffled.0;
 
             // Reset the f block
             left.f[n].default_in_place();
@@ -151,27 +144,11 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
 
             self.prf1.encrypt_all(&mut ro_keys);
 
-            /* TODO: This seems to work but it is technically using the nonce as the key
-             * (instead of using it as the plaintext). This appears to be how the original
-             * ORE implementation does it but it feels a bit wonky to me. Should check with David.
-             * It is useful though because the AES crate makes it easy to encrypt groups of 8
-             * plaintexts under the same key. We really want the ability to encrypt the same
-             * plaintext (i.e. the nonce) under different keys but this may be an acceptable
-             * approximation.
-             *
-             * If not, we will probably need to implement our own parallel encrypt using intrisics
-             * like in the AES crate: https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/ni/aes128.rs#L26
-             */
-            let hasher: AES128Z2Hash = Hash::new(AesBlock::from_slice(&right.nonce));
-            let hashes = hasher.hash_all(&mut ro_keys);
+            let hashes = hash_all(AesBlock::from_slice(&right.nonce), &mut ro_keys);
 
-            // FIXME: force casting to u8 from usize could cause a panic
-            for (j, h) in hashes.iter().enumerate() {
-                let jstar = prp.invert(j as u8).map_err(|_| OREError)?;
-                let indicator = cmp(jstar, x[n]);
-                right.data[n].set_bit(j, indicator ^ h);
+            for (i, hash) in hashes.iter().enumerate() {
+                right.data[n].data[i] = hash ^ shuffled.1[i];
             }
-
             // Zeroize / reset the RO keys before the next loop iteration
             ro_keys.clone_from_slice(&*ZEROED_RO_KEYS);
         }
