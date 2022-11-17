@@ -45,6 +45,21 @@ impl Hash for AES128Z2Hash {
     }
 }
 
+pub fn hash_all(key: &HashKey, data: &mut [AesBlock]) -> Vec<u8> { // TODO create a u256 composite type
+    let cipher = Aes128::new(key.into());
+    cipher.encrypt_blocks(data);
+
+    // TODO: This conversion is the same as in the PRP (extract?)
+    data.chunks(8).map(|chunk| {
+        let mut out: u8 = 0;
+        for hash in chunk[1..].iter().rev() {
+            out |= 1u8 & hash[0];
+            out <<= 1;
+        }
+        out | 1u8 & chunk[0][0]
+    }).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

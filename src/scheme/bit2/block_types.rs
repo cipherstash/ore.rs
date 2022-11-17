@@ -12,7 +12,7 @@ pub type LeftBlock16 = AesBlock;
 #[derive(Debug, Copy, Clone, Default)]
 pub struct RightBlock32 {
     // TODO: Make this a slice later when the entire right ciphertext is a big array
-    data: [u8; 32],
+    pub data: [u8; 32],
 }
 
 impl RightBlock32 {
