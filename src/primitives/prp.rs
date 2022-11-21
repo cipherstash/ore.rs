@@ -1,5 +1,4 @@
 pub mod prng;
-use crate::Left;
 use crate::primitives::prp::prng::AES128PRNG;
 use crate::primitives::{PRPError, PRPResult, Prp};
 use std::convert::TryFrom;
@@ -33,7 +32,9 @@ pub(crate) fn block_shuffle(key: &[u8], forward_target: u8) -> (u8, Vec<u8>) {
         input[i] = i as u8;
     }
 
-    let mut rng = AES128PRNG::init(key); // TODO: Use Result type here, too
+    // 96 is the number of pre-generated AES blocks
+    // Performance tuned to minimize the need for regeneration
+    let mut rng: AES128PRNG<96> = AES128PRNG::init(key); // TODO: Use Result type here, too
 
     (0..=255usize).into_iter().rev().for_each(|i| {
         let j = rng.gen_range(i as u8);
@@ -61,6 +62,8 @@ pub(crate) fn block_shuffle(key: &[u8], forward_target: u8) -> (u8, Vec<u8>) {
             _ => ()
         };
     }
+
+    input.zeroize();
         
     (forward_permuted.unwrap(), block)
 }
@@ -74,7 +77,7 @@ impl Prp<u8> for KnuthShufflePRP<u8, 256> {
      * and a 64-bit random seed
      */
     fn new(key: &[u8]) -> PRPResult<Self> {
-        let mut rng = AES128PRNG::init(key); // TODO: Use Result type here, too
+        let mut rng: AES128PRNG<32> = AES128PRNG::init(key); // TODO: Use Result type here, too
 
         let mut perm = Self {
             permutation: [0u8; 256],
