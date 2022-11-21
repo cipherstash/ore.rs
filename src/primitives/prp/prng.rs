@@ -2,11 +2,12 @@ use aes::cipher::{consts::U16, generic_array::GenericArray, BlockEncrypt, KeyIni
 use aes::Aes128;
 use zeroize::Zeroize;
 
-pub struct AES128PRNG {
+pub struct AES128PRNG<const P: usize = 32> {
     cipher: Aes128,
-    data: [GenericArray<u8, U16>; 16],
+    data: [GenericArray<u8, U16>; P],
     ptr: (usize, usize), // ptr to block and byte within block
-    ctr: u32,            // increments with each new encryption
+    pub ctr: u32,            // increments with each new encryption
+    pub used: u32
 }
 
 impl Zeroize for AES128PRNG {
@@ -17,19 +18,16 @@ impl Zeroize for AES128PRNG {
     }
 }
 
-/*
- * To aid in performance this PRNG can only generate 256 random numbers
- * before it panics. Should _only_ be used inside the PRP.
- */
-impl AES128PRNG {
+impl <const P: usize> AES128PRNG<P> {
     pub fn init(key: &[u8]) -> Self {
         let key_array = GenericArray::from_slice(key);
         let cipher = Aes128::new(key_array);
         let mut prng = Self {
             cipher,
-            data: Default::default(),
+            data: [GenericArray::<u8, U16>::default(); P],
             ctr: 0,
             ptr: (0, 0),
+            used: 0
         };
         prng.generate();
         prng
@@ -39,9 +37,10 @@ impl AES128PRNG {
      * Generates the next byte of the random number sequence.
      */
     pub fn next_byte(&mut self) -> u8 {
-        debug_assert!(self.ptr.0 < 16 && self.ptr.1 < 16);
+        debug_assert!(self.ptr.0 < P && self.ptr.1 < 16);
         let value: u8 = self.data[self.ptr.0][self.ptr.1];
         self.inc_ptr();
+        self.used += 1;
         value
     }
 
@@ -59,7 +58,7 @@ impl AES128PRNG {
 
     fn generate(&mut self) {
         self.ptr = (0, 0);
-        for i in 0..16 {
+        for i in 0..P {
             // Counter
             self.data[i][0..4].copy_from_slice(&self.ctr.to_be_bytes());
             self.ctr += 1;
@@ -69,7 +68,7 @@ impl AES128PRNG {
 
     #[inline]
     fn inc_ptr(&mut self) {
-        if self.ptr == (15, 15) {
+        if self.ptr == (P - 1, 15) {
             self.generate();
         }
         if self.ptr.1 < 15 {

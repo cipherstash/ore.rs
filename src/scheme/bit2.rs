@@ -15,7 +15,7 @@ use aes::cipher::generic_array::GenericArray;
 use lazy_static::lazy_static;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
-use std::cell::RefCell;
+use std::{cell::RefCell, slice::Chunks};
 use std::cmp::Ordering;
 use subtle_ng::{Choice, ConditionallySelectable, ConstantTimeEq};
 use zeroize::{ZeroizeOnDrop, Zeroize};
@@ -109,47 +109,38 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
         });
 
         self.prf2.encrypt_all(&mut left.f);
+        let mut ro_keys = vec![AesBlock::default(); 256 * N];
 
-        // To make zeroizing / resetting the RO keys
-        // Since the AesBlock type is stack allocated this should get optimised to a single memcpy
-        lazy_static! {
-            static ref ZEROED_RO_KEYS: [AesBlock; 256] = [Default::default(); 256];
+        for (n, chunk) in ro_keys.chunks_mut(256).enumerate() {
+            for (j, ro_key) in chunk.iter_mut().enumerate() {
+                // The output of F in H(F(k1, y|i-1||j), r)
+                ro_key[0..n].clone_from_slice(&x[0..n]);
+                ro_key[n] = j as u8;
+                ro_key[N] = n as u8;
+            }
         }
 
-        let mut ro_keys = *ZEROED_RO_KEYS;
+        self.prf1.encrypt_all(&mut ro_keys);
 
-        for n in 0..N {
+        // The output of F in H(F(k1, y|i-1||j), r)
+        let hashes = hash_all(AesBlock::from_slice(&right.nonce), &mut ro_keys);
+        //ro_keys.zeroize(); TODO
+
+        for (n, chunk) in hashes.chunks(32).enumerate() {
             // TODO: Make the left and right one big vector/array
             let shuffled = block_shuffle(&left.f[n], x[n]);
             left.xt[n] = shuffled.0;
 
             // Reset the f block
             left.f[n].default_in_place();
-
             left.f[n][0..n].clone_from_slice(&x[0..n]);
             left.f[n][n] = left.xt[n];
             // Include the block number in the value passed to the Random Oracle
             left.f[n][N] = n as u8;
 
-
-            for (j, ro_key) in ro_keys.iter_mut().enumerate() {
-                /*
-                 * The output of F in H(F(k1, y|i-1||j), r)
-                 */
-                ro_key[0..n].clone_from_slice(&x[0..n]);
-                ro_key[n] = j as u8;
-                ro_key[N] = n as u8;
-            }
-
-            self.prf1.encrypt_all(&mut ro_keys);
-
-            let hashes = hash_all(AesBlock::from_slice(&right.nonce), &mut ro_keys);
-
-            for (i, hash) in hashes.iter().enumerate() {
+            for (i, hash) in chunk.iter().enumerate() {
                 right.data[n].data[i] = hash ^ shuffled.1[i];
             }
-            // Zeroize / reset the RO keys before the next loop iteration
-            ro_keys.clone_from_slice(&*ZEROED_RO_KEYS);
         }
 
         self.prf1.encrypt_all(&mut left.f);
