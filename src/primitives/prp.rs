@@ -2,19 +2,16 @@ pub mod prng;
 use crate::primitives::prp::prng::AES128PRNG;
 use zeroize::Zeroize;
 
+#[inline]
 fn cmp(a: u8, b: u8) -> u8 {
-    if a > b {
-        1u8
-    } else {
-        0u8
-    }
+    u8::from(a > b)
 }
 
 // FIXME: To get this right, we need to change the "Left" type to be a Vec
 pub(crate) fn block_shuffle(key: &[u8], forward_target: u8) -> (u8, Vec<u8>) {
     let mut input = [0u8; 256];
-    for i in 0..=255 {
-        input[i] = i as u8;
+    for (i, item) in input.iter_mut().enumerate() {
+        *item = i as u8;
     }
 
     // 96 is the number of pre-generated AES blocks
@@ -44,14 +41,9 @@ pub(crate) fn block_shuffle(key: &[u8], forward_target: u8) -> (u8, Vec<u8>) {
     // Find the permutation of target in constant time
     let mut forward_permuted = None;
     for (index, val) in input.iter().enumerate() {
-        match forward_permuted {
-            None => {
-                if (*val as u8) == forward_target {
-                    forward_permuted = Some(index as u8)
-                }
-            }
-            _ => (),
-        };
+        if forward_permuted.is_none() && (*val as u8) == forward_target {
+            forward_permuted = Some(index as u8);
+        }
     }
 
     input.zeroize();
