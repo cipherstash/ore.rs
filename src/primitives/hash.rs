@@ -8,6 +8,10 @@ pub struct AES128Z2Hash {
     cipher: Aes128,
 }
 
+/*
+ * Models a Random Oracle in Z2 by encrypting a data block with AES
+ * and returning the least significant bit.
+ */
 impl Hash for AES128Z2Hash {
     fn new(key: &HashKey) -> Self {
         let key_array = GenericArray::from_slice(key);
@@ -31,33 +35,24 @@ impl Hash for AES128Z2Hash {
         output[0] & 1u8
     }
 
-    // TODO: this mutates - see how much a copy effects performance (clone_from_slice)
+    /* Hashes all data blocks taking the least significant bit
+     * each time. The resulting bit array is converted into bytes
+     * and returned as a Vec<u8>. */
     fn hash_all(&self, data: &mut [AesBlock]) -> Vec<u8> {
         self.cipher.encrypt_blocks(data);
-
-        let mut vec = Vec::with_capacity(data.len());
-        for &mut block in data {
-            // Output is Z2 (1-bit)
-            vec.push(block[0] & 1u8);
-        }
-
-        vec
+    
+        // TODO: This conversion is the same as in the PRP (extract?)
+        data.chunks(8)
+            .map(|chunk| {
+                let mut out: u8 = 0;
+                for hash in chunk[1..].iter().rev() {
+                    out |= 1u8 & hash[0];
+                    out <<= 1;
+                }
+                out | 1u8 & chunk[0][0]
+            })
+            .collect()
     }
-}
-
-pub fn hash_all(key: &HashKey, data: &mut [AesBlock]) -> Vec<u8> { // TODO create a u256 composite type
-    let cipher = Aes128::new(key.into());
-    cipher.encrypt_blocks(data);
-
-    // TODO: This conversion is the same as in the PRP (extract?)
-    data.chunks(8).map(|chunk| {
-        let mut out: u8 = 0;
-        for hash in chunk[1..].iter().rev() {
-            out |= 1u8 & hash[0];
-            out <<= 1;
-        }
-        out | 1u8 & chunk[0][0]
-    }).collect()
 }
 
 #[cfg(test)]

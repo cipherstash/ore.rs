@@ -6,8 +6,8 @@ pub struct AES128PRNG<const P: usize = 32> {
     cipher: Aes128,
     data: [GenericArray<u8, U16>; P],
     ptr: (usize, usize), // ptr to block and byte within block
-    pub ctr: u32,            // increments with each new encryption
-    pub used: u32
+    pub ctr: u32,        // increments with each new encryption
+    pub used: u32,
 }
 
 impl Zeroize for AES128PRNG {
@@ -18,7 +18,7 @@ impl Zeroize for AES128PRNG {
     }
 }
 
-impl <const P: usize> AES128PRNG<P> {
+impl<const P: usize> AES128PRNG<P> {
     pub fn init(key: &[u8]) -> Self {
         let key_array = GenericArray::from_slice(key);
         let cipher = Aes128::new(key_array);
@@ -27,7 +27,7 @@ impl <const P: usize> AES128PRNG<P> {
             data: [GenericArray::<u8, U16>::default(); P],
             ctr: 0,
             ptr: (0, 0),
-            used: 0
+            used: 0,
         };
         prng.generate();
         prng

@@ -5,20 +5,21 @@
 use crate::{
     ciphertext::*,
     primitives::{
-        hash::{AES128Z2Hash, hash_all}, prf::AES128PRF, prp::{KnuthShufflePRP, block_shuffle}, AesBlock, Hash, HashKey, Prf,
-        Prp, NONCE_SIZE,
+        hash::AES128Z2Hash,
+        prf::AES128PRF,
+        prp::block_shuffle,
+        AesBlock, Hash, HashKey, Prf, NONCE_SIZE,
     },
     ORECipher, OREError, PlainText,
 };
 
 use aes::cipher::generic_array::GenericArray;
-use lazy_static::lazy_static;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
-use std::{cell::RefCell, slice::Chunks};
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use subtle_ng::{Choice, ConditionallySelectable, ConstantTimeEq};
-use zeroize::{ZeroizeOnDrop, Zeroize};
+use zeroize::ZeroizeOnDrop;
 
 pub mod block_types;
 pub use self::block_types::*;
@@ -123,7 +124,8 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
         self.prf1.encrypt_all(&mut ro_keys);
 
         // The output of F in H(F(k1, y|i-1||j), r)
-        let hashes = hash_all(AesBlock::from_slice(&right.nonce), &mut ro_keys);
+        let hasher: AES128Z2Hash = Hash::new(&right.nonce.into());
+        let hashes = hasher.hash_all(&mut ro_keys);
         //ro_keys.zeroize(); TODO
 
         for (n, chunk) in hashes.chunks(32).enumerate() {
