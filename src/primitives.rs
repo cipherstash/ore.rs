@@ -22,10 +22,3 @@ pub trait Hash {
 
 #[derive(Debug, Clone)]
 pub struct PRPError;
-pub type PRPResult<T> = Result<T, PRPError>;
-
-pub trait Prp<T>: Sized {
-    fn new(key: &[u8]) -> PRPResult<Self>;
-    fn permute(&self, data: T) -> PRPResult<T>;
-    fn invert(&self, data: T) -> PRPResult<T>;
-}
