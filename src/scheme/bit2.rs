@@ -17,7 +17,7 @@ use rand_chacha::ChaCha20Rng;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use subtle_ng::{Choice, ConditionallySelectable, ConstantTimeEq};
-use zeroize::ZeroizeOnDrop;
+use zeroize::{ZeroizeOnDrop, Zeroize};
 
 pub mod block_types;
 pub use self::block_types::*;
@@ -37,14 +37,17 @@ pub type OREAES128 = OreAes128<ChaCha20Rng>;
 type EncryptLeftResult<R, const N: usize> = Result<Left<OreAes128<R>, N>, OREError>;
 type EncryptResult<R, const N: usize> = Result<CipherText<OreAes128<R>, N>, OREError>;
 
+fn zeroize_ro_keys(ro_keys: &mut [AesBlock]) {
+    for block in ro_keys.iter_mut() {
+        block.zeroize();
+    }
+}
+
 impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
     type LeftBlockType = LeftBlock16;
     type RightBlockType = RightBlock32;
 
     fn init(k1: &[u8; 16], k2: &[u8; 16]) -> Result<Self, OREError> {
-        // TODO: k1 and k2 should be Key types and we should have a set of traits to abstract the
-        // behaviour ro parsing/loading etc
-
         let rng: R = SeedableRng::from_entropy();
 
         return Ok(OreAes128 {
@@ -124,7 +127,10 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
         // The output of F in H(F(k1, y|i-1||j), r)
         let hasher: AES128Z2Hash = Hash::new(&right.nonce.into());
         let hashes = hasher.hash_all(&mut ro_keys);
-        //ro_keys.zeroize(); TODO
+       
+        // It's important that these are cleared
+        // as the nonce would allow decrypting plaintext data
+        zeroize_ro_keys(&mut ro_keys);
 
         for (n, chunk) in hashes.chunks(32).enumerate() {
             // TODO: Make the left and right one big vector/array
