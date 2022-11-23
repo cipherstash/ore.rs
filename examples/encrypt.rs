@@ -10,4 +10,10 @@ fn main() {
     let i = 10000u64;
     let x_u64 = i.encrypt(&ore).unwrap().to_bytes();
     println!("CT = {};", hex::encode(&x_u64));
+
+    let x: u8 = 47;
+    let c: u8 = 133;
+
+    println!("X = {}, c {}, c trunc {}", x, c, c >> x.leading_zeros());
+
 }

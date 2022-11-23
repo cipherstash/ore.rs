@@ -2,6 +2,10 @@ use aes::cipher::{consts::U16, generic_array::GenericArray, BlockEncrypt, KeyIni
 use aes::Aes128;
 use zeroize::Zeroize;
 
+/* Struct representing a PRNG based on AES in counter mode.
+ * For performance, P blocks of AES are generated a time using AES pipelining.
+ * Careful tuning of P can avoid multiple calls to generate (see `gen_range` for more info).
+ */
 pub struct AES128PRNG<const P: usize = 32> {
     cipher: Aes128,
     data: [GenericArray<u8, U16>; P],
@@ -44,13 +48,42 @@ impl<const P: usize> AES128PRNG<P> {
         value
     }
 
-    /* Find a uniform random number up to and including max */
+    /*
+     * Find a uniform random number between 0 and (including) max.
+     * 
+     * This function calls `next_byte` to sample an 8-bit random value
+     * and uses the modulo of the max value to find a random number in the target range.
+     * Rejection sampling is used to avoid modulo bias by finding the largest multiple of max
+     * that is less than 255. If no such multiple is found (i.e for numbers 128 or greater),
+     * rejection sampling is used alone until a suitable random number is generated.
+     * 
+     * This approach minimizes the number of rejections required and also generates
+     * random numbers with good uniformity, including for small values of max.
+     * 
+     * Calling this function with a max of 0 will return 0.
+     */
     pub fn gen_range(&mut self, max: u8) -> u8 {
+        if max < 1 {
+            return max;
+        }
+
+        let mut target: Option<u8> = None;
+
+        // Find the largest multiple of max that is less than 255
+        if max < 128 {
+            target = Some(255u8.div_floor(max));
+        }
         loop {
             let candidate = self.next_byte();
 
-            // If next_byte is less than the max we return
-            if candidate <= max {
+            // Divide candidate in Z_max where t is an integer multiple of max
+            // We wish to use the largest possible value of t to maximize entropy
+            // and ensure decent levels of uniformity for small max values
+            if let Some(t) = target {
+                if candidate < t * max {
+                    return candidate % max;
+                }
+            } else if candidate <= max {
                 return candidate;
             }
         }
@@ -84,6 +117,8 @@ impl<const P: usize> AES128PRNG<P> {
 mod tests {
     use super::*;
     use hex_literal::hex;
+    use rand::{thread_rng, Rng};
+    use std::collections::HashMap;
 
     fn init_prng() -> AES128PRNG {
         let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
@@ -110,6 +145,42 @@ mod tests {
         /* Ask for enough bytes that more data needs to be generated */
         for _i in 0..=100_000 {
             prg.next_byte();
+        }
+    }
+
+    #[test]
+    fn uniformity() {
+        // Test uniformity of the PRNG for all possible values of max
+        // by calculation of the Root-Mean-Square Error (RMSE)
+        // and asserting that it remains below some arbitrary threshold
+        let mut key = [0u8; 16];
+        thread_rng().try_fill(&mut key).unwrap();
+
+        let mut rng: AES128PRNG<96> = AES128PRNG::init(&key);
+
+        // Test count per max value
+        let n = 100_000i32;
+
+        for k in 1..=255 {
+            let mut hist: HashMap<u8, usize> = HashMap::new();
+
+            for _i in 0..n {
+                let v = rng.gen_range(k);
+
+                match hist.get(&v) {
+                    Some(count) => hist.insert(v, count + 1),
+                    None => hist.insert(v, 1),
+                };
+            }
+
+            let mut sum: f64 = 0.0;
+
+            for (_key, count) in hist.iter() {
+                sum += (*count as f64 - (n as f64 / k as f64)).powf(2.0);
+            }
+
+            // RMSE within 0.5%
+            assert!((sum.sqrt() as i32) < 500);
         }
     }
 }
