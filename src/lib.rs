@@ -170,5 +170,3 @@ pub trait ORECipher: Sized {
 #[cfg(test)]
 #[macro_use]
 extern crate quickcheck;
-
-

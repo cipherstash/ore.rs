@@ -47,16 +47,16 @@ impl<const P: usize> AES128PRNG<P> {
 
     /*
      * Find a uniform random number between 0 and (including) max.
-     * 
+     *
      * This function calls `next_byte` to sample an 8-bit random value
      * and uses the modulo of the max value to find a random number in the target range.
      * Rejection sampling is used to avoid modulo bias by finding the largest multiple of max
      * that is less than 255. If no such multiple is found (i.e for numbers 128 or greater),
      * rejection sampling is used alone until a suitable random number is generated.
-     * 
+     *
      * This approach minimizes the number of rejections required and also generates
      * random numbers with good uniformity, including for small values of max.
-     * 
+     *
      * Calling this function with a max of 0 will return 0.
      */
     pub fn gen_range(&mut self, max: u8) -> u8 {

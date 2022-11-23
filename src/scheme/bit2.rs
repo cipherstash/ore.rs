@@ -5,10 +5,8 @@
 use crate::{
     ciphertext::*,
     primitives::{
-        hash::AES128Z2Hash,
-        prf::AES128PRF,
-        prp::block_shuffle,
-        AesBlock, Hash, HashKey, Prf, NONCE_SIZE,
+        hash::AES128Z2Hash, prf::AES128PRF, prp::block_shuffle, AesBlock, Hash, HashKey, Prf,
+        NONCE_SIZE,
     },
     ORECipher, OREError, PlainText,
 };
@@ -19,7 +17,7 @@ use rand_chacha::ChaCha20Rng;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use subtle_ng::{Choice, ConditionallySelectable, ConstantTimeEq};
-use zeroize::{ZeroizeOnDrop, Zeroize};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub mod block_types;
 pub use self::block_types::*;
@@ -129,7 +127,7 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
         // The output of F in H(F(k1, y|i-1||j), r)
         let hasher: AES128Z2Hash = Hash::new(&right.nonce.into());
         let hashes = hasher.hash_all(&mut ro_keys);
-       
+
         // It's important that these are cleared
         // as the nonce would allow decrypting plaintext data
         zeroize_ro_keys(&mut ro_keys);
