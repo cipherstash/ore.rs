@@ -132,10 +132,13 @@
 //! # assert!(ct == a);
 //! ```
 
+#![feature(int_roundings)]
+
 mod ciphertext;
 mod convert;
 mod encrypt;
-mod primitives;
+// TODO: Don't make this pub
+pub mod primitives;
 pub mod scheme;
 
 pub use crate::ciphertext::*;
@@ -167,3 +170,5 @@ pub trait ORECipher: Sized {
 #[cfg(test)]
 #[macro_use]
 extern crate quickcheck;
+
+

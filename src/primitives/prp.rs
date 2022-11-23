@@ -14,9 +14,10 @@ pub(crate) fn block_shuffle(key: &[u8], forward_target: u8) -> (u8, Vec<u8>) {
         *item = i as u8;
     }
 
-    // 96 is the number of pre-generated AES blocks
+    // 20 is the number of pre-generated AES blocks
     // Performance tuned to minimize the need for regeneration
-    let mut rng: AES128PRNG<96> = AES128PRNG::init(key); // TODO: Use Result type here, too
+    // See prng module for more details
+    let mut rng: AES128PRNG<20> = AES128PRNG::init(key); // TODO: Use Result type here, too
 
     // Knuth Shuffle
     (0..=255usize).into_iter().rev().for_each(|i| {
@@ -48,6 +49,8 @@ pub(crate) fn block_shuffle(key: &[u8], forward_target: u8) -> (u8, Vec<u8>) {
 
     input.zeroize();
 
+    //println!("RNG Uses: {}", rng.used);
+
     (forward_permuted.unwrap(), block)
 }
 
@@ -61,6 +64,6 @@ mod tests {
         let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0eaa");
 
         let (permuted, _) = block_shuffle(&key, 10);
-        assert_eq!(170, permuted);
+        assert_eq!(9, permuted);
     }
 }
