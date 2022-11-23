@@ -40,7 +40,7 @@ impl Hash for AES128Z2Hash {
      * and returned as a Vec<u8>. */
     fn hash_all(&self, data: &mut [AesBlock]) -> Vec<u8> {
         self.cipher.encrypt_blocks(data);
-    
+
         // TODO: This conversion is the same as in the PRP (extract?)
         data.chunks(8)
             .map(|chunk| {

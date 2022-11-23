@@ -11,7 +11,7 @@ fn cmp(a: u8, b: u8) -> u8 {
  *
  * The forward target is a plaintext value from a left plaintext block which will
  * be permuted.
- * 
+ *
  * The return value is a tuple of the permuted plaintext value and a vector containing
  * all bits of a permuted right block.
  */
