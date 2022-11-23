@@ -1,4 +1,4 @@
-pub mod prng;
+pub(crate) mod prng;
 use crate::primitives::prp::prng::AES128PRNG;
 use zeroize::Zeroize;
 
@@ -7,7 +7,14 @@ fn cmp(a: u8, b: u8) -> u8 {
     u8::from(a > b)
 }
 
-// FIXME: To get this right, we need to change the "Left" type to be a Vec
+/* Generates a permutation based on the given key using a KnuthShuffle.
+ *
+ * The forward target is a plaintext value from a left plaintext block which will
+ * be permuted.
+ * 
+ * The return value is a tuple of the permuted plaintext value and a vector containing
+ * all bits of a permuted right block.
+ */
 pub(crate) fn block_shuffle(key: &[u8], forward_target: u8) -> (u8, Vec<u8>) {
     let mut input = [0u8; 256];
     for (i, item) in input.iter_mut().enumerate() {
