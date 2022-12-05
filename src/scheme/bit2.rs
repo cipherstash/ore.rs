@@ -39,11 +39,7 @@ type EncryptLeftResult<R, const N: usize> = Result<Left<OreAes128<R>, N>, OREErr
 type EncryptResult<R, const N: usize> = Result<CipherText<OreAes128<R>, N>, OREError>;
 
 fn cmp(a: u8, b: u8) -> u8 {
-    if a > b {
-        1u8
-    } else {
-        0u8
-    }
+    u8::from(a > b)
 }
 
 impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
