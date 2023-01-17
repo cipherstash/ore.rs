@@ -76,8 +76,7 @@ In the mean-time: Use at your own risk!
 
 ## License
 
-Licensed under the GPLv3.
-ore.rs will be available commercially under the CipherStash 1.0 licence.
+ore.rs is available under the CipherStash 1.0 licence.
 
 ## Contribution
 
