@@ -76,8 +76,8 @@ In the mean-time: Use at your own risk!
 
 ## License
 
-ore.rs is available under the CipherStash 1.0 licence.
+ore.rs is available under the CipherStash Client Library Licence Agreement.
 
 ## Contribution
 
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the GPLv3 license, shall be licensed as above, without any additional terms or conditions.
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, shall be licensed as above, without any additional terms or conditions.
