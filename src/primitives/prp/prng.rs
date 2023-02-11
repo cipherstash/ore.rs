@@ -2,14 +2,14 @@ use aes::cipher::{consts::U16, generic_array::GenericArray, BlockEncrypt, KeyIni
 use aes::Aes128;
 use zeroize::Zeroize;
 
-pub struct AES128PRNG {
+pub struct Aes128Prng {
     cipher: Aes128,
     data: [GenericArray<u8, U16>; 16],
     ptr: (usize, usize), // ptr to block and byte within block
     ctr: u32,            // increments with each new encryption
 }
 
-impl Zeroize for AES128PRNG {
+impl Zeroize for Aes128Prng {
     fn zeroize(&mut self) {
         for d in self.data.iter_mut() {
             d.as_mut_slice().zeroize();
@@ -21,7 +21,7 @@ impl Zeroize for AES128PRNG {
  * To aid in performance this PRNG can only generate 256 random numbers
  * before it panics. Should _only_ be used inside the PRP.
  */
-impl AES128PRNG {
+impl Aes128Prng {
     pub fn init(key: &[u8]) -> Self {
         let key_array = GenericArray::from_slice(key);
         let cipher = Aes128::new(key_array);
@@ -86,10 +86,10 @@ mod tests {
     use super::*;
     use hex_literal::hex;
 
-    fn init_prng() -> AES128PRNG {
+    fn init_prng() -> Aes128Prng {
         let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 
-        AES128PRNG::init(&key)
+        Aes128Prng::init(&key)
     }
 
     #[test]

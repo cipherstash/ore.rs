@@ -1,6 +1,6 @@
 pub mod prng;
-use crate::primitives::prp::prng::AES128PRNG;
-use crate::primitives::{PRPError, PRPResult, Prp};
+use crate::primitives::prp::prng::Aes128Prng;
+use crate::primitives::{PrpError, PrpResult, Prp};
 use std::convert::TryFrom;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -25,8 +25,8 @@ impl Prp<u8> for KnuthShufflePRP<u8, 256> {
      * Initialize an 8-bit (256 element) PRP using a KnuthShuffle
      * and a 64-bit random seed
      */
-    fn new(key: &[u8]) -> PRPResult<Self> {
-        let mut rng = AES128PRNG::init(key); // TODO: Use Result type here, too
+    fn new(key: &[u8]) -> PrpResult<Self> {
+        let mut rng = Aes128Prng::init(key); // TODO: Use Result type here, too
 
         let mut perm = Self {
             permutation: [0u8; 256],
@@ -55,25 +55,25 @@ impl Prp<u8> for KnuthShufflePRP<u8, 256> {
      *
      * Forward permutations are only used once in the ORE scheme so this is OK
      */
-    fn permute(&self, input: u8) -> PRPResult<u8> {
-        let index = usize::try_from(input).map_err(|_| PRPError)?;
+    fn permute(&self, input: u8) -> PrpResult<u8> {
+        let index = usize::try_from(input).map_err(|_| PrpError)?;
 
         match self.inverse.get(index) {
             Some(i) => Ok(*i),
-            None => Err(PRPError),
+            None => Err(PrpError),
         }
     }
 
     /*
      * Performs the inverse permutation in constant time.
      */
-    fn invert(&self, input: u8) -> PRPResult<u8> {
-        let index = usize::try_from(input).map_err(|_| PRPError)?;
+    fn invert(&self, input: u8) -> PrpResult<u8> {
+        let index = usize::try_from(input).map_err(|_| PrpError)?;
 
         // Forward an inverse permutations are reversed for historical reasons
         match self.permutation.get(index) {
             Some(i) => Ok(*i),
-            None => Err(PRPError),
+            None => Err(PrpError),
         }
     }
 }
@@ -83,13 +83,13 @@ mod tests {
     use super::*;
     use hex_literal::hex;
 
-    fn init_prp() -> PRPResult<KnuthShufflePRP<u8, 256>> {
+    fn init_prp() -> PrpResult<KnuthShufflePRP<u8, 256>> {
         let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0eaa");
         Prp::new(&key)
     }
 
     #[test]
-    fn test_invert() -> Result<(), PRPError> {
+    fn test_invert() -> Result<(), PrpError> {
         let prp = init_prp()?;
 
         for i in 0..=255 {

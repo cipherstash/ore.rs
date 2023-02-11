@@ -6,12 +6,12 @@ use aes::cipher::{consts::U16, generic_array::GenericArray};
 use aes::Block;
 use thiserror::Error;
 pub type AesBlock = Block;
-pub type PRFKey = GenericArray<u8, U16>;
+pub type PrfKey = GenericArray<u8, U16>;
 pub type HashKey = GenericArray<u8, U16>;
 pub const NONCE_SIZE: usize = 16;
 
 pub trait Prf {
-    fn new(key: &PRFKey) -> Self;
+    fn new(key: &PrfKey) -> Self;
     fn encrypt_all(&self, data: &mut [AesBlock]);
 }
 
@@ -23,11 +23,11 @@ pub trait Hash {
 
 #[derive(Debug, Error)]
 #[error("PRP Error")]
-pub struct PRPError;
-pub type PRPResult<T> = Result<T, PRPError>;
+pub struct PrpError;
+pub type PrpResult<T> = Result<T, PrpError>;
 
 pub trait Prp<T>: Sized {
-    fn new(key: &[u8]) -> PRPResult<Self>;
-    fn permute(&self, data: T) -> PRPResult<T>;
-    fn invert(&self, data: T) -> PRPResult<T>;
+    fn new(key: &[u8]) -> PrpResult<Self>;
+    fn permute(&self, data: T) -> PrpResult<T>;
+    fn invert(&self, data: T) -> PrpResult<T>;
 }
