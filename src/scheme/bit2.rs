@@ -76,8 +76,7 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
 
         for (n, xn) in x.iter().enumerate().take(N) {
             // Set prefix and create PRP for the block
-            let prp: KnuthShufflePRP<u8, 256> =
-                Prp::new(&output.f[n])?;
+            let prp: KnuthShufflePRP<u8, 256> = Prp::new(&output.f[n])?;
 
             output.xt[n] = prp.permute(*xn)?;
         }
@@ -104,9 +103,7 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
         let mut right = Right::<Self, N>::init();
 
         // Generate a 16-byte random nonce
-        self.rng
-            .borrow_mut()
-            .try_fill(&mut right.nonce)?;
+        self.rng.borrow_mut().try_fill(&mut right.nonce)?;
 
         // Build the prefixes
         // TODO: Don't modify struct values directly - use a function on a "Left"
@@ -126,8 +123,7 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
 
         for n in 0..N {
             // Set prefix and create PRP for the block
-            let prp: KnuthShufflePRP<u8, 256> =
-                Prp::new(&left.f[n])?;
+            let prp: KnuthShufflePRP<u8, 256> = Prp::new(&left.f[n])?;
 
             left.xt[n] = prp.permute(x[n])?;
 
@@ -507,7 +503,10 @@ mod tests {
         let ore = init_ore();
         let a = 10u64.encrypt(&ore).unwrap();
         let bin = a.to_bytes();
-        assert_eq!(a, CipherText::<OreAes128ChaCha20, 8>::from_slice(&bin).unwrap());
+        assert_eq!(
+            a,
+            CipherText::<OreAes128ChaCha20, 8>::from_slice(&bin).unwrap()
+        );
     }
 
     #[test]

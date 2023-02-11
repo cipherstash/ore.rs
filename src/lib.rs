@@ -139,11 +139,11 @@ mod convert;
 mod encrypt;
 mod primitives;
 pub mod scheme;
-use primitives::PrpError;
-use thiserror::Error;
-use std::cmp::Ordering;
 pub use crate::ciphertext::*;
 pub use crate::encrypt::OreEncrypt;
+use primitives::PrpError;
+use std::cmp::Ordering;
+use thiserror::Error;
 
 pub type PlainText<const N: usize> = [u8; N];
 

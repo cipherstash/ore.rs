@@ -1,4 +1,4 @@
-use crate::primitives::{AesBlock, PrfKey, Prf};
+use crate::primitives::{AesBlock, Prf, PrfKey};
 use aes::cipher::{BlockEncrypt, KeyInit};
 use aes::Aes128;
 use zeroize::ZeroizeOnDrop;

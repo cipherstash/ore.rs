@@ -13,7 +13,10 @@ fn do_encrypt_left_64(input: u64, ore: &mut OreAes128ChaCha20) {
 }
 
 #[inline]
-fn do_compare<const N: usize>(a: &CipherText<OreAes128ChaCha20, N>, b: &CipherText<OreAes128ChaCha20, N>) {
+fn do_compare<const N: usize>(
+    a: &CipherText<OreAes128ChaCha20, N>,
+    b: &CipherText<OreAes128ChaCha20, N>,
+) {
     let _ret = a.partial_cmp(b);
 }
 

@@ -7,14 +7,14 @@ pub use crate::OreCipher;
 pub trait OreOutput: Sized {
     /// The size (in bytes) of this encrypted value
     fn size() -> usize;
- 
+
     /// Convert to bytes
     fn to_bytes(&self) -> Vec<u8>;
- 
+
     /// Try to serialize from a slice
     fn from_slice(data: &[u8]) -> Result<Self, ParseError>;
 
-    #[deprecated(since="0.8.0", note="please use `from_slice` instead")]
+    #[deprecated(since = "0.8.0", note = "please use `from_slice` instead")]
     fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
         Self::from_slice(data)
     }
