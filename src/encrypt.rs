@@ -4,8 +4,8 @@ use crate::PlainText;
 use crate::{OreCipher, OreError};
 
 pub trait OreEncrypt<T: OreCipher> {
-    type LeftOutput;
-    type FullOutput;
+    type LeftOutput: OreOutput;
+    type FullOutput: OreOutput;
 
     fn encrypt_left(&self, cipher: &T) -> Result<Self::LeftOutput, OreError>;
     fn encrypt(&self, input: &T) -> Result<Self::FullOutput, OreError>;

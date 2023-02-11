@@ -101,6 +101,7 @@
 //! #     CipherText,
 //! #     OreCipher,  // Main ORE Cipher trait
 //! #     OreEncrypt, // Traits for encrypting primitive types (e.g. u64)
+//! #     OreOutput,
 //! #     scheme::bit2::OreAes128ChaCha20 // Specific scheme we want to use
 //! # };
 //! # use hex_literal::hex;
@@ -119,6 +120,7 @@
 //! #     CipherText,
 //! #     OreCipher,  // Main ORE Cipher trait
 //! #     OreEncrypt, // Traits for encrypting primitive types (e.g. u64)
+//! #     OreOutput,
 //! #     scheme::bit2::OreAes128ChaCha20 // Specific scheme we want to use
 //! # };
 //! # use hex_literal::hex;

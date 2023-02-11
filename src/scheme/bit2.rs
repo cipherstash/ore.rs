@@ -507,14 +507,14 @@ mod tests {
         let ore = init_ore();
         let a = 10u64.encrypt(&ore).unwrap();
         let bin = a.to_bytes();
-        assert_eq!(a, CipherText::<OreAes128ChaCha20, 8>::from_bytes(&bin).unwrap());
+        assert_eq!(a, CipherText::<OreAes128ChaCha20, 8>::from_slice(&bin).unwrap());
     }
 
     #[test]
     #[should_panic(expected = "ParseError")]
     fn binary_encoding_invalid_length() {
         let bin = vec![0, 1, 2, 3];
-        CipherText::<OreAes128ChaCha20, 8>::from_bytes(&bin).unwrap();
+        CipherText::<OreAes128ChaCha20, 8>::from_slice(&bin).unwrap();
     }
 
     #[test]

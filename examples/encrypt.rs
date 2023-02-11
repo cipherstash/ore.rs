@@ -1,5 +1,5 @@
 use hex_literal::hex;
-use ore_rs::{scheme::bit2::OreAes128ChaCha20, OreCipher, OreEncrypt};
+use ore_rs::{scheme::bit2::OreAes128ChaCha20, OreCipher, OreEncrypt, OreOutput};
 
 fn main() {
     let k1 = hex!("00010203 04050607 08090a0b 0c0d0e0f");
