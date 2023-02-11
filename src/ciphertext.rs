@@ -1,3 +1,5 @@
+use thiserror::Error;
+
 use crate::primitives::NONCE_SIZE;
 pub use crate::OreCipher;
 
@@ -32,7 +34,8 @@ pub trait CipherTextBlock: Default + Copy + std::fmt::Debug {
     fn default_in_place(&mut self);
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("Unable to parse ORE Ciphertext")]
 pub struct ParseError;
 
 impl<S: OreCipher, const N: usize> Left<S, N> {
