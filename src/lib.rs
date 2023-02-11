@@ -137,15 +137,23 @@ mod convert;
 mod encrypt;
 mod primitives;
 pub mod scheme;
-
+use primitives::PRPError;
+use thiserror::Error;
+use std::cmp::Ordering;
 pub use crate::ciphertext::*;
 pub use crate::encrypt::OREEncrypt;
-use std::cmp::Ordering;
 
 pub type PlainText<const N: usize> = [u8; N];
 
-#[derive(Debug, Clone)]
-pub struct OREError;
+#[derive(Debug, Error)]
+pub enum OREError {
+    #[error("Failed to initialize cipher")]
+    InitFailed,
+    #[error(transparent)]
+    PrpError(#[from] PRPError),
+    #[error("Randomness Error")]
+    RandError(#[from] rand::Error),
+}
 
 pub trait ORECipher: Sized {
     type LeftBlockType: CipherTextBlock;

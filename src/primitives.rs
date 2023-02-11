@@ -4,6 +4,7 @@ pub mod prp;
 
 use aes::cipher::{consts::U16, generic_array::GenericArray};
 use aes::Block;
+use thiserror::Error;
 pub type AesBlock = Block;
 pub type PRFKey = GenericArray<u8, U16>;
 pub type HashKey = GenericArray<u8, U16>;
@@ -20,7 +21,8 @@ pub trait Hash {
     fn hash_all(&self, input: &mut [AesBlock]) -> Vec<u8>;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Error)]
+#[error("PRP Error")]
 pub struct PRPError;
 pub type PRPResult<T> = Result<T, PRPError>;
 

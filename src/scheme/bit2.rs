@@ -77,9 +77,9 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
         for (n, xn) in x.iter().enumerate().take(N) {
             // Set prefix and create PRP for the block
             let prp: KnuthShufflePRP<u8, 256> =
-                Prp::new(&output.f[n]).map_err(|_| OREError)?;
+                Prp::new(&output.f[n])?;
 
-            output.xt[n] = prp.permute(*xn).map_err(|_| OREError)?;
+            output.xt[n] = prp.permute(*xn)?;
         }
 
         // Reset the f block
@@ -106,8 +106,7 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
         // Generate a 16-byte random nonce
         self.rng
             .borrow_mut()
-            .try_fill(&mut right.nonce)
-            .map_err(|_| OREError)?;
+            .try_fill(&mut right.nonce)?;
 
         // Build the prefixes
         // TODO: Don't modify struct values directly - use a function on a "Left"
@@ -128,9 +127,9 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
         for n in 0..N {
             // Set prefix and create PRP for the block
             let prp: KnuthShufflePRP<u8, 256> =
-                Prp::new(&left.f[n]).map_err(|_| OREError)?;
+                Prp::new(&left.f[n])?;
 
-            left.xt[n] = prp.permute(x[n]).map_err(|_| OREError)?;
+            left.xt[n] = prp.permute(x[n])?;
 
             // Reset the f block
             left.f[n].default_in_place();
@@ -167,7 +166,7 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
 
             // FIXME: force casting to u8 from usize could cause a panic
             for (j, h) in hashes.iter().enumerate() {
-                let jstar = prp.invert(j as u8).map_err(|_| OREError)?;
+                let jstar = prp.invert(j as u8)?;
                 let indicator = cmp(jstar, x[n]);
                 right.data[n].set_bit(j, indicator ^ h);
             }
