@@ -4,11 +4,11 @@ use aes::Aes128;
 use zeroize::ZeroizeOnDrop;
 
 #[derive(ZeroizeOnDrop)]
-pub struct AES128Z2Hash {
+pub struct Aes128Z2Hash {
     cipher: Aes128,
 }
 
-impl Hash for AES128Z2Hash {
+impl Hash for Aes128Z2Hash {
     fn new(key: &HashKey) -> Self {
         let key_array = GenericArray::from_slice(key);
         let cipher = Aes128::new(key_array);
@@ -50,7 +50,7 @@ mod tests {
     use super::*;
     use hex_literal::hex;
 
-    fn init_hash() -> AES128Z2Hash {
+    fn init_hash() -> Aes128Z2Hash {
         let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
         let key_array = GenericArray::from_slice(&key);
         Hash::new(key_array)

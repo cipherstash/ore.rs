@@ -5,10 +5,10 @@
 use crate::{
     ciphertext::*,
     primitives::{
-        hash::AES128Z2Hash, prf::AES128PRF, prp::KnuthShufflePRP, AesBlock, Hash, HashKey, Prf,
+        hash::Aes128Z2Hash, prf::Aes128Prf, prp::KnuthShufflePRP, AesBlock, Hash, HashKey, Prf,
         Prp, NONCE_SIZE,
     },
-    ORECipher, OREError, PlainText,
+    OreCipher, OreError, PlainText,
 };
 
 use aes::cipher::generic_array::GenericArray;
@@ -26,27 +26,27 @@ pub use self::block_types::*;
 /* Define our scheme */
 #[derive(Debug, ZeroizeOnDrop)]
 pub struct OreAes128<R: Rng + SeedableRng> {
-    prf1: AES128PRF,
-    prf2: AES128PRF,
+    prf1: Aes128Prf,
+    prf2: Aes128Prf,
     #[zeroize(skip)]
     rng: RefCell<R>,
 }
 
-pub type OREAES128 = OreAes128<ChaCha20Rng>;
+pub type OreAes128ChaCha20 = OreAes128<ChaCha20Rng>;
 
 /* Define some convenience types */
-type EncryptLeftResult<R, const N: usize> = Result<Left<OreAes128<R>, N>, OREError>;
-type EncryptResult<R, const N: usize> = Result<CipherText<OreAes128<R>, N>, OREError>;
+type EncryptLeftResult<R, const N: usize> = Result<Left<OreAes128<R>, N>, OreError>;
+type EncryptResult<R, const N: usize> = Result<CipherText<OreAes128<R>, N>, OreError>;
 
 fn cmp(a: u8, b: u8) -> u8 {
     u8::from(a > b)
 }
 
-impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
+impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
     type LeftBlockType = LeftBlock16;
     type RightBlockType = RightBlock32;
 
-    fn init(k1: &[u8; 16], k2: &[u8; 16]) -> Result<Self, OREError> {
+    fn init(k1: &[u8; 16], k2: &[u8; 16]) -> Result<Self, OreError> {
         // TODO: k1 and k2 should be Key types and we should have a set of traits to abstract the
         // behaviour ro parsing/loading etc
 
@@ -76,10 +76,9 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
 
         for (n, xn) in x.iter().enumerate().take(N) {
             // Set prefix and create PRP for the block
-            let prp: KnuthShufflePRP<u8, 256> =
-                Prp::new(&output.f[n]).map_err(|_| OREError)?;
+            let prp: KnuthShufflePRP<u8, 256> = Prp::new(&output.f[n])?;
 
-            output.xt[n] = prp.permute(*xn).map_err(|_| OREError)?;
+            output.xt[n] = prp.permute(*xn)?;
         }
 
         // Reset the f block
@@ -104,10 +103,7 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
         let mut right = Right::<Self, N>::init();
 
         // Generate a 16-byte random nonce
-        self.rng
-            .borrow_mut()
-            .try_fill(&mut right.nonce)
-            .map_err(|_| OREError)?;
+        self.rng.borrow_mut().try_fill(&mut right.nonce)?;
 
         // Build the prefixes
         // TODO: Don't modify struct values directly - use a function on a "Left"
@@ -127,10 +123,9 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
 
         for n in 0..N {
             // Set prefix and create PRP for the block
-            let prp: KnuthShufflePRP<u8, 256> =
-                Prp::new(&left.f[n]).map_err(|_| OREError)?;
+            let prp: KnuthShufflePRP<u8, 256> = Prp::new(&left.f[n])?;
 
-            left.xt[n] = prp.permute(x[n]).map_err(|_| OREError)?;
+            left.xt[n] = prp.permute(x[n])?;
 
             // Reset the f block
             left.f[n].default_in_place();
@@ -162,12 +157,12 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
              * If not, we will probably need to implement our own parallel encrypt using intrisics
              * like in the AES crate: https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/ni/aes128.rs#L26
              */
-            let hasher: AES128Z2Hash = Hash::new(AesBlock::from_slice(&right.nonce));
+            let hasher: Aes128Z2Hash = Hash::new(AesBlock::from_slice(&right.nonce));
             let hashes = hasher.hash_all(&mut ro_keys);
 
             // FIXME: force casting to u8 from usize could cause a panic
             for (j, h) in hashes.iter().enumerate() {
-                let jstar = prp.invert(j as u8).map_err(|_| OREError)?;
+                let jstar = prp.invert(j as u8)?;
                 let indicator = cmp(jstar, x[n]);
                 right.data[n].set_bit(j, indicator ^ h);
             }
@@ -216,7 +211,7 @@ impl<R: Rng + SeedableRng> ORECipher for OreAes128<R> {
 
         let b_right = &b[num_blocks * (left_size + 1)..];
         let hash_key = HashKey::from_slice(&b_right[0..NONCE_SIZE]);
-        let hash: AES128Z2Hash = Hash::new(hash_key);
+        let hash: Aes128Z2Hash = Hash::new(hash_key);
         let h = hash.hash(left_block(a_f, l));
 
         let target_block = right_block(&b_right[NONCE_SIZE..], l);
@@ -254,13 +249,13 @@ fn get_bit(block: &[u8], bit: usize) -> u8 {
     (block[byte_index] & v) >> position
 }
 
-impl<const N: usize> PartialEq for CipherText<OREAES128, N> {
+impl<const N: usize> PartialEq for CipherText<OreAes128ChaCha20, N> {
     fn eq(&self, b: &Self) -> bool {
         matches!(self.cmp(b), Ordering::Equal)
     }
 }
 
-impl<const N: usize> Ord for CipherText<OREAES128, N> {
+impl<const N: usize> Ord for CipherText<OreAes128ChaCha20, N> {
     fn cmp(&self, b: &Self) -> Ordering {
         let mut is_equal = Choice::from(1);
         let mut l: u64 = 0; // Unequal block
@@ -279,7 +274,7 @@ impl<const N: usize> Ord for CipherText<OREAES128, N> {
             return Ordering::Equal;
         }
 
-        let hash: AES128Z2Hash = Hash::new(AesBlock::from_slice(&b.right.nonce));
+        let hash: Aes128Z2Hash = Hash::new(AesBlock::from_slice(&b.right.nonce));
         let h = hash.hash(&self.left.f[l]);
 
         let test = b.right.data[l].get_bit(self.left.xt[l] as usize) ^ h;
@@ -291,7 +286,7 @@ impl<const N: usize> Ord for CipherText<OREAES128, N> {
     }
 }
 
-impl<const N: usize> PartialOrd for CipherText<OREAES128, N> {
+impl<const N: usize> PartialOrd for CipherText<OreAes128ChaCha20, N> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
@@ -301,15 +296,15 @@ impl<const N: usize> PartialOrd for CipherText<OREAES128, N> {
  * (From the Rust docs)
  * This property cannot be checked by the compiler, and therefore Eq implies PartialEq, and has no extra methods.
  */
-impl<const N: usize> Eq for CipherText<OREAES128, N> {}
+impl<const N: usize> Eq for CipherText<OreAes128ChaCha20, N> {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::encrypt::OREEncrypt;
+    use crate::encrypt::OreEncrypt;
     use quickcheck::TestResult;
 
-    type ORE = OREAES128;
+    type ORE = OreAes128ChaCha20;
 
     fn init_ore() -> ORE {
         let mut k1: [u8; 16] = Default::default();
@@ -320,7 +315,7 @@ mod tests {
         rng.fill(&mut k1);
         rng.fill(&mut k2);
 
-        ORECipher::init(&k1, &k2).unwrap()
+        OreCipher::init(&k1, &k2).unwrap()
     }
 
     quickcheck! {
@@ -508,14 +503,17 @@ mod tests {
         let ore = init_ore();
         let a = 10u64.encrypt(&ore).unwrap();
         let bin = a.to_bytes();
-        assert_eq!(a, CipherText::<OREAES128, 8>::from_bytes(&bin).unwrap());
+        assert_eq!(
+            a,
+            CipherText::<OreAes128ChaCha20, 8>::from_slice(&bin).unwrap()
+        );
     }
 
     #[test]
     #[should_panic(expected = "ParseError")]
     fn binary_encoding_invalid_length() {
         let bin = vec![0, 1, 2, 3];
-        CipherText::<OREAES128, 8>::from_bytes(&bin).unwrap();
+        CipherText::<OreAes128ChaCha20, 8>::from_slice(&bin).unwrap();
     }
 
     #[test]
@@ -530,8 +528,8 @@ mod tests {
             49, 50, 51, 52, 53, 54, 55, 56, 57, 48, 97, 98, 99, 100, 101, 102,
         ];
 
-        let ore1: OREAES128 = ORECipher::init(&k1, &k2).unwrap();
-        let ore2: OREAES128 = ORECipher::init(&k3, &k2).unwrap();
+        let ore1: OreAes128ChaCha20 = OreCipher::init(&k1, &k2).unwrap();
+        let ore2: OreAes128ChaCha20 = OreCipher::init(&k3, &k2).unwrap();
 
         let a = 1000u32.encrypt(&ore1).unwrap().to_bytes();
         let b = 1000u32.encrypt(&ore2).unwrap().to_bytes();
@@ -551,8 +549,8 @@ mod tests {
             49, 50, 51, 52, 53, 54, 55, 56, 57, 48, 97, 98, 99, 100, 101, 102,
         ];
 
-        let ore1: OREAES128 = ORECipher::init(&k1, &k2).unwrap();
-        let ore2: OREAES128 = ORECipher::init(&k1, &k3).unwrap();
+        let ore1: OreAes128ChaCha20 = OreCipher::init(&k1, &k2).unwrap();
+        let ore2: OreAes128ChaCha20 = OreCipher::init(&k1, &k3).unwrap();
 
         let a = 1000u32.encrypt(&ore1).unwrap().to_bytes();
         let b = 1000u32.encrypt(&ore2).unwrap().to_bytes();
