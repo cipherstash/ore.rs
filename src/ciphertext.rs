@@ -11,7 +11,7 @@ pub trait OreOutput: Sized {
     /// Convert to bytes
     fn to_bytes(&self) -> Vec<u8>;
 
-    /// Try to serialize from a slice
+    /// Try to deserialize from a slice
     fn from_slice(data: &[u8]) -> Result<Self, ParseError>;
 
     #[deprecated(since = "0.8.0", note = "please use `from_slice` instead")]
