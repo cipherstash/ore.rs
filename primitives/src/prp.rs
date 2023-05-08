@@ -1,6 +1,6 @@
 pub mod prng;
-use crate::primitives::prp::prng::Aes128Prng;
-use crate::primitives::{Prp, PrpError, PrpResult};
+use crate::prp::prng::Aes128Prng;
+use crate::{Prp, PrpError, PrpResult};
 use std::convert::TryFrom;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 

@@ -1,7 +1,7 @@
 use zeroize::Zeroize;
 
 use crate::ciphertext::{CipherTextBlock, ParseError};
-use crate::primitives::AesBlock;
+use primitives::AesBlock;
 
 pub type LeftBlock16 = AesBlock;
 

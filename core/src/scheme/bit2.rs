@@ -2,12 +2,12 @@
  * Block ORE Implemenation using a 2-bit indicator function
  */
 
+use primitives::{
+    hash::Aes128Z2Hash, prf::Aes128Prf, prp::KnuthShufflePRP, AesBlock, Hash, HashKey, Prf,
+    Prp, NONCE_SIZE,
+};
 use crate::{
     ciphertext::*,
-    primitives::{
-        hash::Aes128Z2Hash, prf::Aes128Prf, prp::KnuthShufflePRP, AesBlock, Hash, HashKey, Prf,
-        Prp, NONCE_SIZE,
-    },
     OreCipher, OreError, PlainText,
 };
 
