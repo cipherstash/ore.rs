@@ -3,6 +3,7 @@
 members = [
     "core",
     "primitives",
+    "ore-rs-5bit",
 ]
 
 [workspace.dependencies]
