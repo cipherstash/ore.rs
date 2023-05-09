@@ -4,6 +4,7 @@ pub mod prp;
 
 use aes::cipher::{consts::U16, generic_array::GenericArray};
 use aes::Block;
+use prf::PrfBlock;
 use thiserror::Error;
 pub type AesBlock = Block;
 pub type PrfKey = GenericArray<u8, U16>;
@@ -12,7 +13,7 @@ pub const NONCE_SIZE: usize = 16;
 
 pub trait Prf {
     fn new(key: &PrfKey) -> Self;
-    fn encrypt_all(&self, data: &mut [AesBlock]);
+    fn encrypt_all(&self, data: &mut [PrfBlock]);
 }
 
 pub trait Hash {
