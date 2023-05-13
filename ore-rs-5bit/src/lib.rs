@@ -1,3 +1,4 @@
+#![feature(iter_next_chunk)]
 use std::cell::RefCell;
 use primitives::{prf::{Aes128Prf, PrfBlock}, Prf, prp::{KnuthShufflePRP, bitwise::BitwisePrp}, Prp, AesBlock, KnuthShuffleGenerator, PrpGenerator, NewPrp, hash::Aes128Z2Hash, Hash, HashKey};
 use rand::{Rng, SeedableRng};
@@ -5,10 +6,9 @@ use rand_chacha::ChaCha20Rng;
 use zeroize::ZeroizeOnDrop;
 use aes::{cipher::generic_array::GenericArray, Aes128};
 use cmac::{Cmac, Mac, digest::FixedOutput};
-
 use crate::packing::packed_prefixes;
-
 pub mod packing;
+pub mod format;
 
 #[derive(Debug, ZeroizeOnDrop)]
 pub struct Ore5Bit<R: Rng + SeedableRng> {
@@ -115,8 +115,8 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
         let mut left_blks = packed_prefixes(input);
         let mut right_blocks: Vec<u32> = Vec::new(); // TODO: Len
         self.prf2.encrypt_all(&mut left_blks);
-        left.push(left_blks.len().try_into().unwrap()); // TODO: DOn't unwrap
-        right.push(left_blks.len().try_into().unwrap()); // TODO: DOn't unwrap
+        left.push(input.len().try_into().unwrap()); // TODO: DOn't unwrap
+        right.push(input.len().try_into().unwrap()); // TODO: DOn't unwrap
 
         // This deviates from the paper slightly.
         // Instead of calling PRF1 with the plaintext prefix, we call it
@@ -137,12 +137,12 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
 
         self.prf1.encrypt_all(&mut left_blks);
 
-        for output_block in left_blks {
-            left.extend_from_slice(&output_block);
+        for (left_blk, right_blk) in left_blks.iter().zip(right_blocks.iter()) {
+            left.extend_from_slice(left_blk);
             let mut ro_keys: [[u8; 16]; 32] = Default::default();
             
             for (j, ro_key) in ro_keys.iter_mut().enumerate() {
-                ro_key.copy_from_slice(&output_block);
+                ro_key.copy_from_slice(left_blk);
                 ro_key[15] = j as u8;
             }
             self.prf1.encrypt_all(&mut ro_keys);
@@ -150,7 +150,8 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
             // set the bits and and Xor with the right_block
             // Push bytes onto right output vec
             let hasher: Aes128Z2Hash = Hash::new(&nonce.into());
-            let blind_block = hasher.hash_all_onto_u32(&ro_keys);
+            let final_right = right_blk ^ hasher.hash_all_onto_u32(&ro_keys);
+            right.extend_from_slice(&final_right.to_be_bytes());
         }
 
 
