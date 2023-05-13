@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use primitives::{prf::{Aes128Prf, PrfBlock}, Prf, prp::KnuthShufflePRP, Prp, AesBlock};
+use primitives::{prf::{Aes128Prf, PrfBlock}, Prf, prp::{KnuthShufflePRP, bitwise::BitwisePrp}, Prp, AesBlock, KnuthShuffleGenerator, PrpGenerator, NewPrp, hash::Aes128Z2Hash, Hash, HashKey};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use zeroize::ZeroizeOnDrop;
@@ -95,6 +95,70 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
         }
 
         out
+    }
+
+    pub fn encrypt(&self, input: &[u8]) -> (Vec<u8>, Vec<u8>) {
+        let mut nonce: [u8; 16] = Default::default();
+        self.rng.borrow_mut().try_fill(&mut nonce).unwrap();
+
+        // TODO: Can we pack the input bytes??
+        debug_assert!(input.len() <= 16);
+        // TODO: We could possibly use the stack and just do a single extend on to a vec after each round
+        // Format: [<u8:number of blocks>, <u8:prp-values>, <Prfblock:prf-values>]
+        let mut left: Vec<u8> = Vec::new(); // TODO: What capacity?
+        let mut right: Vec<u8> = Vec::new(); // TODO: What capacity?
+
+        // Here we'll model a PRF using a single block of AES
+        // This will be OK for up to 16-bytes of input (or 25 5-bit values)
+        // For larger inputs we can chain the values by XORing the last output
+        // with the next input (a little like CMAC).
+        let mut left_blks = packed_prefixes(input);
+        let mut right_blocks: Vec<u32> = Vec::new(); // TODO: Len
+        self.prf2.encrypt_all(&mut left_blks);
+        left.push(left_blks.len().try_into().unwrap()); // TODO: DOn't unwrap
+        right.push(left_blks.len().try_into().unwrap()); // TODO: DOn't unwrap
+
+        // This deviates from the paper slightly.
+        // Instead of calling PRF1 with the plaintext prefix, we call it
+        // with the output of the PRF2 of the prefix.
+        // This avoids a copy and should have the same effect.
+        // We also use a mask to set the comparison bits in one constant time
+        // operation and then perform a bitwise shuffle using the PRP
+        // instead of performing comparisons on each value (which would not be constant time).
+        for (out_left_blk, in_blk) in left_blks.iter_mut().zip(input.iter()) {
+            let out_right_blk: u32 = 0xFFFFFFFF >> *in_blk;
+            let prp: NewPrp<u8, 32> = KnuthShuffleGenerator::new(out_left_blk).generate();
+            let p_n = prp.permute(*in_blk);
+            out_right_blk.inverse_shuffle(&prp);
+            left.push(p_n);
+            out_left_blk[15] = p_n;
+            right_blocks.push(out_right_blk.inverse_shuffle(&prp));
+        }
+
+        self.prf1.encrypt_all(&mut left_blks);
+
+        for output_block in left_blks {
+            left.extend_from_slice(&output_block);
+            let mut ro_keys: [[u8; 16]; 32] = Default::default();
+            
+            for (j, ro_key) in ro_keys.iter_mut().enumerate() {
+                ro_key.copy_from_slice(&output_block);
+                ro_key[15] = j as u8;
+            }
+            self.prf1.encrypt_all(&mut ro_keys);
+            // TODO: Hash all of these keys with the nonce
+            // set the bits and and Xor with the right_block
+            // Push bytes onto right output vec
+            let hasher: Aes128Z2Hash = Hash::new(&nonce.into());
+            let blind_block = hasher.hash_all_onto_u32(&ro_keys);
+        }
+
+
+
+
+        // TODO: Final XORs
+
+        (left, right)
     }
 
     // For the right encryption we could either use the approach that we do in the current version,
