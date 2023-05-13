@@ -1,7 +1,10 @@
 pub mod prng;
+pub mod bitwise;
 use crate::prp::prng::Aes128Prng;
 use crate::{Prp, PrpError, PrpResult};
 use std::convert::TryFrom;
+use std::iter::Enumerate;
+use std::slice::Iter;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 #[derive(Zeroize)]
@@ -20,6 +23,7 @@ impl<T: Zeroize, const N: usize> Drop for KnuthShufflePRP<T, N> {
 // Impl the ZeroizeOnDrop marker trait since we're zeroizing above
 impl<T: Zeroize, const N: usize> ZeroizeOnDrop for KnuthShufflePRP<T, N> {}
 
+// TODO: This would make more sense if we defined PRP as a generator
 impl <const N: usize> Prp<u8> for KnuthShufflePRP<u8, N> {
     /*
      * Initialize an 8-bit (N element) PRP using a KnuthShuffle
@@ -75,6 +79,10 @@ impl <const N: usize> Prp<u8> for KnuthShufflePRP<u8, N> {
             Some(i) => Ok(*i),
             None => Err(PrpError),
         }
+    }
+
+    fn enumerate(&self) -> Enumerate<Iter<u8>> {
+        self.permutation.iter().enumerate()
     }
 }
 

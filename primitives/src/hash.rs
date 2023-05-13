@@ -1,11 +1,34 @@
+use std::slice;
 use crate::{AesBlock, Hash, HashKey};
 use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
 use aes::Aes128;
 use zeroize::ZeroizeOnDrop;
 
+pub type HashBlock = [u8; 16];
+
+fn convert_slice<'a>(input: &'a [HashBlock]) -> &'a mut [AesBlock] {
+    let ptr = input.as_ptr() as *mut AesBlock;
+    unsafe { slice::from_raw_parts_mut(ptr, input.len()) }
+}
+
 #[derive(ZeroizeOnDrop)]
 pub struct Aes128Z2Hash {
     cipher: Aes128,
+}
+
+impl Aes128Z2Hash {
+    pub fn hash_all_onto_u32(&self, data: &[HashBlock]) -> u32 {
+        assert!(data.len() <= 32);
+        let mut out: u32 = 0;
+        let mut blocks = convert_slice(data);
+        self.cipher.encrypt_blocks(&mut blocks);
+
+        for (i, block) in blocks.iter().enumerate() {
+            out |= ((block[0] & 1u8) as u32) << i;
+        }
+
+        out
+    }
 }
 
 impl Hash for Aes128Z2Hash {
@@ -32,10 +55,11 @@ impl Hash for Aes128Z2Hash {
     }
 
     // TODO: this mutates - see how much a copy effects performance (clone_from_slice)
-    fn hash_all(&self, data: &mut [AesBlock]) -> Vec<u8> {
-        self.cipher.encrypt_blocks(data);
+    fn hash_all(&self, data: &mut [HashBlock]) -> Vec<u8> {
+        let mut blocks = convert_slice(data);
+        self.cipher.encrypt_blocks(&mut blocks);
 
-        let mut vec = Vec::with_capacity(data.len());
+        let mut vec = Vec::with_capacity(blocks.len());
         for &mut block in data {
             // Output is Z2 (1-bit)
             vec.push(block[0] & 1u8);
@@ -88,5 +112,65 @@ mod tests {
         let input: [u8; 24] = hex!("00010203 04050607 ffffffff bbbbbbbb cccccccc abababab");
 
         hash.hash(&input);
+    }
+
+    #[test]
+    fn hash_all_onto_u32_one_elem() {
+        let hash = init_hash();
+
+        let mut input: [[u8; 16]; 1] = [
+            hex!("00110211 04050607 08090a0b 0c0d0e0f"),
+        ];
+        let res = hash.hash_all_onto_u32(&mut input);
+        assert_eq!(
+            res,
+            0b1,
+        );
+    }
+
+    #[test]
+    fn hash_all_onto_u32_three_elems() {
+        let hash = init_hash();
+
+        let mut input: [[u8; 16]; 3] = [
+            hex!("00110211 04050607 08090a0b 0c0d0e0f"),
+            hex!("00000000 04050607 08090a0b 0c0d0e0f"),
+            hex!("00110211 04050607 08090a0b 0c0d0e0f"),
+        ];
+        let res = hash.hash_all_onto_u32(&mut input);
+        assert_eq!(
+            res,
+            0b101,
+        );
+    }
+
+    #[test]
+    fn hash_all_onto_u32_16_elems() {
+        let hash = init_hash();
+
+        let mut input: [[u8; 16]; 16] = [
+            hex!("00110211 04050607 08090a0b 0c0d0e0f"),
+            hex!("00000000 04050607 08090a0b 0c0d0e0f"),
+            hex!("00110211 04050607 08090a0b 0c0d0e0f"),
+            hex!("00000000 04050607 08090a0b 0c0d0e0f"),
+            hex!("00110211 04050607 08090a0b 0c0d0e0f"),
+            hex!("00000000 04050607 08090a0b 0c0d0e0f"),
+            hex!("00110211 04050607 08090a0b 0c0d0e0f"),
+            hex!("00000000 04050607 08090a0b 0c0d0e0f"),
+            hex!("00110211 04050607 08090a0b 0c0d0e0f"),
+            hex!("00000000 04050607 08090a0b 0c0d0e0f"),
+            hex!("00110211 04050607 08090a0b 0c0d0e0f"),
+            hex!("00000000 04050607 08090a0b 0c0d0e0f"),
+            hex!("00110211 04050607 08090a0b 0c0d0e0f"),
+            hex!("00000000 04050607 08090a0b 0c0d0e0f"),
+            hex!("00110211 04050607 08090a0b 0c0d0e0f"),
+            hex!("00110211 04050607 08090a0b 0c0d0e0f"),
+        ];
+        let res = hash.hash_all_onto_u32(&mut input);
+        println!("{res:b}");
+        assert_eq!(
+            res,
+            0b1101_0101_0101_0101,
+        );
     }
 }

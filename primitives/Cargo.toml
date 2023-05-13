@@ -10,3 +10,4 @@ thiserror = { workspace = true }
 aes = { workspace = true }
 zeroize = { workspace = true }
 hex-literal = { workspace = true }
+num-traits = "0.2.15"
