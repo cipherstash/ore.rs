@@ -1,6 +1,6 @@
 use crate::header::Header;
 
-pub(crate) struct DataWithHeader {
+pub struct DataWithHeader {
     data: Vec<u8>
 }
 
@@ -43,14 +43,14 @@ impl DataWithHeader {
         &self.data[Header::HEADER_LEN..]
     }
 
-    pub(crate) fn extend<I>(&mut self, iter: I)
+    pub fn extend<I>(&mut self, iter: I)
         where
             I: IntoIterator<Item = u8>
     {
         self.data.extend(iter)
     }
 
-    pub(crate) fn extend_from_slice(&mut self, slice: &[u8]) {
+    pub fn extend_from_slice(&mut self, slice: &[u8]) {
         self.data.extend_from_slice(slice);
     }
 }

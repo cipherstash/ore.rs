@@ -1,8 +1,8 @@
 use std::slice::Iter;
-use crate::header::Header;
-mod left;
-mod right;
-mod combined;
+use crate::{header::Header, data_with_header::DataWithHeader};
+pub(crate) mod left;
+pub(crate) mod right;
+pub(crate) mod combined;
 
 // TODO: make the new and add_block functions a separate trait
 pub trait CipherText {
@@ -17,7 +17,7 @@ pub trait CipherText {
     fn blocks(&self) -> Iter<Self::Block>;
 }
 
-pub trait CipherTextBlock {
+pub trait CipherTextBlock { // TODO: Zeroize
     fn byte_size() -> usize;
-    fn extend_into(&self, out: &mut Vec<u8>);
+    fn extend_into(&self, out: &mut DataWithHeader);
 }

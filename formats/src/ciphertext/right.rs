@@ -1,5 +1,5 @@
 use std::{marker::PhantomData, slice::Iter};
-use crate::{data_with_header::DataWithHeader, ParseError, header::Header, CtType};
+use crate::{data_with_header::{DataWithHeader, CtType}, ParseError, header::Header};
 use super::{CipherTextBlock, CipherText};
 
 pub struct RightCiphertext<B: CipherTextBlock> {

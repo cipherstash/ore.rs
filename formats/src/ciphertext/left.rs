@@ -1,28 +1,12 @@
 use std::{marker::PhantomData, slice::Iter};
-use crate::{data_with_header::DataWithHeader, header::Header, ParseError, CtType};
+use crate::{data_with_header::{CtType, DataWithHeader}, header::Header, ParseError};
 use super::{CipherTextBlock, CipherText};
-
-
-
 
 pub struct LeftCiphertext<B: CipherTextBlock> {
     pub(crate) data: DataWithHeader,
     _phantom: PhantomData<B>,
 }
 
-// TODO: Should we include a scheme and/or version number?
-/// Wrapper to a structured byte array representing a Left ciphertext.
-/// 
-/// ## Format
-/// 
-/// | Field | Number of Bytes |
-/// |-------|-----------------|
-/// | type  | 1               |
-/// | num_blocks | 2 (up to 65535 blocks) |
-/// | block* | 17 |
-/// 
-/// * There are `num_blocks` blocks of 17 bytes.
-/// 
 impl<B: CipherTextBlock> LeftCiphertext<B> {
     pub fn new(num_blocks: usize) -> Self {
         let hdr = Header::new(CtType::Left, num_blocks);
@@ -33,11 +17,9 @@ impl<B: CipherTextBlock> LeftCiphertext<B> {
         }
     }
 
-    pub fn add_block(&mut self, block: &[u8; 16], permuted: u8) {
-        self.data.extend_from_slice(block);
-        self.data.extend([permuted]);
+    pub fn add_block(&mut self, block: &B) {
+        block.extend_into(&mut self.data);
     }
-
 }
 
 impl<B: CipherTextBlock> CipherText for LeftCiphertext<B> {

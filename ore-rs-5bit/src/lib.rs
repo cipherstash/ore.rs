@@ -1,14 +1,12 @@
 use std::cell::RefCell;
-use format::CombinedCiphertext;
+use formats::{LeftCiphertext, CipherTextBlock, DataWithHeader};
 use primitives::{prf::{Aes128Prf, PrfBlock}, Prf, prp::{KnuthShufflePRP, bitwise::BitwisePrp}, Prp, AesBlock, KnuthShuffleGenerator, PrpGenerator, NewPrp, hash::Aes128Z2Hash, Hash, HashKey};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use zeroize::ZeroizeOnDrop;
 use aes::{cipher::generic_array::GenericArray, Aes128};
-use cmac::{Cmac, Mac, digest::FixedOutput};
-use crate::{packing::packed_prefixes, format::{LeftCiphertext, CipherText}};
+use crate::packing::packed_prefixes;
 pub mod packing;
-pub mod format;
 
 #[derive(Debug, ZeroizeOnDrop)]
 pub struct Ore5Bit<R: Rng + SeedableRng> {
@@ -26,21 +24,25 @@ pub struct Ore5Bit<R: Rng + SeedableRng> {
 pub struct OreError;
 
 pub type Ore5BitChaCha20 = Ore5Bit<ChaCha20Rng>;
+pub type Ore5BitLeft = LeftCiphertext<LeftBlock>;
 
 #[derive(Debug)]
 pub struct Out(Vec<u8>, u8);
 
-// TODO: Include block prefixes
-pub fn cmac(key: &[u8; 16], input: &[u8]) -> PrfBlock {
-    let mut out: PrfBlock = Default::default();
-    let mut buf = GenericArray::from_mut_slice(&mut out);
-    // TODO: This might be really inefficient!
-    let mut mac = Cmac::<Aes128>::new_from_slice(key).unwrap();
-    mac.update(input);
-    mac.finalize_into(&mut buf);
-    //result.into_bytes().to_vec()
-    out
+pub struct LeftBlock([u8; 16], u8);
+pub struct RightBlock(u32);
+
+impl CipherTextBlock for LeftBlock {
+    fn byte_size() -> usize {
+        17
+    }
+
+    fn extend_into(&self, out: &mut DataWithHeader) {
+        out.extend_from_slice(&self.0);
+        out.extend([self.1]);
+    }
 }
+
 
 // TODO: Make this use the ORE traits once we've cleaned these up
 impl<R: Rng + SeedableRng> Ore5Bit<R> {
@@ -63,12 +65,12 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
     /// most significant 3-bits of each value are ignored).
     /// TODO: Create a wrapper type
     /// TODO: This might be faster if we do it blocks of statically allocated chunks
-    pub fn encrypt_left(&self, input: &[u8]) -> LeftCiphertext {
+    pub fn encrypt_left(&self, input: &[u8]) -> Ore5BitLeft {
         // We're limited to 16 input blocks for now because we're using AES as the PRF (1 block)
         debug_assert!(input.len() <= 16);
         // TODO: We could possibly use the stack and just do a single extend on to a vec after each round
         // Format: [<u8:number of blocks>, <u8:prp-values>, <Prfblock:prf-values>]
-        let mut out = LeftCiphertext::new(input.len());
+        let mut out = Ore5BitLeft::new(input.len());
 
         // Here we'll model a PRF using a single block of AES
         // This will be OK for up to 16-bytes of input (or 25 5-bit values)
@@ -83,22 +85,23 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
         // This avoids a copy and should have the same effect.
         // TODO: Change this to use functional callbacks rather than for
         let mut p_ns = vec![];
-        for (output_block, input_block) in prefixes.iter_mut().zip(input.iter()) {
-            let prp: KnuthShufflePRP<u8, 32> = Prp::new(output_block).unwrap(); // TODO:
-            let p_n = prp.permute(*input_block).unwrap();
+        for (enc_prefix, in_blk) in prefixes.iter_mut().zip(input.iter()) {
+            //let prp: KnuthShufflePRP<u8, 32> = Prp::new(out_blk).unwrap(); // TODO:
+            let prp: NewPrp<u8, 32> = KnuthShuffleGenerator::new(enc_prefix).generate();
+            let p_n = prp.permute(*in_blk);
             p_ns.push(p_n);
-            output_block[15] = p_n;
+            enc_prefix[15] = p_n;
         }
 
         self.prf1.encrypt_all(&mut prefixes);
         for (prf_block, permuted) in prefixes.iter().zip(p_ns.iter()) {
-            out.add_block(prf_block, *permuted);
+            out.add_block(&LeftBlock(*prf_block, *permuted));
         }
 
         out
     }
 
-    pub fn encrypt(&self, input: &[u8]) -> (Vec<u8>, Vec<u8>) {
+    pub fn encrypt(&self, input: &[u8]) -> (Ore5BitLeft, Vec<u8>) { // TODO: Combined
         let mut nonce: [u8; 16] = Default::default();
         self.rng.borrow_mut().try_fill(&mut nonce).unwrap();
 
@@ -106,17 +109,18 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
         debug_assert!(input.len() <= 16);
         // TODO: We could possibly use the stack and just do a single extend on to a vec after each round
         // Format: [<u8:number of blocks>, <u8:prp-values>, <Prfblock:prf-values>]
-        let mut left: Vec<u8> = Vec::new(); // TODO: What capacity?
+        let mut left = Ore5BitLeft::new(input.len());
+
         let mut right: Vec<u8> = Vec::new(); // TODO: What capacity?
 
         // Here we'll model a PRF using a single block of AES
         // This will be OK for up to 16-bytes of input (or 25 5-bit values)
         // For larger inputs we can chain the values by XORing the last output
         // with the next input (a little like CMAC).
-        let mut left_blks = packed_prefixes(input);
+        let mut prefixes = packed_prefixes(input);
         let mut right_blocks: Vec<u32> = Vec::new(); // TODO: Len
-        self.prf2.encrypt_all(&mut left_blks);
-        left.push(input.len().try_into().unwrap()); // TODO: DOn't unwrap
+        self.prf2.encrypt_all(&mut prefixes);
+
         right.push(input.len().try_into().unwrap()); // TODO: DOn't unwrap
 
         // This deviates from the paper slightly.
@@ -126,24 +130,28 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
         // We also use a mask to set the comparison bits in one constant time
         // operation and then perform a bitwise shuffle using the PRP
         // instead of performing comparisons on each value (which would not be constant time).
-        for (out_left_blk, in_blk) in left_blks.iter_mut().zip(input.iter()) {
+        let mut p_ns: Vec<u8> = Vec::with_capacity(input.len());
+
+        for (enc_prefix, in_blk) in prefixes.iter_mut().zip(input.iter()) {
             let out_right_blk: u32 = 0xFFFFFFFF >> *in_blk;
-            let prp: NewPrp<u8, 32> = KnuthShuffleGenerator::new(out_left_blk).generate();
+            let prp: NewPrp<u8, 32> = KnuthShuffleGenerator::new(enc_prefix).generate();
             let p_n = prp.permute(*in_blk);
+            p_ns.push(p_n);
+            enc_prefix[15] = p_n;
+
             out_right_blk.inverse_shuffle(&prp);
-            left.push(p_n);
-            out_left_blk[15] = p_n;
             right_blocks.push(out_right_blk.inverse_shuffle(&prp));
         }
 
-        self.prf1.encrypt_all(&mut left_blks);
+        self.prf1.encrypt_all(&mut prefixes);
 
-        for (left_blk, right_blk) in left_blks.iter().zip(right_blocks.iter()) {
-            left.extend_from_slice(left_blk);
+        // TODO: This feels a bit janky
+        for ((enc_prefix, right_blk), p_n) in prefixes.iter().zip(right_blocks.iter()).zip(p_ns.iter()) {
+            left.add_block(&LeftBlock(*enc_prefix, *p_n));
             let mut ro_keys: [[u8; 16]; 32] = Default::default();
             
             for (j, ro_key) in ro_keys.iter_mut().enumerate() {
-                ro_key.copy_from_slice(left_blk);
+                ro_key.copy_from_slice(enc_prefix);
                 ro_key[15] = j as u8;
             }
             self.prf1.encrypt_all(&mut ro_keys);
@@ -161,9 +169,9 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
     // TODO: The CipherText types might be better to implement a CipherText trait
     // so that we can handle the different variations here?
     pub fn compare_slices(a: impl AsRef<[u8]>, b: impl AsRef<[u8]>) -> u8 {
-        let left: LeftCiphertext = a.as_ref().try_into().unwrap();
-        let combined: CombinedCiphertext = b.as_ref().try_into().unwrap();
-        assert!(left.comparable(&combined)); // TODO: Error
+        let left: Ore5BitLeft = a.as_ref().try_into().unwrap();
+        //let combined: CombinedCiphertext = b.as_ref().try_into().unwrap();
+        //assert!(left.comparable(&combined)); // TODO: Error
         0
     }
 

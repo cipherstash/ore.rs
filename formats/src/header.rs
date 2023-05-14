@@ -1,4 +1,4 @@
-use super::CtType;
+use crate::data_with_header::CtType;
 
 #[derive(PartialEq, Debug)]
 pub struct Header {
@@ -61,7 +61,7 @@ impl Header {
 
 #[cfg(test)]
 mod tests {
-    use crate::CtType;
+    use crate::data_with_header::CtType;
     use super::Header;
 
     #[test]

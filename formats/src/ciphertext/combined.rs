@@ -1,5 +1,5 @@
 use std::{slice::Iter, marker::PhantomData};
-use crate::{data_with_header::DataWithHeader, header::Header, ParseError, CtType};
+use crate::{data_with_header::{CtType, DataWithHeader}, header::Header, ParseError};
 use super::{CipherTextBlock, CipherText, left::LeftCiphertext, right::RightCiphertext};
 
 pub struct CombinedBlock<L: CipherTextBlock, R: CipherTextBlock>(L, R);
@@ -9,7 +9,7 @@ impl<L: CipherTextBlock, R: CipherTextBlock> CipherTextBlock for CombinedBlock<L
         L::byte_size() + R::byte_size()
     }
 
-    fn extend_into(&self, out: &mut Vec<u8>) {
+    fn extend_into(&self, out: &mut DataWithHeader) {
         todo!()
     }
 }
