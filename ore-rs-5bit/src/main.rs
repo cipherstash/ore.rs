@@ -1,5 +1,5 @@
 use hex_literal::hex;
-use ore_rs_5bit::{Ore5BitChaCha20, cmac, packing::packed_prefixes};
+use ore_rs_5bit::{Ore5BitChaCha20, packing::packed_prefixes};
 
 fn permute_u32(input: u32, perm: &[usize; 32]) -> u32 {
     let mut output: u32 = 0;
@@ -21,6 +21,7 @@ fn main() {
 
     let input = vec![7, 23, 30, 2];
     let ore = Ore5BitChaCha20::init(&k1, &k2).unwrap();
-    let (left, right) = ore.encrypt(&input);
-    println!("{}, {}, {}", left.len(), right.len(), hex::encode(right));
+    let left = ore.encrypt_left(&input);
+    println!("Left encrypt: {}", hex::encode(&left));
+    //println!("{}, {}, {}", left.len(), right.len(), hex::encode(right));
 }

@@ -61,7 +61,7 @@ impl Header {
 
 #[cfg(test)]
 mod tests {
-    use crate::format::CtType;
+    use crate::CtType;
     use super::Header;
 
     #[test]

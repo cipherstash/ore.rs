@@ -2,6 +2,7 @@
 
 members = [
     "core",
+    "formats",
     "primitives",
     "ore-rs-5bit",
 ]

@@ -1,13 +1,24 @@
-use self::header::Header;
+use std::slice::Iter;
 
+use self::header::Header;
 mod header;
 
-const LEFT_BLOCKSIZE: usize = 16;
-const RIGHT_BLOCKSIZE: usize = 32;
-const NONCE_SIZE: usize = 16;
+// TODO: make the new and add_block functions a separate trait
+
+pub trait CipherText<B> {
+    fn comparable<C>(&self, to: &impl CipherText<C>) -> bool {
+        self.header().comparable(&to.header())
+    }
+    fn header(&self) -> Header;
+
+    fn blocks(&self) -> Iter<B>;
+}
+
+#[derive(Debug)]
+pub struct ParseError {}
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum CtType {
+pub enum CtType {
     Left = 0,
     Right = 1,
     Combined = 2,
@@ -24,11 +35,11 @@ impl From<u8> for CtType {
     }
 }
 
-struct RawCiphertext {
+struct DataWithHeader {
     data: Vec<u8>
 }
 
-impl RawCiphertext {
+impl DataWithHeader {
     fn new(header: Header, body_len: usize) -> Self {
         let mut data = Vec::with_capacity(Header::HEADER_LEN + body_len);
         data.extend(header.to_vec());
@@ -61,17 +72,87 @@ impl RawCiphertext {
     }
 }
 
-pub struct LeftCiphertext {
-    data: RawCiphertext
+pub struct LeftCiphertext<B> {
+    data: DataWithHeader
 }
 
 pub struct RightCiphertext {
-    data: RawCiphertext
+    data: DataWithHeader
 }
 
-pub struct CombinedCiphertext {
-    data: RawCiphertext
+pub struct CombinedCiphertext<B> {
+    data: DataWithHeader
 }
+
+impl<B> CipherText<B> for LeftCiphertext<B> {
+    fn header(&self) -> Header {
+        self.data.header()
+    }
+}
+
+impl<B> CipherText<B> for CombinedCiphertext<B> {
+    fn header(&self) -> Header {
+        self.data.header()
+    }
+}
+
+impl<B> TryFrom<&[u8]> for LeftCiphertext<B> {
+    type Error = ParseError;
+
+    fn try_from(data: &[u8]) -> Result<Self, Self::Error> {
+        let hdr = Header::from_slice(data);
+        if matches!(hdr.ct_type, CtType::Left) {
+            // TODO: It would be nice if we could avoid this copy!
+            let raw = DataWithHeader { data: data.to_vec() };
+            Ok(LeftCiphertext { data: raw })
+        } else {
+            Err(ParseError {  })
+        }
+    }
+}
+
+impl<B> TryFrom<&[u8]> for CombinedCiphertext<B> {
+    type Error = ParseError;
+
+    fn try_from(data: &[u8]) -> Result<Self, Self::Error> {
+        let hdr = Header::from_slice(data);
+        if matches!(hdr.ct_type, CtType::Combined) {
+            // TODO: It would be nice if we could avoid this copy!
+            let raw = DataWithHeader { data: data.to_vec() };
+            Ok(Self { data: raw })
+        } else {
+            Err(ParseError {  })
+        }
+    }
+}
+
+impl AsRef<[u8]> for DataWithHeader {
+    fn as_ref(&self) -> &[u8] {
+        self.data.as_ref()
+    }
+}
+
+impl<B> AsRef<[u8]> for LeftCiphertext<B> {
+    fn as_ref(&self) -> &[u8] {
+        self.data.as_ref()
+    }
+}
+
+impl AsRef<[u8]> for RightCiphertext {
+    fn as_ref(&self) -> &[u8] {
+        self.data.as_ref()
+    }
+}
+
+impl<B> AsRef<[u8]> for CombinedCiphertext<B> {
+    fn as_ref(&self) -> &[u8] {
+        self.data.as_ref()
+    }
+}
+
+pub struct LeftBlock([u8; 16], u8);
+
+pub struct CombinedBlock(LeftBlock, u32);
 
 // TODO: Should we include a scheme and/or version number?
 /// Wrapper to a structured byte array representing a Left ciphertext.
@@ -86,19 +167,21 @@ pub struct CombinedCiphertext {
 /// 
 /// * There are `num_blocks` blocks of 17 bytes.
 /// 
-impl LeftCiphertext {
+impl LeftCiphertext<LeftBlock> {
+    // TODO: Self::from() should take an AsRef<[u8]> (not a slice)
     const BLOCK_SIZE: usize = 17;
 
     pub fn new(num_blocks: usize) -> Self {
         let hdr = Header::new(CtType::Left, num_blocks);
 
-        Self { data: RawCiphertext::new(hdr, num_blocks * Self::BLOCK_SIZE) }
+        Self { data: DataWithHeader::new(hdr, num_blocks * Self::BLOCK_SIZE) }
     }
 
     pub fn add_block(&mut self, block: &[u8; 16], permuted: u8) {
         self.data.extend_from_slice(block);
         self.data.extend([permuted]);
     }
+
 }
 
 impl RightCiphertext {
@@ -108,7 +191,7 @@ impl RightCiphertext {
 
     pub fn new(num_blocks: usize, nonce: &[u8; 16]) -> Self {
         let hdr = Header::new(CtType::Left, num_blocks);
-        let mut data = RawCiphertext::new(hdr, Self::NONCE_SIZE + (num_blocks * Self::BLOCKSIZE));
+        let mut data = DataWithHeader::new(hdr, Self::NONCE_SIZE + (num_blocks * Self::BLOCKSIZE));
         data.extend_from_slice(nonce);
         Self { data }
     }
@@ -118,11 +201,11 @@ impl RightCiphertext {
     }
 }
 
-impl CombinedCiphertext {
+impl CombinedCiphertext<CombinedBlock> {
     /// Creates a new CombinedCiphertext by merging (and consuming) the given left and right Ciphertexts.
     /// The headers must be comparable (See [Header]) and have the same block length.
     /// The resulting Ciphertext has a single header representing both ciphertexts.
-    pub fn new(mut left: LeftCiphertext, right: RightCiphertext) -> Self {
+    pub fn new(mut left: LeftCiphertext<LeftBlock>, right: RightCiphertext) -> Self {
         let mut l_hdr = left.data.header();
         let r_hdr = right.data.header();
 
