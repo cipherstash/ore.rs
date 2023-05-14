@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use formats::{LeftCiphertext, CipherTextBlock, DataWithHeader};
+use formats::{LeftCiphertext, CipherTextBlock, DataWithHeader, RightCiphertext, CombinedCiphertext};
 use primitives::{prf::{Aes128Prf, PrfBlock}, Prf, prp::{KnuthShufflePRP, bitwise::BitwisePrp}, Prp, AesBlock, KnuthShuffleGenerator, PrpGenerator, NewPrp, hash::Aes128Z2Hash, Hash, HashKey};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -25,9 +25,8 @@ pub struct OreError;
 
 pub type Ore5BitChaCha20 = Ore5Bit<ChaCha20Rng>;
 pub type Ore5BitLeft = LeftCiphertext<LeftBlock>;
-
-#[derive(Debug)]
-pub struct Out(Vec<u8>, u8);
+pub type Ore5BitRight = RightCiphertext<RightBlock>;
+pub type Ore5BitCombined = CombinedCiphertext<LeftBlock, RightBlock>;
 
 pub struct LeftBlock([u8; 16], u8);
 pub struct RightBlock(u32);
@@ -43,6 +42,15 @@ impl CipherTextBlock for LeftBlock {
     }
 }
 
+impl CipherTextBlock for RightBlock {
+    fn byte_size() -> usize {
+        32
+    }
+
+    fn extend_into(&self, out: &mut DataWithHeader) {
+        out.extend(self.0.to_be_bytes());
+    }
+}
 
 // TODO: Make this use the ORE traits once we've cleaned these up
 impl<R: Rng + SeedableRng> Ore5Bit<R> {
@@ -68,8 +76,6 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
     pub fn encrypt_left(&self, input: &[u8]) -> Ore5BitLeft {
         // We're limited to 16 input blocks for now because we're using AES as the PRF (1 block)
         debug_assert!(input.len() <= 16);
-        // TODO: We could possibly use the stack and just do a single extend on to a vec after each round
-        // Format: [<u8:number of blocks>, <u8:prp-values>, <Prfblock:prf-values>]
         let mut out = Ore5BitLeft::new(input.len());
 
         // Here we'll model a PRF using a single block of AES
@@ -86,7 +92,6 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
         // TODO: Change this to use functional callbacks rather than for
         let mut p_ns = vec![];
         for (enc_prefix, in_blk) in prefixes.iter_mut().zip(input.iter()) {
-            //let prp: KnuthShufflePRP<u8, 32> = Prp::new(out_blk).unwrap(); // TODO:
             let prp: NewPrp<u8, 32> = KnuthShuffleGenerator::new(enc_prefix).generate();
             let p_n = prp.permute(*in_blk);
             p_ns.push(p_n);
@@ -101,17 +106,14 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
         out
     }
 
-    pub fn encrypt(&self, input: &[u8]) -> (Ore5BitLeft, Vec<u8>) { // TODO: Combined
+    pub fn encrypt(&self, input: &[u8]) -> Ore5BitCombined {
         let mut nonce: [u8; 16] = Default::default();
         self.rng.borrow_mut().try_fill(&mut nonce).unwrap();
 
         // TODO: Can we pack the input bytes??
         debug_assert!(input.len() <= 16);
-        // TODO: We could possibly use the stack and just do a single extend on to a vec after each round
-        // Format: [<u8:number of blocks>, <u8:prp-values>, <Prfblock:prf-values>]
         let mut left = Ore5BitLeft::new(input.len());
-
-        let mut right: Vec<u8> = Vec::new(); // TODO: What capacity?
+        let mut right = Ore5BitRight::new(input.len(), &nonce);
 
         // Here we'll model a PRF using a single block of AES
         // This will be OK for up to 16-bytes of input (or 25 5-bit values)
@@ -120,8 +122,6 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
         let mut prefixes = packed_prefixes(input);
         let mut right_blocks: Vec<u32> = Vec::new(); // TODO: Len
         self.prf2.encrypt_all(&mut prefixes);
-
-        right.push(input.len().try_into().unwrap()); // TODO: DOn't unwrap
 
         // This deviates from the paper slightly.
         // Instead of calling PRF1 with the plaintext prefix, we call it
@@ -160,10 +160,10 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
             // Push bytes onto right output vec
             let hasher: Aes128Z2Hash = Hash::new(&nonce.into());
             let final_right = right_blk ^ hasher.hash_all_onto_u32(&ro_keys);
-            right.extend_from_slice(&final_right.to_be_bytes());
+            right.add_block(final_right);
         }
 
-        (left, right)
+        Ore5BitCombined::new(left, right)
     }
 
     // TODO: The CipherText types might be better to implement a CipherText trait

@@ -11,7 +11,7 @@ impl<B: CipherTextBlock> RightCiphertext<B> {
     const NONCE_SIZE: usize = 16;
 
     pub fn new(num_blocks: usize, nonce: &[u8; 16]) -> Self {
-        let hdr = Header::new(CtType::Left, num_blocks);
+        let hdr = Header::new(CtType::Right, num_blocks);
         let mut data = DataWithHeader::new(hdr, Self::NONCE_SIZE + (num_blocks * <Self as CipherText>::Block::byte_size()));
         data.extend_from_slice(nonce);
         Self { data, _phantom: PhantomData }
