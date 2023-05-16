@@ -1,14 +1,14 @@
-use std::{marker::PhantomData, slice::Iter};
+use std::marker::PhantomData;
 use crate::{data_with_header::{DataWithHeader, CtType}, ParseError, header::Header};
-use super::{CipherTextBlock, CipherText};
+use super::{CipherTextBlock, CipherText, RightCipherTextBlock};
 
-pub struct RightCiphertext<B: CipherTextBlock> {
+pub struct RightCiphertext<'a, B: RightCipherTextBlock<'a>> {
     pub(crate) data: DataWithHeader,
-    _phantom: PhantomData<B>,
+    _phantom: PhantomData<&'a B>,
 }
 
-impl<B: CipherTextBlock> RightCiphertext<B> {
-    const NONCE_SIZE: usize = 16;
+impl<'a, B: RightCipherTextBlock<'a>> RightCiphertext<'a, B> {
+    pub const NONCE_SIZE: usize = 16;
 
     pub fn new(num_blocks: usize, nonce: &[u8; 16]) -> Self {
         let hdr = Header::new(CtType::Right, num_blocks);
@@ -17,28 +17,27 @@ impl<B: CipherTextBlock> RightCiphertext<B> {
         Self { data, _phantom: PhantomData }
     }
 
-    pub fn add_block(&mut self, block: u32) {
-        self.data.extend(block.to_be_bytes().into_iter());
+    pub fn add_block(&mut self, block: B) {
+        block.extend_into(&mut self.data);
     }
 }
 
-
-impl<B: CipherTextBlock> CipherText for RightCiphertext<B> {
+impl<'a, B: RightCipherTextBlock<'a>> CipherText<'a> for RightCiphertext<'a, B> {
     type Block = B;
 
     fn header(&self) -> Header {
         self.data.header()
     }
 
-    fn blocks(&self) -> Iter<Self::Block> {
+    fn blocks(&self) -> Box<dyn Iterator<Item=Self::Block>> {
         todo!()
     }
 }
 
-impl<B: CipherTextBlock> TryFrom<&[u8]> for RightCiphertext<B> {
+impl<'a, B: RightCipherTextBlock<'a>> TryFrom<&'a [u8]> for RightCiphertext<'a, B> {
     type Error = ParseError;
 
-    fn try_from(data: &[u8]) -> Result<Self, Self::Error> {
+    fn try_from(data: &'a [u8]) -> Result<Self, Self::Error> {
         let hdr = Header::from_slice(data);
         if matches!(hdr.ct_type, CtType::Right) {
             Ok(Self { data: data.into(), _phantom: PhantomData })
@@ -48,7 +47,7 @@ impl<B: CipherTextBlock> TryFrom<&[u8]> for RightCiphertext<B> {
     }
 }
 
-impl<B: CipherTextBlock> AsRef<[u8]> for RightCiphertext<B> {
+impl<'a, B: RightCipherTextBlock<'a>> AsRef<[u8]> for RightCiphertext<'a, B> {
     fn as_ref(&self) -> &[u8] {
         self.data.as_ref()
     }

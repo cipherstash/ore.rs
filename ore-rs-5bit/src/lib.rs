@@ -1,10 +1,11 @@
-use std::cell::RefCell;
-use formats::{LeftCiphertext, CipherTextBlock, DataWithHeader, RightCiphertext, CombinedCiphertext};
-use primitives::{prf::{Aes128Prf, PrfBlock}, Prf, prp::{KnuthShufflePRP, bitwise::BitwisePrp}, Prp, AesBlock, KnuthShuffleGenerator, PrpGenerator, NewPrp, hash::Aes128Z2Hash, Hash, HashKey};
+use std::{cell::RefCell, ops::BitAnd};
+use formats::{LeftCiphertext, CipherTextBlock, DataWithHeader, RightCiphertext, CombinedCiphertext, CipherText, LeftCipherTextBlock, RightCipherTextBlock, OreBlockOrd, LeftBlockEq};
+use primitives::{prf::Aes128Prf, Prf, prp::bitwise::BitwisePrp, Prp, KnuthShuffleGenerator, PrpGenerator, NewPrp, hash::Aes128Z2Hash, Hash};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
+use subtle_ng::ConstantTimeEq;
 use zeroize::ZeroizeOnDrop;
-use aes::{cipher::generic_array::GenericArray, Aes128};
+use aes::cipher::generic_array::GenericArray;
 use crate::packing::packed_prefixes;
 pub mod packing;
 
@@ -24,14 +25,16 @@ pub struct Ore5Bit<R: Rng + SeedableRng> {
 pub struct OreError;
 
 pub type Ore5BitChaCha20 = Ore5Bit<ChaCha20Rng>;
-pub type Ore5BitLeft = LeftCiphertext<LeftBlock>;
-pub type Ore5BitRight = RightCiphertext<RightBlock>;
-pub type Ore5BitCombined = CombinedCiphertext<LeftBlock, RightBlock>;
+pub type Ore5BitLeft<'a> = LeftCiphertext<'a, LeftBlock>;
+pub type Ore5BitRight<'a> = RightCiphertext<'a, RightBlock>;
+pub type Ore5BitCombined<'a> = CombinedCiphertext<'a, LeftBlock, RightBlock>;
 
+#[derive(Debug)]
 pub struct LeftBlock([u8; 16], u8);
+#[derive(Debug)]
 pub struct RightBlock(u32);
 
-impl CipherTextBlock for LeftBlock {
+impl<'a> CipherTextBlock<'a> for LeftBlock {
     fn byte_size() -> usize {
         17
     }
@@ -42,13 +45,66 @@ impl CipherTextBlock for LeftBlock {
     }
 }
 
-impl CipherTextBlock for RightBlock {
+impl ConstantTimeEq for LeftBlock {
+    fn ct_eq(&self, other: &Self) -> subtle_ng::Choice {
+        self.0.ct_eq(&other.0).bitand(self.1.ct_eq(&other.1))
+    }
+}
+
+impl<'a> LeftBlockEq<'a, LeftBlock> for LeftBlock {
+    type Other = LeftBlock;
+
+    fn constant_eq(&self, other: &Self) -> subtle_ng::Choice {
+        self.ct_eq(other)
+    }
+}
+
+// TODO: Derive macro?
+impl<'a> LeftCipherTextBlock<'a> for LeftBlock {}
+
+impl<'a> OreBlockOrd<'a, RightBlock> for LeftBlock {
+    type Other = RightBlock;
+
+    fn ore_compare(&self, right: &RightBlock) -> u8 {
+        0
+    }
+}
+
+impl<'a> RightCipherTextBlock<'a> for RightBlock {}
+
+
+// TODO: Can we derive macro any of this, too??
+impl<'a> CipherTextBlock<'a> for RightBlock {
     fn byte_size() -> usize {
-        32
+        4
     }
 
     fn extend_into(&self, out: &mut DataWithHeader) {
         out.extend(self.0.to_be_bytes());
+    }
+}
+
+/*impl OreBlockOrd<RightBlock> for LeftBlock {
+    fn ore_compare(&self, right: &RightBlock) -> bool {
+        false
+    }
+}*/
+
+impl From<&[u8]> for LeftBlock {
+    fn from(value: &[u8]) -> Self {
+        assert!(value.len() == Self::byte_size());
+        let mut buf: [u8; 16] = Default::default();
+        buf.copy_from_slice(&value[0..16]);
+        LeftBlock(buf, value[16])
+    }
+}
+
+impl From<&[u8]> for RightBlock {
+    fn from(value: &[u8]) -> Self {
+        assert!(value.len() == Self::byte_size());
+        let mut buf: [u8; 4] = Default::default();
+        buf.copy_from_slice(&value[0..4]);
+        RightBlock(u32::from_be_bytes(buf))
     }
 }
 
@@ -100,7 +156,7 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
 
         self.prf1.encrypt_all(&mut prefixes);
         for (prf_block, permuted) in prefixes.iter().zip(p_ns.iter()) {
-            out.add_block(&LeftBlock(*prf_block, *permuted));
+            out.add_block(LeftBlock(*prf_block, *permuted));
         }
 
         out
@@ -112,7 +168,7 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
 
         // TODO: Can we pack the input bytes??
         debug_assert!(input.len() <= 16);
-        let mut left = Ore5BitLeft::new(input.len());
+        let mut out = Ore5BitCombined::new(input.len(), &nonce);
         let mut right = Ore5BitRight::new(input.len(), &nonce);
 
         // Here we'll model a PRF using a single block of AES
@@ -147,7 +203,7 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
 
         // TODO: This feels a bit janky
         for ((enc_prefix, right_blk), p_n) in prefixes.iter().zip(right_blocks.iter()).zip(p_ns.iter()) {
-            left.add_block(&LeftBlock(*enc_prefix, *p_n));
+            //left.add_block(&LeftBlock(*enc_prefix, *p_n));
             let mut ro_keys: [[u8; 16]; 32] = Default::default();
             
             for (j, ro_key) in ro_keys.iter_mut().enumerate() {
@@ -160,19 +216,28 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
             // Push bytes onto right output vec
             let hasher: Aes128Z2Hash = Hash::new(&nonce.into());
             let final_right = right_blk ^ hasher.hash_all_onto_u32(&ro_keys);
-            right.add_block(final_right);
+            //right.add_block(RightBlock(final_right));
+
+            out.add_block(LeftBlock(*enc_prefix, *p_n), RightBlock(final_right));
         }
 
-        Ore5BitCombined::new(left, right)
+        out
     }
 
-    // TODO: The CipherText types might be better to implement a CipherText trait
-    // so that we can handle the different variations here?
-    pub fn compare_slices(a: impl AsRef<[u8]>, b: impl AsRef<[u8]>) -> u8 {
+    // TODO: Do this as a PartialOrd impl (and handle versions)
+    // TODO: Handle different length slices. Compare the first n-bytes and if they're equal then the
+    // longer value will be more "more-than"
+    pub fn compare_slices(a: impl AsRef<[u8]>, b: impl AsRef<[u8]>) -> bool {
         let left: Ore5BitLeft = a.as_ref().try_into().unwrap();
-        //let combined: CombinedCiphertext = b.as_ref().try_into().unwrap();
+        let combined: Ore5BitCombined = b.as_ref().try_into().unwrap();
         //assert!(left.comparable(&combined)); // TODO: Error
-        0
+        // TODO: Should this iteration also be constant time?
+        // We could make our own iterator type which works in constant time and zips another
+
+        let x = left.compare_blocks(combined.blocks());
+        dbg!(x);
+
+        true
     }
 
     // For the right encryption we could either use the approach that we do in the current version,

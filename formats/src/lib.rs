@@ -6,6 +6,11 @@ mod ciphertext;
 pub use ciphertext::{
     CipherText,
     CipherTextBlock,
+    LeftCipherTextBlock,
+    RightCipherTextBlock,
+    LeftBlockEq,
+    OreBlockOrd,
+    // TODO: Make the naming of these consistent
     left::LeftCiphertext,
     right::RightCiphertext,
     combined::CombinedCiphertext

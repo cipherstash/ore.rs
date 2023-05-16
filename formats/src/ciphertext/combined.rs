@@ -1,10 +1,29 @@
-use std::{slice::Iter, marker::PhantomData};
-use crate::{data_with_header::{CtType, DataWithHeader}, header::Header, ParseError};
-use super::{CipherTextBlock, CipherText, left::LeftCiphertext, right::RightCiphertext};
+use std::marker::PhantomData;
+use crate::{data_with_header::{CtType, DataWithHeader}, header::Header, ParseError, LeftBlockEq, LeftCipherTextBlock, OreBlockOrd};
+use super::{CipherTextBlock, CipherText, left::LeftCiphertext, right::RightCiphertext, RightCipherTextBlock};
 
-pub struct CombinedBlock<L: CipherTextBlock, R: CipherTextBlock>(L, R);
+#[derive(Debug)]
+pub struct CombinedBlock<'a, L: CipherTextBlock<'a>, R: CipherTextBlock<'a>> {
+    pub left: L,
+    pub right: R,
+    _phantom: PhantomData<&'a L>
+}
 
-impl<L: CipherTextBlock, R: CipherTextBlock> CipherTextBlock for CombinedBlock<L, R> {
+/// A combined ciphertext block also implements Right Block
+impl<'a, L, R> RightCipherTextBlock<'a> for CombinedBlock<'a, L, R>
+where L: LeftCipherTextBlock<'a>,
+    R: RightCipherTextBlock<'a>
+{}
+
+impl <'a, L: CipherTextBlock<'a>, R: CipherTextBlock<'a>> From<&'a [u8]> for CombinedBlock<'a, L, R> {
+    fn from(value: &'a [u8]) -> Self {
+        let left = L::from(&value[..L::byte_size()]);
+        let right = R::from(&value[L::byte_size()..]);
+        Self { left, right, _phantom: PhantomData }
+    }
+}
+
+impl<'a, L: CipherTextBlock<'a>, R: CipherTextBlock<'a>> CipherTextBlock<'a> for CombinedBlock<'a, L, R> {
     fn byte_size() -> usize {
         L::byte_size() + R::byte_size()
     }
@@ -14,50 +33,72 @@ impl<L: CipherTextBlock, R: CipherTextBlock> CipherTextBlock for CombinedBlock<L
     }
 }
 
-pub struct CombinedCiphertext<L: CipherTextBlock, R: CipherTextBlock> {
+pub struct CombinedCiphertext<'a, L: LeftCipherTextBlock<'a>, R: RightCipherTextBlock<'a>> {
     data: DataWithHeader,
-    _phantom: (PhantomData<L>, PhantomData<R>),
+    _phantom: (PhantomData<&'a L>, PhantomData<&'a R>),
 }
 
 
-impl<L: CipherTextBlock, R: CipherTextBlock> CombinedCiphertext<L, R> {
-    /// Creates a new CombinedCiphertext by merging (and consuming) the given left and right Ciphertexts.
-    /// The headers must be comparable (See [Header]) and have the same block length.
-    /// The resulting Ciphertext has a single header representing both ciphertexts.
-    pub fn new(mut left: LeftCiphertext<L>, right: RightCiphertext<R>) -> Self {
-        let mut l_hdr = left.header();
-        let r_hdr = right.header();
+impl<'a, L, R> CombinedCiphertext<'a, L, R>
+where
+    L: LeftCipherTextBlock<'a>,
+    R: RightCipherTextBlock<'a> 
+{
+    pub fn new(num_blocks: usize, nonce: &[u8; 16]) -> Self {
+        let hdr = Header::new(CtType::Combined, num_blocks);
+        let mut data = DataWithHeader::new(
+            hdr,
+            RightCiphertext::<'a, R>::NONCE_SIZE + (num_blocks * <Self as CipherText>::Block::byte_size())
+        );
+        data.extend_from_slice(nonce);
+        Self { data, _phantom: (PhantomData, PhantomData) }
+    }
 
-        if !l_hdr.comparable(&r_hdr) || l_hdr.num_blocks != r_hdr.num_blocks {
-            panic!("Cannot combine incompatible ciphertexts");
-        }
+    // TODO: We should probably pass the args as references (same for left and right impls)
+    pub fn add_block(&mut self, left: L, right: R) {
+        left.extend_into(&mut self.data);
+        right.extend_into(&mut self.data);
+    }
 
-        // Steal and reuse the left
-        l_hdr.ct_type = CtType::Combined;
-        left.data.set_header(&l_hdr);
-        left.data.extend_from_slice(right.data.body());
-
-        Self { data: left.data, _phantom: (PhantomData, PhantomData) }
+    pub fn nonce(&self) -> &[u8] {
+        &self.data.body()[..RightCiphertext::<'a, R>::NONCE_SIZE]
     }
 }
 
-impl<L: CipherTextBlock, R: CipherTextBlock> CipherText for CombinedCiphertext<L, R> {
-    type Block = CombinedBlock<L, R>;
+impl<'a, L, R> CipherText<'a> for CombinedCiphertext<'a, L, R>
+where
+    L: LeftCipherTextBlock<'a>,
+    R: RightCipherTextBlock<'a> 
+{
+    type Block = CombinedBlock<'a, L, R>;
 
     fn header(&self) -> Header {
         self.data.header()
     }
 
-    fn blocks(&self) -> Iter<Self::Block> {
-        todo!()
+    // TODO: This can go into the trait if we add a body method
+    // Right is different though because we have the nonce!
+    fn blocks(&'a self) -> Box<dyn Iterator<Item=Self::Block> + 'a> {
+        Box::new(
+            self.data.body()[RightCiphertext::<'a, R>::NONCE_SIZE..]
+            .chunks(Self::Block::byte_size())
+            .map(|bytes| {
+                println!("BYTES LEN: {}", bytes.len());
+                Self::Block::from(bytes)
+            })
+        )
     }
 }
 
 
-impl<L: CipherTextBlock, R: CipherTextBlock> TryFrom<&[u8]> for CombinedCiphertext<L, R> {
+impl<'a, L, R> TryFrom<&'a [u8]> for CombinedCiphertext<'a, L, R>
+where
+    L: LeftCipherTextBlock<'a>,
+    R: RightCipherTextBlock<'a> 
+{
     type Error = ParseError;
 
-    fn try_from(data: &[u8]) -> Result<Self, Self::Error> {
+    fn try_from(data: &'a [u8]) -> Result<Self, Self::Error> {
         let hdr = Header::from_slice(data);
         if matches!(hdr.ct_type, CtType::Combined) {
             Ok(Self { data: data.into(), _phantom: (PhantomData, PhantomData) })
@@ -67,8 +108,41 @@ impl<L: CipherTextBlock, R: CipherTextBlock> TryFrom<&[u8]> for CombinedCipherte
     }
 }
 
-impl<L: CipherTextBlock, R: CipherTextBlock> AsRef<[u8]> for CombinedCiphertext<L, R> {
+impl<'a, L, R> AsRef<[u8]> for CombinedCiphertext<'a, L, R>
+where
+    L: LeftCipherTextBlock<'a>,
+    R: RightCipherTextBlock<'a> 
+{
     fn as_ref(&self) -> &[u8] {
         self.data.as_ref()
     }
 }
+
+/// Blanket implementation to compare a left block to the left of any combined block
+impl<'a, L, R> LeftBlockEq<'a, CombinedBlock<'a, L, R>> for L
+where
+    L: LeftCipherTextBlock<'a>,
+    R: RightCipherTextBlock<'a>
+{
+    type Other = CombinedBlock<'a, L, R>;
+
+    fn constant_eq(&self, other: &Self::Other) -> subtle_ng::Choice {
+        self.constant_eq(&other.left)
+    }
+}
+
+/// Blanket implementation for a left block to Ore compare to the right block
+/// of a combined block.
+impl<'a, L, R> OreBlockOrd<'a, CombinedBlock<'a, L, R>> for L
+where
+    L: LeftCipherTextBlock<'a>,
+    R: RightCipherTextBlock<'a>,
+    L: OreBlockOrd<'a, R>
+{
+    type Other = CombinedBlock<'a, L, R>;
+
+    fn ore_compare(&self, other: &Self::Other) -> u8 {
+        self.ore_compare(&other.right)
+    }
+}
+
