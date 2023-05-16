@@ -29,6 +29,10 @@ impl DataWithHeader {
         Self { data }
     }
 
+    pub(crate) fn len(&self) -> usize {
+        self.data.len()
+    }
+
     pub(crate) fn header(&self) -> Header {
         Header::from_slice(&self.data)
     }

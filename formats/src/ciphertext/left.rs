@@ -1,7 +1,7 @@
-use std::{marker::PhantomData, ops::BitOr};
+use std::{marker::PhantomData, ops::BitOr, cmp::Ordering};
 use subtle_ng::{Choice, CtOption};
 
-use crate::{data_with_header::{CtType, DataWithHeader}, header::Header, ParseError, LeftCipherTextBlock, OreBlockOrd};
+use crate::{data_with_header::{CtType, DataWithHeader}, header::Header, ParseError, LeftCipherTextBlock, OreBlockOrd, RightCipherTextBlock};
 use super::{CipherTextBlock, CipherText, LeftBlockEq};
 
 pub struct LeftCiphertext<'a, B: LeftCipherTextBlock<'a>> {
@@ -30,9 +30,10 @@ impl<'a, B: LeftCipherTextBlock<'a>> LeftCiphertext<'a, B> {
     /// TODO??? What do we return? Perhaps we can do the ORE comparison in this step, too?
     /// The ordering mechanism is important here, too (i.e. Lexicographic or Numerical)
     /// If its numerical then the shorter value is always less than the other.
-    pub fn compare_blocks<O>(&'a self, other: Box<dyn Iterator<Item=O> + 'a>) -> u8 // TODO: Return the PartialOrd enum
+    pub fn compare_blocks<O>(&'a self, nonce: &[u8], other: Box<dyn Iterator<Item=O> + 'a>) -> Ordering
     where
-        B: LeftBlockEq<'a, O> + OreBlockOrd<'a, O>
+        B: LeftBlockEq<'a, O> + OreBlockOrd<'a, O>,
+        O: RightCipherTextBlock<'a>
     {
         // TODO: We should use CtOption and acc.conditionally_select
         let eq = self.blocks().zip(other).fold(None, { |acc: Option<(B, O)>, (a, b): (B, O)|
@@ -46,10 +47,10 @@ impl<'a, B: LeftCipherTextBlock<'a>> LeftCiphertext<'a, B> {
 
         // FIXME: This isn't constant time either
         if let Some((a, b)) = eq {
-            a.ore_compare(&b)
+            a.ore_compare(nonce, &b)
         } else {
             // No blocks differ so say that the values are equal
-            1
+            Ordering::Equal
         }
         
         // TODO: Handle different lengths
@@ -58,6 +59,10 @@ impl<'a, B: LeftCipherTextBlock<'a>> LeftCiphertext<'a, B> {
 
 impl<'a, B: LeftCipherTextBlock<'a>> CipherText<'a> for LeftCiphertext<'a, B> {
     type Block = B;
+
+    fn len(&self) -> usize {
+        self.data.len()
+    }
 
     fn header(&self) -> Header {
         self.data.header()

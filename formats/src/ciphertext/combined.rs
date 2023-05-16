@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, cmp::Ordering};
 use crate::{data_with_header::{CtType, DataWithHeader}, header::Header, ParseError, LeftBlockEq, LeftCipherTextBlock, OreBlockOrd};
 use super::{CipherTextBlock, CipherText, left::LeftCiphertext, right::RightCiphertext, RightCipherTextBlock};
 
@@ -72,6 +72,10 @@ where
 {
     type Block = CombinedBlock<'a, L, R>;
 
+    fn len(&self) -> usize {
+        self.data.len()
+    }
+
     fn header(&self) -> Header {
         self.data.header()
     }
@@ -124,9 +128,7 @@ where
     L: LeftCipherTextBlock<'a>,
     R: RightCipherTextBlock<'a>
 {
-    type Other = CombinedBlock<'a, L, R>;
-
-    fn constant_eq(&self, other: &Self::Other) -> subtle_ng::Choice {
+    fn constant_eq(&self, other: &CombinedBlock<'a, L, R>) -> subtle_ng::Choice {
         self.constant_eq(&other.left)
     }
 }
@@ -139,10 +141,8 @@ where
     R: RightCipherTextBlock<'a>,
     L: OreBlockOrd<'a, R>
 {
-    type Other = CombinedBlock<'a, L, R>;
-
-    fn ore_compare(&self, other: &Self::Other) -> u8 {
-        self.ore_compare(&other.right)
+    fn ore_compare(&self, nonce: &[u8], other: &CombinedBlock<'a, L, R>) -> Ordering {
+        self.ore_compare(nonce, &other.right)
     }
 }
 

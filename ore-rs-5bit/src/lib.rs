@@ -1,9 +1,9 @@
-use std::{cell::RefCell, ops::BitAnd};
+use std::{cell::RefCell, ops::BitAnd, cmp::Ordering};
 use formats::{LeftCiphertext, CipherTextBlock, DataWithHeader, RightCiphertext, CombinedCiphertext, CipherText, LeftCipherTextBlock, RightCipherTextBlock, OreBlockOrd, LeftBlockEq};
 use primitives::{prf::Aes128Prf, Prf, prp::bitwise::BitwisePrp, Prp, KnuthShuffleGenerator, PrpGenerator, NewPrp, hash::Aes128Z2Hash, Hash};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
-use subtle_ng::ConstantTimeEq;
+use subtle_ng::{ConstantTimeEq, Choice};
 use zeroize::ZeroizeOnDrop;
 use aes::cipher::generic_array::GenericArray;
 use crate::packing::packed_prefixes;
@@ -52,8 +52,6 @@ impl ConstantTimeEq for LeftBlock {
 }
 
 impl<'a> LeftBlockEq<'a, LeftBlock> for LeftBlock {
-    type Other = LeftBlock;
-
     fn constant_eq(&self, other: &Self) -> subtle_ng::Choice {
         self.ct_eq(other)
     }
@@ -63,10 +61,14 @@ impl<'a> LeftBlockEq<'a, LeftBlock> for LeftBlock {
 impl<'a> LeftCipherTextBlock<'a> for LeftBlock {}
 
 impl<'a> OreBlockOrd<'a, RightBlock> for LeftBlock {
-    type Other = RightBlock;
-
-    fn ore_compare(&self, right: &RightBlock) -> u8 {
-        0
+    fn ore_compare(&self, nonce: &[u8], RightBlock(right): &RightBlock) -> Ordering {
+        let hasher: Aes128Z2Hash = Hash::new(nonce.into());
+        // TODO: Use conditional_select
+        if ((right >> self.1) as u8 & 1u8) & hasher.hash(&self.0) == 1 {
+            Ordering::Less
+        } else {
+            Ordering::Greater
+        }
     }
 }
 
@@ -83,12 +85,6 @@ impl<'a> CipherTextBlock<'a> for RightBlock {
         out.extend(self.0.to_be_bytes());
     }
 }
-
-/*impl OreBlockOrd<RightBlock> for LeftBlock {
-    fn ore_compare(&self, right: &RightBlock) -> bool {
-        false
-    }
-}*/
 
 impl From<&[u8]> for LeftBlock {
     fn from(value: &[u8]) -> Self {
@@ -169,7 +165,6 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
         // TODO: Can we pack the input bytes??
         debug_assert!(input.len() <= 16);
         let mut out = Ore5BitCombined::new(input.len(), &nonce);
-        let mut right = Ore5BitRight::new(input.len(), &nonce);
 
         // Here we'll model a PRF using a single block of AES
         // This will be OK for up to 16-bytes of input (or 25 5-bit values)
@@ -203,7 +198,6 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
 
         // TODO: This feels a bit janky
         for ((enc_prefix, right_blk), p_n) in prefixes.iter().zip(right_blocks.iter()).zip(p_ns.iter()) {
-            //left.add_block(&LeftBlock(*enc_prefix, *p_n));
             let mut ro_keys: [[u8; 16]; 32] = Default::default();
             
             for (j, ro_key) in ro_keys.iter_mut().enumerate() {
@@ -227,17 +221,14 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
     // TODO: Do this as a PartialOrd impl (and handle versions)
     // TODO: Handle different length slices. Compare the first n-bytes and if they're equal then the
     // longer value will be more "more-than"
-    pub fn compare_slices(a: impl AsRef<[u8]>, b: impl AsRef<[u8]>) -> bool {
+    pub fn compare_slices(a: impl AsRef<[u8]>, b: impl AsRef<[u8]>) -> Ordering {
         let left: Ore5BitLeft = a.as_ref().try_into().unwrap();
         let combined: Ore5BitCombined = b.as_ref().try_into().unwrap();
         //assert!(left.comparable(&combined)); // TODO: Error
-        // TODO: Should this iteration also be constant time?
-        // We could make our own iterator type which works in constant time and zips another
 
-        let x = left.compare_blocks(combined.blocks());
-        dbg!(x);
-
-        true
+        // With most of the work now in the LeftCipherText and the block types, this
+        // could be a default implementation in the main trait
+        left.compare_blocks(combined.nonce(), combined.blocks())
     }
 
     // For the right encryption we could either use the approach that we do in the current version,

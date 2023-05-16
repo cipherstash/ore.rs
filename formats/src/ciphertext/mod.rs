@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use subtle_ng::{ConstantTimeEq, Choice};
 use crate::{header::Header, data_with_header::DataWithHeader};
 pub(crate) mod left;
@@ -16,6 +18,8 @@ pub trait CipherText<'a> {
     fn header(&self) -> Header;
 
     fn blocks(&'a self) -> Box<dyn Iterator<Item=Self::Block> + 'a>;
+
+    fn len(&self) -> usize;
 }
 
 pub trait CipherTextBlock<'a>: From<&'a [u8]> { // TODO: Zeroize
@@ -27,15 +31,13 @@ pub trait LeftCipherTextBlock<'a>: LeftBlockEq<'a> + CipherTextBlock<'a> {}
 
 pub trait RightCipherTextBlock<'a>: CipherTextBlock<'a> {}
 
-pub trait LeftBlockEq<'a, Other = Self> {
-    type Other: ?Sized + CipherTextBlock<'a>;
+pub trait LeftBlockEq<'a, Other: ?Sized + CipherTextBlock<'a> = Self> {
+    //type Other: ?Sized + CipherTextBlock<'a>;
 
     // TODO: Maybe this is choice? Or a wrapper of choice at least
     fn constant_eq(&self, other: &Other) -> Choice;
 }
 
-pub trait OreBlockOrd<'a, Other> {
-    type Other: ?Sized + RightCipherTextBlock<'a>;
-
-    fn ore_compare(&self, right: &Other) -> u8; // TODO: Return a PartialOrd enum value
+pub trait OreBlockOrd<'a, Other: ?Sized + RightCipherTextBlock<'a>> {
+    fn ore_compare(&self, nonce: &[u8], right: &Other) -> Ordering;
 }

@@ -25,6 +25,10 @@ impl<'a, B: RightCipherTextBlock<'a>> RightCiphertext<'a, B> {
 impl<'a, B: RightCipherTextBlock<'a>> CipherText<'a> for RightCiphertext<'a, B> {
     type Block = B;
 
+    fn len(&self) -> usize {
+        self.data.len()
+    }
+
     fn header(&self) -> Header {
         self.data.header()
     }
