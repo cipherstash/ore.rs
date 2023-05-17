@@ -1,6 +1,18 @@
 use bit_vec::BitVec;
 use primitives::prf::PrfBlock;
 
+
+pub fn prefixes(slice: &[u8]) -> Vec<PrfBlock> {
+    let mut prefixes: Vec<PrfBlock> = Vec::with_capacity(slice.len());
+    for i in 0..slice.len() {
+        let mut fblock: PrfBlock = Default::default();
+        fblock[0..i].copy_from_slice(&slice[0..i]);
+        prefixes.push(fblock);
+    }
+
+    prefixes
+}
+
 // TODO: Probably more efficient to code by hand
 // Or use bitvec or bitvec-simd
 // TODO: Also include the index (like in the original implementation)

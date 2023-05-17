@@ -1,12 +1,12 @@
 use crate::{Prp, NewPrp};
 
 pub trait BitwisePrp<const N: usize>: Sized {
-    fn shuffle(self, prp: &NewPrp<u8, N>) -> Self;
-    fn inverse_shuffle(self, prp: &NewPrp<u8, N>) -> Self;
+    fn bitwise_shuffle(self, prp: &NewPrp<u8, N>) -> Self;
+    fn bitwise_inverse_shuffle(self, prp: &NewPrp<u8, N>) -> Self;
 }
 
 impl BitwisePrp<32> for u32 {
-    fn shuffle(self, prp: &NewPrp<u8, 32>) -> Self {
+    fn bitwise_shuffle(self, prp: &NewPrp<u8, 32>) -> Self {
         let mut output: Self = 0;
     
         for (i, &p) in prp.forward() {
@@ -17,7 +17,7 @@ impl BitwisePrp<32> for u32 {
         output 
     }
 
-    fn inverse_shuffle(self, prp: &NewPrp<u8, 32>) -> Self {
+    fn bitwise_inverse_shuffle(self, prp: &NewPrp<u8, 32>) -> Self {
         let mut output: Self = 0;
     
         for (i, &p) in prp.inverse() {
@@ -30,7 +30,7 @@ impl BitwisePrp<32> for u32 {
 }
 
 impl BitwisePrp<8> for u8 {
-    fn shuffle(self, prp: &NewPrp<u8, 8>) -> Self {
+    fn bitwise_shuffle(self, prp: &NewPrp<u8, 8>) -> Self {
         let mut output: Self = 0;
     
         for (i, &p) in prp.forward() {
@@ -41,7 +41,7 @@ impl BitwisePrp<8> for u8 {
         output
     }
 
-    fn inverse_shuffle(self, prp: &NewPrp<u8, 8>) -> Self {
+    fn bitwise_inverse_shuffle(self, prp: &NewPrp<u8, 8>) -> Self {
         let mut output: Self = 0;
     
         for (i, &p) in prp.inverse() {
@@ -83,7 +83,7 @@ mod tests {
         };
         let prp = PrpGenerator::generate(gen);
         let input = 0b00110110u8;
-        assert_eq!(input, input.shuffle(&prp).inverse_shuffle(&prp));
-        assert_eq!(0b10100101, input.shuffle(&prp));
+        assert_eq!(input, input.bitwise_shuffle(&prp).bitwise_inverse_shuffle(&prp));
+        assert_eq!(0b10100101, input.bitwise_shuffle(&prp));
     }
 }

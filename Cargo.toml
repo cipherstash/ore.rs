@@ -20,3 +20,4 @@ subtle-ng = "2.5.0"
 zeroize = { version = "1.5.7", features = [ "zeroize_derive", "alloc" ] }
 lazy_static = "1.4.0"
 thiserror = "1.0.38"
+quickcheck = "1.0.3"

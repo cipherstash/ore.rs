@@ -13,6 +13,8 @@ rand = { workspace = true }
 rand_chacha = { workspace = true }
 aes = { workspace = true }
 subtle-ng = { workspace = true }
+thiserror = { workspace = true }
+quickcheck = { workspace = true }
 
 # TODO: Only use this in examples
 hex-literal = "0.3.2"

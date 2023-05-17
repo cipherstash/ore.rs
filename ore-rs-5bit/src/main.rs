@@ -20,6 +20,8 @@ fn main() {
     // TODO:
     // Can we use a derive macro for types to implement LeftCipherTextBlock and RightCipherTextBlock
     // Also, those names are very long
+    // * I think we only need the forward PRP now
+    // * Could the test failures be due to the changes I made to prefix generation?
     // TODO: Tests and benchmarks
     // TODO: create a plaintext trait for the ORE trait methods
     // For the 5-bit scheme, create a Packed variant

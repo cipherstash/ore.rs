@@ -61,6 +61,10 @@ impl <T: Sized + Copy, const N: usize> NewPrp<T, N> {
     pub fn permute(&self, input: impl Into<usize>) -> T {
         self.forward[input.into()]
     }
+
+    pub fn inverse_permute(&self, input: impl Into<usize>) -> T {
+        self.inverse[input.into()]
+    }
 }
 
 pub trait PrpGenerator<T: Sized + Copy, const N: usize> {

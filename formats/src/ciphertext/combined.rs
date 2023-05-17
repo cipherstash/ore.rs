@@ -86,10 +86,7 @@ where
         Box::new(
             self.data.body()[RightCiphertext::<'a, R>::NONCE_SIZE..]
             .chunks(Self::Block::byte_size())
-            .map(|bytes| {
-                println!("BYTES LEN: {}", bytes.len());
-                Self::Block::from(bytes)
-            })
+            .map(|bytes| Self::Block::from(bytes))
         )
     }
 }

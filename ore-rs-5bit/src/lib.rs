@@ -1,13 +1,17 @@
-use std::{cell::RefCell, ops::BitAnd, cmp::Ordering};
+use std::{cell::RefCell, ops::{BitAnd, BitXor, BitXorAssign}, cmp::Ordering};
 use formats::{LeftCiphertext, CipherTextBlock, DataWithHeader, RightCiphertext, CombinedCiphertext, CipherText, LeftCipherTextBlock, RightCipherTextBlock, OreBlockOrd, LeftBlockEq};
+use left_block::LeftBlock;
 use primitives::{prf::Aes128Prf, Prf, prp::bitwise::BitwisePrp, Prp, KnuthShuffleGenerator, PrpGenerator, NewPrp, hash::Aes128Z2Hash, Hash};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
+use right_block::RightBlock;
 use subtle_ng::{ConstantTimeEq, Choice};
 use zeroize::ZeroizeOnDrop;
 use aes::cipher::generic_array::GenericArray;
-use crate::packing::packed_prefixes;
+use crate::packing::prefixes;
 pub mod packing;
+mod right_block;
+mod left_block;
 
 #[derive(Debug, ZeroizeOnDrop)]
 pub struct Ore5Bit<R: Rng + SeedableRng> {
@@ -21,6 +25,7 @@ pub struct Ore5Bit<R: Rng + SeedableRng> {
 }
 
 // TODO: use a trait type
+/// This type is deliberately opaque as to avoid potential side-channel leakage.
 #[derive(Debug)]
 pub struct OreError;
 
@@ -29,80 +34,7 @@ pub type Ore5BitLeft<'a> = LeftCiphertext<'a, LeftBlock>;
 pub type Ore5BitRight<'a> = RightCiphertext<'a, RightBlock>;
 pub type Ore5BitCombined<'a> = CombinedCiphertext<'a, LeftBlock, RightBlock>;
 
-#[derive(Debug)]
-pub struct LeftBlock([u8; 16], u8);
-#[derive(Debug)]
-pub struct RightBlock(u32);
 
-impl<'a> CipherTextBlock<'a> for LeftBlock {
-    fn byte_size() -> usize {
-        17
-    }
-
-    fn extend_into(&self, out: &mut DataWithHeader) {
-        out.extend_from_slice(&self.0);
-        out.extend([self.1]);
-    }
-}
-
-impl ConstantTimeEq for LeftBlock {
-    fn ct_eq(&self, other: &Self) -> subtle_ng::Choice {
-        self.0.ct_eq(&other.0).bitand(self.1.ct_eq(&other.1))
-    }
-}
-
-impl<'a> LeftBlockEq<'a, LeftBlock> for LeftBlock {
-    fn constant_eq(&self, other: &Self) -> subtle_ng::Choice {
-        self.ct_eq(other)
-    }
-}
-
-// TODO: Derive macro?
-impl<'a> LeftCipherTextBlock<'a> for LeftBlock {}
-
-impl<'a> OreBlockOrd<'a, RightBlock> for LeftBlock {
-    fn ore_compare(&self, nonce: &[u8], RightBlock(right): &RightBlock) -> Ordering {
-        let hasher: Aes128Z2Hash = Hash::new(nonce.into());
-        // TODO: Use conditional_select
-        if ((right >> self.1) as u8 & 1u8) & hasher.hash(&self.0) == 1 {
-            Ordering::Less
-        } else {
-            Ordering::Greater
-        }
-    }
-}
-
-impl<'a> RightCipherTextBlock<'a> for RightBlock {}
-
-
-// TODO: Can we derive macro any of this, too??
-impl<'a> CipherTextBlock<'a> for RightBlock {
-    fn byte_size() -> usize {
-        4
-    }
-
-    fn extend_into(&self, out: &mut DataWithHeader) {
-        out.extend(self.0.to_be_bytes());
-    }
-}
-
-impl From<&[u8]> for LeftBlock {
-    fn from(value: &[u8]) -> Self {
-        assert!(value.len() == Self::byte_size());
-        let mut buf: [u8; 16] = Default::default();
-        buf.copy_from_slice(&value[0..16]);
-        LeftBlock(buf, value[16])
-    }
-}
-
-impl From<&[u8]> for RightBlock {
-    fn from(value: &[u8]) -> Self {
-        assert!(value.len() == Self::byte_size());
-        let mut buf: [u8; 4] = Default::default();
-        buf.copy_from_slice(&value[0..4]);
-        RightBlock(u32::from_be_bytes(buf))
-    }
-}
 
 // TODO: Make this use the ORE traits once we've cleaned these up
 impl<R: Rng + SeedableRng> Ore5Bit<R> {
@@ -134,7 +66,8 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
         // This will be OK for up to 16-bytes of input (or 25 5-bit values)
         // For larger inputs we can chain the values by XORing the last output
         // with the next input (a little like CMAC).
-        let mut prefixes = packed_prefixes(input);
+        let mut prefixes = prefixes(input);
+
         self.prf2.encrypt_all(&mut prefixes);
 
         // This deviates from the paper slightly.
@@ -143,14 +76,20 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
         // This avoids a copy and should have the same effect.
         // TODO: Change this to use functional callbacks rather than for
         let mut p_ns = vec![];
-        for (enc_prefix, in_blk) in prefixes.iter_mut().zip(input.iter()) {
-            let prp: NewPrp<u8, 32> = KnuthShuffleGenerator::new(enc_prefix).generate();
+
+        for (n, in_blk) in input.iter().enumerate() {
+            let prp: NewPrp<u8, 32> = KnuthShuffleGenerator::new(&prefixes[n]).generate();
             let p_n = prp.permute(*in_blk);
             p_ns.push(p_n);
-            enc_prefix[15] = p_n;
+
+            prefixes[n].iter_mut().for_each(|x| *x = 0);
+            prefixes[n][0..n].clone_from_slice(&input[0..n]);
+            prefixes[n][n] = p_n;
+            prefixes[n][15] = n as u8;
         }
 
         self.prf1.encrypt_all(&mut prefixes);
+
         for (prf_block, permuted) in prefixes.iter().zip(p_ns.iter()) {
             out.add_block(LeftBlock(*prf_block, *permuted));
         }
@@ -170,8 +109,8 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
         // This will be OK for up to 16-bytes of input (or 25 5-bit values)
         // For larger inputs we can chain the values by XORing the last output
         // with the next input (a little like CMAC).
-        let mut prefixes = packed_prefixes(input);
-        let mut right_blocks: Vec<u32> = Vec::new(); // TODO: Len
+        let mut prefixes = prefixes(input);
+        let mut right_blocks: Vec<RightBlock> = Vec::with_capacity(input.len());
         self.prf2.encrypt_all(&mut prefixes);
 
         // This deviates from the paper slightly.
@@ -183,37 +122,80 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
         // instead of performing comparisons on each value (which would not be constant time).
         let mut p_ns: Vec<u8> = Vec::with_capacity(input.len());
 
-        for (enc_prefix, in_blk) in prefixes.iter_mut().zip(input.iter()) {
-            let out_right_blk: u32 = 0xFFFFFFFF >> *in_blk;
-            let prp: NewPrp<u8, 32> = KnuthShuffleGenerator::new(enc_prefix).generate();
+        for (n, in_blk) in input.iter().enumerate() {
+            let prp: NewPrp<u8, 32> = KnuthShuffleGenerator::new(&prefixes[n]).generate();
             let p_n = prp.permute(*in_blk);
             p_ns.push(p_n);
-            enc_prefix[15] = p_n;
 
-            out_right_blk.inverse_shuffle(&prp);
-            right_blocks.push(out_right_blk.inverse_shuffle(&prp));
+            prefixes[n].iter_mut().for_each(|x| *x = 0);
+            prefixes[n][0..n].clone_from_slice(&input[0..n]);
+            prefixes[n][n] = p_n;
+            prefixes[n][15] = n as u8;
+
+
+            // encrypt_left and encrypt functions are identical, except that we have this encrypt right block stuff in the middle
+            let mut right_blk = RightBlock::init(*in_blk).shuffle(&prp);
+
+            // TODO: Use the same approach here as we do in the original implementation
+            let mut ro_keys: [[u8; 16]; 32] = Default::default();
+            
+            for (j, ro_key) in ro_keys.iter_mut().enumerate() {
+                ro_key[0..n].copy_from_slice(&input[0..n]);
+                ro_key[n] = j as u8;
+            }
+
+            self.prf1.encrypt_all(&mut ro_keys);
+
+            // TODO: Hash all of these keys with the nonce
+            // set the bits and and Xor with the right_block
+            // Push bytes onto right output vec
+            let hasher: Aes128Z2Hash = Hash::new(&nonce.into());
+            // TODO: Hash all onto could be generic (right block)
+            // A RightBlock is like an "indicator set"
+            let mask = hasher.hash_all_onto_u32(&ro_keys);
+
+            right_blk ^= mask;
+
+            right_blocks.push(right_blk);
+
         }
 
         self.prf1.encrypt_all(&mut prefixes);
 
+        for ((left, p_n), right) in prefixes.into_iter().zip(p_ns.into_iter()).zip(right_blocks.into_iter()) {
+            out.add_block(LeftBlock(left, p_n), right);
+        }
+
+
+
         // TODO: This feels a bit janky
-        for ((enc_prefix, right_blk), p_n) in prefixes.iter().zip(right_blocks.iter()).zip(p_ns.iter()) {
+        /*for ((enc_prefix, mut right_blk), p_n) in prefixes.iter().zip(right_blocks.into_iter()).zip(p_ns.iter()) {
             let mut ro_keys: [[u8; 16]; 32] = Default::default();
             
             for (j, ro_key) in ro_keys.iter_mut().enumerate() {
                 ro_key.copy_from_slice(enc_prefix);
                 ro_key[15] = j as u8;
             }
+
+            for (j, prefix) in ro_keys.iter().enumerate() {
+                println!("RIGHT: {} -> {:?}", j, prefix);
+            }
+
             self.prf1.encrypt_all(&mut ro_keys);
+
             // TODO: Hash all of these keys with the nonce
             // set the bits and and Xor with the right_block
             // Push bytes onto right output vec
             let hasher: Aes128Z2Hash = Hash::new(&nonce.into());
-            let final_right = right_blk ^ hasher.hash_all_onto_u32(&ro_keys);
-            //right.add_block(RightBlock(final_right));
+            // TODO: Hash all onto could be generic (right block)
+            // A RightBlock is like an "indicator set"
+            let mask = hasher.hash_all_onto_u32(&ro_keys);
+            println!("MASK: {mask:b}");
 
-            out.add_block(LeftBlock(*enc_prefix, *p_n), RightBlock(final_right));
-        }
+            right_blk ^= mask;
+
+            out.add_block(LeftBlock(*enc_prefix, *p_n), right_blk);
+        }*/
 
         out
     }
@@ -244,8 +226,126 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
     // - Bitwise permute: N bit get, N bit set (we avoid the comparisons!)
 }
 
+#[cfg(test)]
+#[macro_use]
+extern crate quickcheck;
 
 #[cfg(test)]
 mod tests {
+    use quickcheck::{Arbitrary, QuickCheck};
+
     use super::*;
+
+    type ORE = Ore5BitChaCha20;
+
+    fn init_ore() -> Result<ORE, OreError> {
+        let mut k1: [u8; 16] = Default::default();
+        let mut k2: [u8; 16] = Default::default();
+
+        let mut rng = ChaCha20Rng::from_entropy();
+
+        rng.fill(&mut k1);
+        rng.fill(&mut k2);
+
+        // TODO: This will work when have the trait setup correctly
+        //OreCipher::init(&k1, &k2).unwrap()
+        Ore5BitChaCha20::init(&k1, &k2)
+    }
+
+    #[test]
+    fn test_single_block_eq() -> Result<(), OreError> {
+        let a = vec![10];
+        let ore = init_ore()?;
+        let left = ore.encrypt_left(&a);
+        let combined = ore.encrypt(&a);
+
+        assert_eq!(ORE::compare_slices(&left, &combined), Ordering::Equal);
+        Ok(())
+    }
+
+    #[test]
+    fn test_single_block_lt() -> Result<(), OreError> {
+        let a = vec![10];
+        let b = vec![29];
+        let ore = init_ore()?;
+        let left = ore.encrypt_left(&a);
+        let combined = ore.encrypt(&b);
+
+        assert_eq!(ORE::compare_slices(&left, &combined), Ordering::Less);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_single_block_gt() -> Result<(), OreError> {
+        let a = vec![11];
+        let b = vec![0];
+        let ore = init_ore()?;
+        let left = ore.encrypt_left(&a);
+        let combined = ore.encrypt(&b);
+
+        assert_eq!(ORE::compare_slices(&left, &combined), Ordering::Greater);
+
+        Ok(())
+    }
+
+    #[derive(Debug, Copy, Clone, PartialEq)]
+    struct U5(u8);
+
+    impl Arbitrary for U5 {
+        fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+            loop {
+                let v: u8 = Arbitrary::arbitrary(g);
+
+                if v <= 31 {
+                    return Self(v)
+                }
+
+            }
+        }
+    }
+
+    impl PartialOrd for U5 {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            self.0.partial_cmp(&other.0)
+        }
+    }
+
+    #[test]
+    fn test_quick() {
+        fn single_elem(a: U5, b: U5) -> bool {
+            let ore = init_ore().unwrap();
+            let ax = [a.0];
+            let bx = [b.0];
+            let left = ore.encrypt_left(&ax);
+            let combined = ore.encrypt(&bx);
+
+            match ORE::compare_slices(&left, &combined) {
+                Ordering::Less => a < b,
+                Ordering::Equal => a == b,
+                Ordering::Greater => a > b
+            }
+        }
+
+        QuickCheck::new().max_tests(1).quickcheck(single_elem as fn(U5, U5) -> bool)
+    }
+
+    #[test]
+    fn test_quick2() {
+        fn multiple_elems(a: Vec<U5>, b: Vec<U5>) -> bool {
+            let ax: Vec<u8> = a.into_iter().map(|U5(x)| x).collect();
+            let bx: Vec<u8> = b.into_iter().map(|U5(x)| x).collect();
+            let ore = init_ore().unwrap();
+            let left = ore.encrypt_left(&ax);
+            let combined = ore.encrypt(&bx);
+
+            match ORE::compare_slices(&left, &combined) {
+                Ordering::Less => ax < bx,
+                Ordering::Equal => ax == bx,
+                Ordering::Greater => ax > bx
+            }
+        }
+
+        QuickCheck::new().max_tests(1).quickcheck(multiple_elems as fn(Vec<U5>, Vec<U5>) -> bool)
+    }
 }
