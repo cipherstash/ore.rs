@@ -32,40 +32,19 @@ impl<'a, B: LeftCipherTextBlock<'a>> LeftCiphertext<'a, B> {
         B: LeftBlockEq<'a, O> + OreBlockOrd<'a, O>,
         O: RightCipherTextBlock<'a>
     {
-
         let mut ai = self.blocks();
         let mut bi = other; // TODO: Don't pass an iterator to this func, pass an impl CipherText
 
         // TODO: Perhaps the LeftBlock could define the whole comparison (rather than splitting Eq and Ord like this)
         let mut result: Option<Ordering> = None;
-        // We only need to keep an accum for Less or Greater!
         loop {
             match (ai.next(), bi.next()) {
-                (None, None) => return result.unwrap_or(Ordering::Equal),
-                // TODO: These 2 cases will depend on result
-                (Some(_), None) => {
-                    if let Some(Ordering::Equal) = result {
-                        return Ordering::Greater;
-                    } else {
-                        return result.unwrap_or(Ordering::Greater);
-                    }
-                },
-                (None, Some(_)) => {
-                    if let Some(Ordering::Equal) = result {
-                        return Ordering::Less;
-                    } else {
-                        return result.unwrap_or(Ordering::Less);
-                    }
-                },
+                (None, None)       => return result.unwrap_or(Ordering::Equal),
+                (Some(_), None)    => return result.unwrap_or(Ordering::Greater),
+                (None, Some(_))    => return result.unwrap_or(Ordering::Less),
                 (Some(x), Some(y)) => {
-                    if x.constant_eq(&y).into() {
-                        result = result.or(Some(Ordering::Equal));
-                    } else {
-                        if let Some(Ordering::Equal) = result {
-                            result = Some(x.ore_compare(nonce, &y));
-                        } else {
-                            result = result.or(Some(x.ore_compare(nonce, &y)));
-                        }
+                    if !Into::<bool>::into(x.constant_eq(&y)) {
+                        result = result.or(Some(x.ore_compare(nonce, &y)));
                     }
                 }
             }

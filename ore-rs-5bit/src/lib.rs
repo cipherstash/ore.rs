@@ -375,7 +375,7 @@ mod tests {
             }
         }
 
-        QuickCheck::new().max_tests(1).quickcheck(single_elem as fn(U5, U5) -> bool)
+        QuickCheck::new().max_tests(1000).quickcheck(single_elem as fn(U5, U5) -> bool)
     }
 
     /*#[test]
