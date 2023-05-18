@@ -138,7 +138,7 @@ where
     R: RightCipherTextBlock<'a>,
     L: OreBlockOrd<'a, R>
 {
-    fn ore_compare(&self, nonce: &[u8], other: &CombinedBlock<'a, L, R>) -> Ordering {
+    fn ore_compare(&self, nonce: &[u8], other: &CombinedBlock<'a, L, R>) -> i8 {
         self.ore_compare(nonce, &other.right)
     }
 }

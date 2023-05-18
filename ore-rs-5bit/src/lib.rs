@@ -172,7 +172,7 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
     // TODO: Do this as a PartialOrd impl (and handle versions)
     // TODO: Handle different length slices. Compare the first n-bytes and if they're equal then the
     // longer value will be more "more-than"
-    pub fn compare_slices(a: impl AsRef<[u8]>, b: impl AsRef<[u8]>) -> Ordering {
+    pub fn compare_slices(a: impl AsRef<[u8]>, b: impl AsRef<[u8]>) -> i8 {
         let left: Ore5BitLeft = a.as_ref().try_into().unwrap();
         let combined: Ore5BitCombined = b.as_ref().try_into().unwrap();
         //assert!(left.comparable(&combined)); // TODO: Error
@@ -229,7 +229,7 @@ mod tests {
         let left = ore.encrypt_left(&a);
         let combined = ore.encrypt(&a);
 
-        assert_eq!(ORE::compare_slices(&left, &combined), Ordering::Equal);
+        assert_eq!(ORE::compare_slices(&left, &combined), 0);
         Ok(())
     }
 
@@ -241,7 +241,7 @@ mod tests {
         let left = ore.encrypt_left(&a);
         let combined = ore.encrypt(&b);
 
-        assert_eq!(ORE::compare_slices(&left, &combined), Ordering::Less);
+        assert_eq!(ORE::compare_slices(&left, &combined), -1);
 
         Ok(())
     }
@@ -254,7 +254,7 @@ mod tests {
         let left = ore.encrypt_left(&a);
         let combined = ore.encrypt(&b);
 
-        assert_eq!(ORE::compare_slices(&left, &combined), Ordering::Greater);
+        assert_eq!(ORE::compare_slices(&left, &combined), 1);
 
         Ok(())
     }
@@ -267,7 +267,7 @@ mod tests {
         let left = ore.encrypt_left(&a);
         let combined = ore.encrypt(&b);
 
-        assert_eq!(ORE::compare_slices(&left, &combined), Ordering::Less);
+        assert_eq!(ORE::compare_slices(&left, &combined), -1);
 
         Ok(())
     }
@@ -280,7 +280,7 @@ mod tests {
         let left = ore.encrypt_left(&a);
         let combined = ore.encrypt(&b);
 
-        assert_eq!(ORE::compare_slices(&left, &combined), Ordering::Greater);
+        assert_eq!(ORE::compare_slices(&left, &combined), 1);
 
         Ok(())
     }
@@ -293,7 +293,7 @@ mod tests {
         let left = ore.encrypt_left(&a);
         let combined = ore.encrypt(&b);
 
-        assert_eq!(ORE::compare_slices(&left, &combined), Ordering::Greater);
+        assert_eq!(ORE::compare_slices(&left, &combined), 1);
 
         Ok(())
     }
@@ -306,7 +306,7 @@ mod tests {
         let left = ore.encrypt_left(&a);
         let combined = ore.encrypt(&b);
 
-        assert_eq!(ORE::compare_slices(&left, &combined), Ordering::Greater);
+        assert_eq!(ORE::compare_slices(&left, &combined), 1);
 
         Ok(())
     }
@@ -319,7 +319,7 @@ mod tests {
         let left = ore.encrypt_left(&a);
         let combined = ore.encrypt(&b);
 
-        assert_eq!(ORE::compare_slices(&left, &combined), Ordering::Less);
+        assert_eq!(ORE::compare_slices(&left, &combined), -1);
 
         Ok(())
     }
@@ -332,7 +332,7 @@ mod tests {
         let left = ore.encrypt_left(&a);
         let combined = ore.encrypt(&b);
 
-        assert_eq!(ORE::compare_slices(&left, &combined), Ordering::Less);
+        assert_eq!(ORE::compare_slices(&left, &combined), -1);
 
         Ok(())
     }
@@ -369,9 +369,10 @@ mod tests {
             let combined = ore.encrypt(&bx);
 
             match ORE::compare_slices(&left, &combined) {
-                Ordering::Less => a < b,
-                Ordering::Equal => a == b,
-                Ordering::Greater => a > b
+                -1 => a < b,
+                0 => a == b,
+                1 => a > b,
+                _ => panic!()
             }
         }
 

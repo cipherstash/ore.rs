@@ -30,16 +30,16 @@ impl<'a> LeftBlockEq<'a, LeftBlock> for LeftBlock {
 
 impl<'a> OreBlockOrd<'a, RightBlock> for LeftBlock {
     // FIXME: Nonce *must* be 16-bytes
-    fn ore_compare(&self, nonce: &[u8], right: &RightBlock) -> Ordering {
+    fn ore_compare(&self, nonce: &[u8], right: &RightBlock) -> i8 {
         // TODO: This would be cleaner if we defined a method on RightBlock
         let hasher: Aes128Z2Hash = Hash::new(nonce.into());
         // TODO: Use conditional_select
         //if ((right << self.1) as u8 & 1u8) ^ hasher.hash(&self.0) == 1 {
         let mask = hasher.hash(&self.0);
         if (right.get_bit(self.1) ^ mask) == 1 {
-            Ordering::Greater
+            1
         } else {
-            Ordering::Less
+            -1
         }
     }
 }
@@ -95,7 +95,7 @@ mod tests {
                 [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, prp.inverse_permute(10u8)],
                 prp.inverse_permute(10u8)
             ).ore_compare(&nonce, &right),
-            Ordering::Greater
+            1
         );
 
         assert_eq!(
@@ -103,7 +103,7 @@ mod tests {
                 [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, prp.inverse_permute(5u8)],
                 prp.inverse_permute(5u8)
             ).ore_compare(&nonce, &right),
-            Ordering::Less
+            -1
         );
         
         assert_eq!(
@@ -111,7 +111,7 @@ mod tests {
                 [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, prp.inverse_permute(24u8)],
                 prp.inverse_permute(24u8)
             ).ore_compare(&nonce, &right),
-            Ordering::Greater
+            1
         );
     }
 }

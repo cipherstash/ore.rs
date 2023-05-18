@@ -39,5 +39,5 @@ pub trait LeftBlockEq<'a, Other: ?Sized + CipherTextBlock<'a> = Self> {
 }
 
 pub trait OreBlockOrd<'a, Other: ?Sized + RightCipherTextBlock<'a>> {
-    fn ore_compare(&self, nonce: &[u8], right: &Other) -> Ordering;
+    fn ore_compare(&self, nonce: &[u8], right: &Other) -> i8;
 }

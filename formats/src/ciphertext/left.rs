@@ -1,5 +1,5 @@
-use std::{marker::PhantomData, ops::BitOr, cmp::Ordering};
-use subtle_ng::{Choice, CtOption};
+use std::{marker::PhantomData, ops::{BitOr, BitAnd}, cmp::Ordering};
+use subtle_ng::{Choice, CtOption, ConditionallySelectable};
 
 use crate::{data_with_header::{CtType, DataWithHeader}, header::Header, ParseError, LeftCipherTextBlock, OreBlockOrd, RightCipherTextBlock};
 use super::{CipherTextBlock, CipherText, LeftBlockEq};
@@ -27,7 +27,7 @@ impl<'a, B: LeftCipherTextBlock<'a>> LeftCiphertext<'a, B> {
     /// where `n` is the length of the shorter iterator.
     /// The ordering mechanism is important here, too (i.e. Lexicographic or Numerical)
     /// If its numerical then the shorter value is always less than the other.
-    pub fn compare_blocks<O>(&'a self, nonce: &[u8], other: Box<dyn Iterator<Item=O> + 'a>) -> Ordering
+    pub fn compare_blocks<O>(&'a self, nonce: &[u8], other: Box<dyn Iterator<Item=O> + 'a>) -> i8
     where
         B: LeftBlockEq<'a, O> + OreBlockOrd<'a, O>,
         O: RightCipherTextBlock<'a>
@@ -36,16 +36,18 @@ impl<'a, B: LeftCipherTextBlock<'a>> LeftCiphertext<'a, B> {
         let mut bi = other; // TODO: Don't pass an iterator to this func, pass an impl CipherText
 
         // TODO: Perhaps the LeftBlock could define the whole comparison (rather than splitting Eq and Ord like this)
-        let mut result: Option<Ordering> = None;
+        let mut result: CtOption<i8> = CtOption::new(0, Choice::from(0));
+
         loop {
             match (ai.next(), bi.next()) {
-                (None, None)       => return result.unwrap_or(Ordering::Equal),
-                (Some(_), None)    => return result.unwrap_or(Ordering::Greater),
-                (None, Some(_))    => return result.unwrap_or(Ordering::Less),
+                (None, None)       => return result.unwrap_or(0),
+                (Some(_), None)    => return result.unwrap_or(1),
+                (None, Some(_))    => return result.unwrap_or(-1),
                 (Some(x), Some(y)) => {
-                    if !Into::<bool>::into(x.constant_eq(&y)) {
-                        result = result.or(Some(x.ore_compare(nonce, &y)));
-                    }
+                    // Always do the ore compare (even though we don't need to) to keep timing constant.
+                    // Then assign the comparison to result if result is None and the left values are not equal.
+                    let comparison = CtOption::new(x.ore_compare(nonce, &y), Choice::from(1));
+                    result.conditional_assign(&comparison, result.is_none().bitand(!x.constant_eq(&y)));
                 }
             }
         }
