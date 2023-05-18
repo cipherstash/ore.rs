@@ -18,6 +18,4 @@ quickcheck = { workspace = true }
 
 # TODO: Only use this in examples
 hex-literal = "0.3.2"
-cmac = "0.7.2"
-bit-vec = "0.6.3"
 hex = { workspace = true }

@@ -23,11 +23,8 @@ impl<'a, B: LeftCipherTextBlock<'a>> LeftCiphertext<'a, B> {
         block.extend_into(&mut self.data);
     }
 
-    // TODO: this should return an Option of the first block that differs
     /// Compare all the blocks of self with all the blocks in the given iterator, up to the `n`
     /// where `n` is the length of the shorter iterator.
-    /// In the case that the two iterators are not equal length and all `n` blocks are equal,
-    /// TODO??? What do we return? Perhaps we can do the ORE comparison in this step, too?
     /// The ordering mechanism is important here, too (i.e. Lexicographic or Numerical)
     /// If its numerical then the shorter value is always less than the other.
     pub fn compare_blocks<O>(&'a self, nonce: &[u8], other: Box<dyn Iterator<Item=O> + 'a>) -> Ordering
@@ -35,25 +32,44 @@ impl<'a, B: LeftCipherTextBlock<'a>> LeftCiphertext<'a, B> {
         B: LeftBlockEq<'a, O> + OreBlockOrd<'a, O>,
         O: RightCipherTextBlock<'a>
     {
-        // TODO: We should use CtOption and acc.conditionally_select
-        let eq = self.blocks().zip(other).fold(None, { |acc: Option<(B, O)>, (a, b): (B, O)|
-            // FIXME: This definitely isn't constant time
-            if a.constant_eq(&b).into() {
-                acc.or(None)
-            } else {
-                Some((a, b))
-            }
-        });
 
-        // FIXME: This isn't constant time either
-        if let Some((a, b)) = eq {
-            a.ore_compare(nonce, &b)
-        } else {
-            // No blocks differ so say that the values are equal
-            Ordering::Equal
+        let mut ai = self.blocks();
+        let mut bi = other; // TODO: Don't pass an iterator to this func, pass an impl CipherText
+
+        // TODO: Perhaps the LeftBlock could define the whole comparison (rather than splitting Eq and Ord like this)
+        let mut result: Option<Ordering> = None;
+        // We only need to keep an accum for Less or Greater!
+        loop {
+            match (ai.next(), bi.next()) {
+                (None, None) => return result.unwrap_or(Ordering::Equal),
+                // TODO: These 2 cases will depend on result
+                (Some(_), None) => {
+                    if let Some(Ordering::Equal) = result {
+                        return Ordering::Greater;
+                    } else {
+                        return result.unwrap_or(Ordering::Greater);
+                    }
+                },
+                (None, Some(_)) => {
+                    if let Some(Ordering::Equal) = result {
+                        return Ordering::Less;
+                    } else {
+                        return result.unwrap_or(Ordering::Less);
+                    }
+                },
+                (Some(x), Some(y)) => {
+                    if x.constant_eq(&y).into() {
+                        result = result.or(Some(Ordering::Equal));
+                    } else {
+                        if let Some(Ordering::Equal) = result {
+                            result = Some(x.ore_compare(nonce, &y));
+                        } else {
+                            result = result.or(Some(x.ore_compare(nonce, &y)));
+                        }
+                    }
+                }
+            }
         }
-        
-        // TODO: Handle different lengths
     }
 }
 

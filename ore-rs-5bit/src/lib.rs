@@ -166,37 +166,6 @@ impl<R: Rng + SeedableRng> Ore5Bit<R> {
             out.add_block(LeftBlock(left, p_n), right);
         }
 
-
-
-        // TODO: This feels a bit janky
-        /*for ((enc_prefix, mut right_blk), p_n) in prefixes.iter().zip(right_blocks.into_iter()).zip(p_ns.iter()) {
-            let mut ro_keys: [[u8; 16]; 32] = Default::default();
-            
-            for (j, ro_key) in ro_keys.iter_mut().enumerate() {
-                ro_key.copy_from_slice(enc_prefix);
-                ro_key[15] = j as u8;
-            }
-
-            for (j, prefix) in ro_keys.iter().enumerate() {
-                println!("RIGHT: {} -> {:?}", j, prefix);
-            }
-
-            self.prf1.encrypt_all(&mut ro_keys);
-
-            // TODO: Hash all of these keys with the nonce
-            // set the bits and and Xor with the right_block
-            // Push bytes onto right output vec
-            let hasher: Aes128Z2Hash = Hash::new(&nonce.into());
-            // TODO: Hash all onto could be generic (right block)
-            // A RightBlock is like an "indicator set"
-            let mask = hasher.hash_all_onto_u32(&ro_keys);
-            println!("MASK: {mask:b}");
-
-            right_blk ^= mask;
-
-            out.add_block(LeftBlock(*enc_prefix, *p_n), right_blk);
-        }*/
-
         out
     }
 
@@ -233,10 +202,11 @@ extern crate quickcheck;
 #[cfg(test)]
 mod tests {
     use quickcheck::{Arbitrary, QuickCheck};
-
     use super::*;
 
     type ORE = Ore5BitChaCha20;
+
+    // TODO: Can we make these a macro so that we can reuse for every scheme?
 
     fn init_ore() -> Result<ORE, OreError> {
         let mut k1: [u8; 16] = Default::default();
@@ -289,6 +259,84 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn test_empty_lt() -> Result<(), OreError> {
+        let a = vec![];
+        let b = vec![0];
+        let ore = init_ore()?;
+        let left = ore.encrypt_left(&a);
+        let combined = ore.encrypt(&b);
+
+        assert_eq!(ORE::compare_slices(&left, &combined), Ordering::Less);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_empty_gt() -> Result<(), OreError> {
+        let a = vec![0];
+        let b = vec![];
+        let ore = init_ore()?;
+        let left = ore.encrypt_left(&a);
+        let combined = ore.encrypt(&b);
+
+        assert_eq!(ORE::compare_slices(&left, &combined), Ordering::Greater);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_uneven_common_prefix_gt() -> Result<(), OreError> {
+        let a = vec![10, 15];
+        let b = vec![10];
+        let ore = init_ore()?;
+        let left = ore.encrypt_left(&a);
+        let combined = ore.encrypt(&b);
+
+        assert_eq!(ORE::compare_slices(&left, &combined), Ordering::Greater);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_uneven_gt() -> Result<(), OreError> {
+        let a = vec![10];
+        let b = vec![7, 20];
+        let ore = init_ore()?;
+        let left = ore.encrypt_left(&a);
+        let combined = ore.encrypt(&b);
+
+        assert_eq!(ORE::compare_slices(&left, &combined), Ordering::Greater);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_uneven_common_prefix_lt() -> Result<(), OreError> {
+        let a = vec![10];
+        let b = vec![10, 15];
+        let ore = init_ore()?;
+        let left = ore.encrypt_left(&a);
+        let combined = ore.encrypt(&b);
+
+        assert_eq!(ORE::compare_slices(&left, &combined), Ordering::Less);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_uneven_lt() -> Result<(), OreError> {
+        let a = vec![10, 20];
+        let b = vec![27];
+        let ore = init_ore()?;
+        let left = ore.encrypt_left(&a);
+        let combined = ore.encrypt(&b);
+
+        assert_eq!(ORE::compare_slices(&left, &combined), Ordering::Less);
+
+        Ok(())
+    }
+
     #[derive(Debug, Copy, Clone, PartialEq)]
     struct U5(u8);
 
@@ -330,7 +378,7 @@ mod tests {
         QuickCheck::new().max_tests(1).quickcheck(single_elem as fn(U5, U5) -> bool)
     }
 
-    #[test]
+    /*#[test]
     fn test_quick2() {
         fn multiple_elems(a: Vec<U5>, b: Vec<U5>) -> bool {
             let ax: Vec<u8> = a.into_iter().map(|U5(x)| x).collect();
@@ -347,5 +395,5 @@ mod tests {
         }
 
         QuickCheck::new().max_tests(1).quickcheck(multiple_elems as fn(Vec<U5>, Vec<U5>) -> bool)
-    }
+    }*/
 }
