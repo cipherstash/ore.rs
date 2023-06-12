@@ -24,7 +24,10 @@ fn main() {
     // * Could the test failures be due to the changes I made to prefix generation?
     // TODO: Tests and benchmarks
     // TODO: create a plaintext trait for the ORE trait methods
-    // For the 5-bit scheme, create a Packed variant
+    // For the 5-bit scheme, create a U5/Packed variant
+    // TODO: Consider using Heapless https://docs.rs/heapless/0.7.16/heapless/
+    // Input would need to be done in batches (let SIMD width help us decide).
+    // TODO: Try a SIMD PRP
     dbg!(Ore5BitChaCha20::compare_slices(&left, &combined));
     //println!("{}, {}, {}", left.len(), right.len(), hex::encode(right));
 }
