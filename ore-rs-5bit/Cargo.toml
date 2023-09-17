@@ -1,0 +1,21 @@
+[package]
+name = "ore-rs-5bit"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+primitives = { path = "../primitives" }
+formats = { path = "../formats" }
+zeroize = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+aes = { workspace = true }
+subtle-ng = { workspace = true }
+thiserror = { workspace = true }
+quickcheck = { workspace = true }
+
+# TODO: Only use this in examples
+hex-literal = "0.3.2"
+hex = { workspace = true }

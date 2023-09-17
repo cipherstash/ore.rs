@@ -1,7 +1,10 @@
 pub mod prng;
-use crate::primitives::prp::prng::Aes128Prng;
-use crate::primitives::{Prp, PrpError, PrpResult};
+pub mod bitwise;
+use crate::prp::prng::Aes128Prng;
+use crate::{Prp, PrpError, PrpResult};
 use std::convert::TryFrom;
+use std::iter::Enumerate;
+use std::slice::Iter;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 #[derive(Zeroize)]
@@ -20,25 +23,26 @@ impl<T: Zeroize, const N: usize> Drop for KnuthShufflePRP<T, N> {
 // Impl the ZeroizeOnDrop marker trait since we're zeroizing above
 impl<T: Zeroize, const N: usize> ZeroizeOnDrop for KnuthShufflePRP<T, N> {}
 
-impl Prp<u8> for KnuthShufflePRP<u8, 256> {
+// TODO: This would make more sense if we defined PRP as a generator
+impl <const N: usize> Prp<u8> for KnuthShufflePRP<u8, N> {
     /*
-     * Initialize an 8-bit (256 element) PRP using a KnuthShuffle
-     * and a 64-bit random seed
+     * Initialize an 8-bit (N element) PRP using a KnuthShuffle
      */
     fn new(key: &[u8]) -> PrpResult<Self> {
+        assert!(N <= 256);
         let mut rng = Aes128Prng::init(key); // TODO: Use Result type here, too
 
         let mut perm = Self {
-            permutation: [0u8; 256],
-            inverse: [0u8; 256],
+            permutation: [0u8; N],
+            inverse: [0u8; N],
         };
 
         // Initialize values
-        for i in 0..=255 {
+        for i in 0..N {
             perm.permutation[i] = i as u8;
         }
 
-        (0..=255usize).into_iter().rev().for_each(|i| {
+        (0..N).into_iter().rev().for_each(|i| {
             let j = rng.gen_range(i as u8);
             perm.permutation.swap(i, j as usize);
         });
@@ -75,6 +79,10 @@ impl Prp<u8> for KnuthShufflePRP<u8, 256> {
             Some(i) => Ok(*i),
             None => Err(PrpError),
         }
+    }
+
+    fn enumerate(&self) -> Enumerate<Iter<u8>> {
+        self.permutation.iter().enumerate()
     }
 }
 

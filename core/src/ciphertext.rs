@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::primitives::NONCE_SIZE;
+use primitives::NONCE_SIZE;
 pub use crate::OreCipher;
 
 /// The trait of any encryption output (either Left, Right or combined).
