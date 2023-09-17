@@ -1,6 +1,7 @@
 use std::slice;
 use crate::{AesBlock, Hash, HashKey};
-use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
+use aes::cipher::KeyInit;
+use aes::cipher::{generic_array::GenericArray, BlockEncrypt};
 use aes::Aes128;
 use zeroize::ZeroizeOnDrop;
 
@@ -33,8 +34,7 @@ impl Aes128Z2Hash {
 
 impl Hash for Aes128Z2Hash {
     fn new(key: &HashKey) -> Self {
-        let key_array = GenericArray::from_slice(key);
-        let cipher = Aes128::new(key_array);
+        let cipher = Aes128::new_from_slice(&key).unwrap();
         Self { cipher }
     }
 
