@@ -38,7 +38,7 @@ impl Prp<u8> for KnuthShufflePRP<u8, 256> {
             perm.permutation[i] = i as u8;
         }
 
-        (0..=255usize).into_iter().rev().for_each(|i| {
+        (0..=255usize).rev().for_each(|i| {
             let j = rng.gen_range(i as u8);
             perm.permutation.swap(i, j as usize);
         });
