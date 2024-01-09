@@ -9,5 +9,5 @@ fn main() {
 
     let i = 10000u64;
     let x_u64 = i.encrypt(&ore).unwrap().to_bytes();
-    println!("CT = {};", hex::encode(&x_u64));
+    println!("CT = {};", hex::encode(x_u64));
 }
