@@ -18,9 +18,9 @@ jobs:
     name: "🧪 Test"
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
-      - uses: actions/cache@v2
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
@@ -30,25 +30,28 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install minimal nightly
-        uses: actions-rs/toolchain@v1
+      - name: setup rust 1.78
+        uses: dtolnay/rust-toolchain@1.78.0
         with:
-          profile: minimal
-          toolchain: nightly
+          components: clippy, rustfmt
 
-      - name: "Test"
-        run: |
-          cargo test
-          cargo clippy -- -D warnings
+      - name: clippy
+        run: cargo clippy --no-deps --all-targets --all-features  -- -D warnings
+
+      - name: format
+        run: cargo fmt -- --check
+
+      - name: test
+        run: cargo test
 
   bench:
     runs-on: ubuntu-latest
     name: "⏱ Benchmark"
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
-      - uses: actions/cache@v2
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
@@ -58,12 +61,8 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install minimal nightly
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
+      - name: setup rust 1.78
+        uses: dtolnay/rust-toolchain@1.78.0
 
       - name: "Benchmark"
-        run: |
-          cargo bench
+        run: cargo bench

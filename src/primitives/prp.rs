@@ -1,7 +1,6 @@
 pub mod prng;
 use crate::primitives::prp::prng::Aes128Prng;
 use crate::primitives::{Prp, PrpError, PrpResult};
-use std::convert::TryFrom;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 #[derive(Zeroize)]
@@ -56,7 +55,7 @@ impl Prp<u8> for KnuthShufflePRP<u8, 256> {
      * Forward permutations are only used once in the ORE scheme so this is OK
      */
     fn permute(&self, input: u8) -> PrpResult<u8> {
-        let index = usize::try_from(input).map_err(|_| PrpError)?;
+        let index = usize::from(input);
 
         match self.inverse.get(index) {
             Some(i) => Ok(*i),
@@ -68,7 +67,7 @@ impl Prp<u8> for KnuthShufflePRP<u8, 256> {
      * Performs the inverse permutation in constant time.
      */
     fn invert(&self, input: u8) -> PrpResult<u8> {
-        let index = usize::try_from(input).map_err(|_| PrpError)?;
+        let index = usize::from(input);
 
         // Forward an inverse permutations are reversed for historical reasons
         match self.permutation.get(index) {

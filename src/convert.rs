@@ -28,6 +28,7 @@ pub(crate) trait ToOrderedInteger<T> {
     fn map_to(&self) -> T;
 }
 
+#[allow(dead_code)]
 trait FromOrderedInteger<T> {
     fn map_from(input: T) -> Self;
 }
