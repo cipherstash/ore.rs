@@ -304,9 +304,9 @@ mod tests {
     use crate::encrypt::OreEncrypt;
     use quickcheck::TestResult;
 
-    type ORE = OreAes128ChaCha20;
+    type Ore = OreAes128ChaCha20;
 
-    fn init_ore() -> ORE {
+    fn init_ore() -> Ore {
         let mut k1: [u8; 16] = Default::default();
         let mut k2: [u8; 16] = Default::default();
 
@@ -336,7 +336,7 @@ mod tests {
             let a = x.encrypt(&ore).unwrap().to_bytes();
             let b = y.encrypt(&ore).unwrap().to_bytes();
 
-            match ORE::compare_raw_slices(&a, &b) {
+            match Ore::compare_raw_slices(&a, &b) {
                 Some(Ordering::Greater) => x > y,
                 Some(Ordering::Less)    => x < y,
                 Some(Ordering::Equal)   => x == y,
@@ -357,10 +357,7 @@ mod tests {
             let a = x.encrypt(&ore).unwrap().to_bytes();
             let b = x.encrypt(&ore).unwrap().to_bytes();
 
-            match ORE::compare_raw_slices(&a, &b) {
-                Some(Ordering::Equal) => true,
-                _ => false
-            }
+            matches!(Ore::compare_raw_slices(&a, &b), Some(Ordering::Equal))
         }
 
         fn compare_u32(x: u32, y: u32) -> bool {
@@ -495,7 +492,7 @@ mod tests {
         let a_64 = 10u64.encrypt(&ore).unwrap().to_bytes();
         let a_32 = 10u32.encrypt(&ore).unwrap().to_bytes();
 
-        assert_eq!(ORE::compare_raw_slices(&a_64, &a_32), Option::None);
+        assert_eq!(Ore::compare_raw_slices(&a_64, &a_32), Option::None);
     }
 
     #[test]
@@ -534,7 +531,7 @@ mod tests {
         let a = 1000u32.encrypt(&ore1).unwrap().to_bytes();
         let b = 1000u32.encrypt(&ore2).unwrap().to_bytes();
 
-        assert_ne!(Some(Ordering::Equal), ORE::compare_raw_slices(&a, &b));
+        assert_ne!(Some(Ordering::Equal), Ore::compare_raw_slices(&a, &b));
     }
 
     #[test]
@@ -555,6 +552,6 @@ mod tests {
         let a = 1000u32.encrypt(&ore1).unwrap().to_bytes();
         let b = 1000u32.encrypt(&ore2).unwrap().to_bytes();
 
-        assert_ne!(Some(Ordering::Equal), ORE::compare_raw_slices(&a, &b));
+        assert_ne!(Some(Ordering::Equal), Ore::compare_raw_slices(&a, &b));
     }
 }
