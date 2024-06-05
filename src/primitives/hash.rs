@@ -73,7 +73,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "assertion failed")]
+    #[should_panic(expected = "assertion `left == right` failed")]
     fn hash_test_input_too_small() {
         let hash = init_hash();
         let input: [u8; 8] = hex!("00010203 04050607");
@@ -82,7 +82,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "assertion failed")]
+    #[should_panic(expected = "assertion `left == right` failed")]
     fn hash_test_input_too_large() {
         let hash = init_hash();
         let input: [u8; 24] = hex!("00010203 04050607 ffffffff bbbbbbbb cccccccc abababab");
