@@ -32,6 +32,8 @@ jobs:
 
       - name: setup rust 1.78
         uses: dtolnay/rust-toolchain@1.78.0
+        with:
+          components: clippy, rustfmt
 
       - name: clippy
         run: cargo clippy --all --no-deps --all-features --tests
