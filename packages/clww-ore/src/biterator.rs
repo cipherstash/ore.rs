@@ -83,6 +83,7 @@ where
     iter: I,
 }
 
+#[allow(dead_code)]
 pub fn string_biter(input: &str) -> StringBiterator<impl Iterator<Item = u8> + '_> {
     let iter = input
         .as_bytes()
@@ -93,6 +94,32 @@ pub fn string_biter(input: &str) -> StringBiterator<impl Iterator<Item = u8> + '
 }
 
 impl<I> Iterator for StringBiterator<I>
+where
+    I: Iterator<Item = u8>,
+{
+    type Item = u8;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
+    }
+}
+
+pub struct VecBiterator<I>
+where
+    I: Iterator<Item = u8>,
+{
+    iter: I,
+}
+
+pub fn vec_biter(input: Vec<u8>) -> VecBiterator<impl Iterator<Item = u8>> {
+    let iter = input
+        .into_iter()
+        .flat_map(|byte| Biterator::new(byte));
+
+    VecBiterator { iter }
+}
+
+impl<I> Iterator for VecBiterator<I>
 where
     I: Iterator<Item = u8>,
 {
@@ -325,6 +352,33 @@ mod test {
         assert_eq!(biter.next(), Some(1));
         assert_eq!(biter.next(), Some(1));
         assert_eq!(biter.next(), Some(1));
+        assert_eq!(biter.next(), Some(1));
+
+        assert_eq!(biter.next(), None);
+    }
+
+
+    #[test]
+    fn test_vec_biterator() {
+        let input: Vec<u8> = vec![0b0110_1000, 0b0110_0101];
+        let mut biter = vec_biter(input);
+
+        assert_eq!(biter.next(), Some(0));
+        assert_eq!(biter.next(), Some(1));
+        assert_eq!(biter.next(), Some(1));
+        assert_eq!(biter.next(), Some(0));
+        assert_eq!(biter.next(), Some(1));
+        assert_eq!(biter.next(), Some(0));
+        assert_eq!(biter.next(), Some(0));
+        assert_eq!(biter.next(), Some(0));
+
+        assert_eq!(biter.next(), Some(0));
+        assert_eq!(biter.next(), Some(1));
+        assert_eq!(biter.next(), Some(1));
+        assert_eq!(biter.next(), Some(0));
+        assert_eq!(biter.next(), Some(0));
+        assert_eq!(biter.next(), Some(1));
+        assert_eq!(biter.next(), Some(0));
         assert_eq!(biter.next(), Some(1));
 
         assert_eq!(biter.next(), None);
