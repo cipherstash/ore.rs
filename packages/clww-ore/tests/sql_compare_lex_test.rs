@@ -10,11 +10,11 @@ fn sql_compare_lex(a: &[u8], b: &[u8]) -> i32 {
     let response = setup_db()
         .query(
             "SELECT cllw_compare_lex($1, $2)",
-            &[&a.as_ref(), &b.as_ref()],
+            &[&a, &b],
         )
         .expect("Failed to execute query");
 
-    let row = response.get(0).expect("Expected a result");
+    let row = response.first().expect("Expected a result");
 
     row.get(0)
 }

@@ -1,6 +1,7 @@
 use cllw_ore::Key;
 use postgres::{Client, NoTls};
 use quickcheck::quickcheck;
+use std::cmp::Ordering;
 
 fn setup_db() -> Client {
     Client::connect("dbname=cllwtest host=localhost user=postgres", NoTls)
@@ -9,21 +10,19 @@ fn setup_db() -> Client {
 
 fn sql_compare(a: &[u8], b: &[u8]) -> i32 {
     let response = setup_db()
-        .query("SELECT cllw_compare($1, $2)", &[&a.as_ref(), &b.as_ref()])
+        .query("SELECT cllw_compare($1, $2)", &[&a, &b])
         .expect("Failed to execute query");
 
-    let row = response.get(0).expect("Expected a result");
+    let row = response.first().expect("Expected a result");
 
     row.get(0)
 }
 
 fn expect(a: u64, b: u64) -> i32 {
-    if a < b {
-        return -1;
-    } else if a > b {
-        return 1;
-    } else {
-        return 0;
+    match a.cmp(&b) {
+        Ordering::Less => -1,
+        Ordering::Greater => 1,
+        Ordering::Equal => 0,
     }
 }
 
