@@ -44,6 +44,10 @@ pub struct Output<Elem> {
 }
 
 impl Output<u8> {
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.bytes
+    }
+
     fn new(num_elements: usize) -> Self {
         Self {
             bytes: Vec::with_capacity(num_elements),
