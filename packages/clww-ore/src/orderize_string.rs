@@ -1,33 +1,20 @@
-use std::sync::OnceLock;
 use regex::Regex;
+use std::sync::OnceLock;
+
+use crate::Error;
 
 static NON_ALPHANUMERIC_OR_SPACE_REGEX: OnceLock<Regex> = OnceLock::new();
 static SPACE_REGEX: OnceLock<Regex> = OnceLock::new();
 
-
-pub fn orderise_string(s: &str) -> Result<String, ()> {
+pub fn orderize_string(s: &str) -> Result<String, Error> {
     if !s.is_ascii() {
-        //return Err(OrderiseStringError::NotAscii);
-        return Err(());
+        return Err(Error::NotAscii);
     }
 
-    let non_alphanumeric_or_space_regex = NON_ALPHANUMERIC_OR_SPACE_REGEX.get_or_init(|| {
-        Regex::new("[^a-z0-9[:space:]]+").unwrap()
-    });
+    let non_alphanumeric_or_space_regex =
+        NON_ALPHANUMERIC_OR_SPACE_REGEX.get_or_init(|| Regex::new("[^a-z0-9[:space:]]+").unwrap());
 
-    let space_regex = SPACE_REGEX.get_or_init(|| {
-        Regex::new("[[:space:]]+").unwrap()
-    });
-
-    /*lazy_static! {
-        static ref NON_ALPHANUMERIC_OR_SPACE_REGEX: Regex =
-            Regex::new("[^a-z0-9[:space:]]+").unwrap();
-    }
-
-    lazy_static! {
-        static ref SPACE_REGEX: Regex = Regex::new("[[:space:]]+").unwrap();
-    }*/
-
+    let space_regex = SPACE_REGEX.get_or_init(|| Regex::new("[[:space:]]+").unwrap());
 
     // This all very much relies on ASCII character numbering.  A copy of `ascii`(7)
     // up on a convenient terminal may assist in understanding what's going
@@ -48,5 +35,4 @@ pub fn orderise_string(s: &str) -> Result<String, ()> {
     s = space_regex.replace_all(&s, "{").to_string();
 
     Ok(s)
-
 }

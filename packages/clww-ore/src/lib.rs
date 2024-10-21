@@ -1,17 +1,25 @@
-use biterator::{vec_biter, Biterator};
-use std::{cmp::Ordering, mem};
+use biterator::{string_biter, Biterator};
+use orderize_string::orderize_string;
+use std::cmp::Ordering;
+use thiserror::Error;
 mod biterator;
 mod nibble_iterator;
 mod orderize_string;
 
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("String must be ASCII to encode for ORE")]
+    NotAscii,
+}
+
 pub struct Key([u8; 32]);
 
 impl Key {
-    pub fn encrypt<T>(&self, input: T) -> Output<u8>
+    pub fn encrypt<T>(&self, input: T) -> Result<Output<u8>, Error>
     where
         T: CllwOreEncrypt,
     {
-        input.encrypt(&self)
+        input.encrypt(self)
     }
 }
 
@@ -22,11 +30,11 @@ impl From<[u8; 32]> for Key {
 }
 
 pub trait CllwOreEncrypt: Sized {
-    fn encrypt(self, key: &Key) -> Output<u8> {
+    fn encrypt(self, key: &Key) -> Result<Output<u8>, Error> {
         self.encrypt_with_salt(key, None)
     }
 
-    fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Output<u8>;
+    fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Output<u8>, Error>;
 }
 
 pub struct Output<Elem> {
@@ -66,53 +74,56 @@ impl AsRef<[u8]> for Output<u8> {
 }
 
 impl CllwOreEncrypt for u32 {
-    fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Output<u8> {
+    fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Output<u8>, Error> {
         let mut hasher = blake3::Hasher::new_keyed(&key.0);
         if let Some(salt) = salt {
             hasher.update(salt);
         }
-        Biterator::new(self).fold(Output::new(u32::BITS as usize), |out, bit| {
+        let out = Biterator::new(self).fold(Output::new(u32::BITS as usize), |out, bit| {
             let mut buf: [u8; 16] = [0; 16];
             hasher.finalize_xof().fill(&mut buf);
             let byte = u128::from_be_bytes(buf).wrapping_add(bit as u128) & 0xFF;
             hasher.update(&[bit]);
             out.push_into(byte as u8)
-        })
+        });
+        Ok(out)
     }
 }
 
 impl CllwOreEncrypt for u64 {
-    fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Output<u8> {
+    fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Output<u8>, Error> {
         let mut hasher = blake3::Hasher::new_keyed(&key.0);
         if let Some(salt) = salt {
             hasher.update(salt);
         }
-        Biterator::new(self).fold(Output::new(Self::BITS as usize), |out, bit| {
+        let out = Biterator::new(self).fold(Output::new(Self::BITS as usize), |out, bit| {
             let mut buf: [u8; 16] = [0; 16];
             hasher.finalize_xof().fill(&mut buf);
             let byte = u128::from_be_bytes(buf).wrapping_add(bit as u128) & 0xFF;
             hasher.update(&[bit]);
             out.push_into(byte as u8)
-        })
+        });
+        Ok(out)
     }
 }
 
 impl CllwOreEncrypt for &str {
-    fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Output<u8> {
-        let blocks = orderise_string(self).expect("Failed to orderise string"); // TODO: Handle error
-        let bytes: Vec<u8> = unsafe { mem::transmute(blocks) };
-        let len = bytes.len() * u8::BITS as usize;
+    fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Output<u8>, Error> {
+        let string = orderize_string(self)?;
+        let len = string.len() * u8::BITS as usize;
         let mut hasher = blake3::Hasher::new_keyed(&key.0);
         if let Some(salt) = salt {
             hasher.update(salt);
         }
-        vec_biter(bytes).fold(Output::new(len), |out, bit| {
+        let out = string_biter(&string).fold(Output::new(len), |out, bit| {
             let mut buf: [u8; 16] = [0; 16];
             hasher.finalize_xof().fill(&mut buf);
             let byte = u128::from_be_bytes(buf).wrapping_add(bit as u128) & 0xFF;
             hasher.update(&[bit]);
             out.push_into(byte as u8)
-        })
+        });
+
+        Ok(out)
     }
 }
 
@@ -153,15 +164,11 @@ pub fn compare_lex(a: &Output<u8>, b: &Output<u8>) -> Ordering {
     match compare(a, b) {
         Ordering::Less => Ordering::Less,
         Ordering::Greater => Ordering::Greater,
-        Ordering::Equal => {
-            if a.len() < b.len() {
-                Ordering::Greater
-            } else if a.len() > b.len() {
-                Ordering::Less
-            } else {
-                Ordering::Equal
-            }
-        }
+        Ordering::Equal => match a.len().cmp(&b.len()) {
+            Ordering::Less => Ordering::Greater,
+            Ordering::Greater => Ordering::Less,
+            Ordering::Equal => Ordering::Equal,
+        },
     }
 }
 
@@ -198,65 +205,65 @@ mod tests {
             paste! {
                 quickcheck! {
                     fn [<prop_eq_ $ty>](key: Key, x: $ty) -> bool {
-                        let a = key.encrypt(x);
-                        let b = key.encrypt(x);
+                        let a = key.encrypt(x).unwrap();
+                        let b = key.encrypt(x).unwrap();
 
                         compare(&a, &b) == Ordering::Equal
                     }
 
 
                     fn [<prop_cmp_ $ty>](key: Key, x: $ty, y: $ty) -> bool {
-                        let a = key.encrypt(x);
-                        let b = key.encrypt(y);
+                        let a = key.encrypt(x).unwrap();
+                        let b = key.encrypt(y).unwrap();
 
                         compare(&a, &b) == x.cmp(&y)
                     }
 
                     fn [<prop_low_order_bit_greater_ $ty>](key: Key) -> bool {
-                        let x1 = key.encrypt(1 as $ty);
-                        let x2 = key.encrypt(0 as $ty);
+                        let x1 = key.encrypt(1 as $ty).unwrap();
+                        let x2 = key.encrypt(0 as $ty).unwrap();
                         compare(&x1, &x2) == Ordering::Greater
                     }
 
                     fn [<prop_high_order_bit_greater_ $ty>](key: Key) -> bool {
-                        let x1 = key.encrypt::<$ty>(1 << ($ty::BITS - 1));
-                        let x2 = key.encrypt::<$ty>(0);
+                        let x1 = key.encrypt::<$ty>(1 << ($ty::BITS - 1)).unwrap();
+                        let x2 = key.encrypt::<$ty>(0).unwrap();
                         compare(&x1, &x2) == Ordering::Greater
                     }
 
                     fn [<prop_high_order_bit_less_ $ty>](key: Key) -> bool {
-                        let x1 = key.encrypt::<$ty>(0);
-                        let x2 = key.encrypt::<$ty>(1 << ($ty::BITS - 1));
+                        let x1 = key.encrypt::<$ty>(0).unwrap();
+                        let x2 = key.encrypt::<$ty>(1 << ($ty::BITS - 1)).unwrap();
                         compare(&x1, &x2) == Ordering::Less
                     }
 
                     fn [<prop_high_order_bit_eq_ $ty>](key: Key) -> bool {
-                        let x1 = key.encrypt::<$ty>(1 << ($ty::BITS - 1));
-                        let x2 = key.encrypt::<$ty>(1 << ($ty::BITS - 1));
+                        let x1 = key.encrypt::<$ty>(1 << ($ty::BITS - 1)).unwrap();
+                        let x2 = key.encrypt::<$ty>(1 << ($ty::BITS - 1)).unwrap();
                         compare(&x1, &x2) == Ordering::Equal
                     }
 
                     fn [<prop_low_order_bit_less_ $ty>](key: Key) -> bool {
-                        let x1 = key.encrypt::<$ty>(0);
-                        let x2 = key.encrypt::<$ty>(1);
+                        let x1 = key.encrypt::<$ty>(0).unwrap();
+                        let x2 = key.encrypt::<$ty>(1).unwrap();
                         compare(&x1, &x2) == Ordering::Less
                     }
 
                     fn [<prop_low_order_bit_eq_ $ty>](key: Key) -> bool {
-                        let x1 = key.encrypt::<$ty>(1);
-                        let x2 = key.encrypt::<$ty>(1);
+                        let x1 = key.encrypt::<$ty>(1).unwrap();
+                        let x2 = key.encrypt::<$ty>(1).unwrap();
                         compare(&x1, &x2) == Ordering::Equal
                     }
 
                     fn [<prop_zero_ $ty>](key: Key) -> bool {
-                        let x1 = key.encrypt::<$ty>(0);
-                        let x2 = key.encrypt::<$ty>(0);
+                        let x1 = key.encrypt::<$ty>(0).unwrap();
+                        let x2 = key.encrypt::<$ty>(0).unwrap();
                         compare(&x1, &x2) == Ordering::Equal
                     }
 
                     fn [<prop_max_ $ty>](key: Key) -> bool {
-                        let x1 = key.encrypt($ty::MAX);
-                        let x2 = key.encrypt($ty::MAX);
+                        let x1 = key.encrypt($ty::MAX).unwrap();
+                        let x2 = key.encrypt($ty::MAX).unwrap();
                         compare(&x1, &x2) == Ordering::Equal
                     }
 
@@ -264,8 +271,8 @@ mod tests {
                         if x == $ty::MAX {
                             return TestResult::discard();
                         }
-                        let x1 = key.encrypt(x);
-                        let x2 = key.encrypt($ty::MAX);
+                        let x1 = key.encrypt(x).unwrap();
+                        let x2 = key.encrypt($ty::MAX).unwrap();
                         TestResult::from_bool(compare(&x1, &x2) == Ordering::Less)
                     }
 
@@ -273,8 +280,8 @@ mod tests {
                         if x == $ty::MAX {
                             return TestResult::discard();
                         }
-                        let x1 = key.encrypt($ty::MAX);
-                        let x2 = key.encrypt::<$ty>(0);
+                        let x1 = key.encrypt($ty::MAX).unwrap();
+                        let x2 = key.encrypt::<$ty>(0).unwrap();
                         TestResult::from_bool(compare(&x1, &x2) == Ordering::Greater)
                     }
 
@@ -282,8 +289,8 @@ mod tests {
                         if x == 0 {
                             return TestResult::discard();
                         }
-                        let x1 = key.encrypt::<$ty>(0);
-                        let x2 = key.encrypt(x);
+                        let x1 = key.encrypt::<$ty>(0).unwrap();
+                        let x2 = key.encrypt(x).unwrap();
                         TestResult::from_bool(compare(&x1, &x2) == Ordering::Less)
                     }
 
@@ -291,8 +298,8 @@ mod tests {
                         if x == 0 {
                             return TestResult::discard();
                         }
-                        let x1 = key.encrypt(x);
-                        let x2 = key.encrypt::<$ty>(0);
+                        let x1 = key.encrypt(x).unwrap();
+                        let x2 = key.encrypt::<$ty>(0).unwrap();
                         TestResult::from_bool(compare(&x1, &x2) == Ordering::Greater)
                     }
 
@@ -300,8 +307,8 @@ mod tests {
                         if x <= 1 {
                             return TestResult::discard();
                         }
-                        let x1 = key.encrypt(x - 1);
-                        let x2 = key.encrypt(x);
+                        let x1 = key.encrypt(x - 1).unwrap();
+                        let x2 = key.encrypt(x).unwrap();
                         TestResult::from_bool(compare(&x1, &x2) == Ordering::Less)
                     }
                 }
@@ -313,8 +320,8 @@ mod tests {
     fn test_string() {
         let key = Key::from([0; 32]);
         let input = "hello";
-        let a = key.encrypt(input);
-        let b = key.encrypt(input);
+        let a = key.encrypt(input).unwrap();
+        let b = key.encrypt(input).unwrap();
         assert_eq!(compare(&a, &b), Ordering::Equal);
     }
 

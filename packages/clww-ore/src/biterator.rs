@@ -72,7 +72,7 @@ impl Iterator for Biterator<u8> {
         }
         let bit = (self.input & 1 << self.count) >> self.count;
         self.count = self.count.wrapping_sub(1);
-        Some(bit as u8)
+        Some(bit)
     }
 }
 
@@ -83,7 +83,6 @@ where
     iter: I,
 }
 
-#[allow(dead_code)]
 pub fn string_biter(input: &str) -> StringBiterator<impl Iterator<Item = u8> + '_> {
     let iter = input
         .as_bytes()
@@ -111,10 +110,9 @@ where
     iter: I,
 }
 
+#[allow(dead_code)]
 pub fn vec_biter(input: Vec<u8>) -> VecBiterator<impl Iterator<Item = u8>> {
-    let iter = input
-        .into_iter()
-        .flat_map(|byte| Biterator::new(byte));
+    let iter = input.into_iter().flat_map(Biterator::new);
 
     VecBiterator { iter }
 }
@@ -356,7 +354,6 @@ mod test {
 
         assert_eq!(biter.next(), None);
     }
-
 
     #[test]
     fn test_vec_biterator() {

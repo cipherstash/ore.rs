@@ -7,45 +7,32 @@ fn setup_db() -> Client {
 }
 
 fn sql_compare_lex(a: &[u8], b: &[u8]) -> i32 {
-    let response = setup_db().query("SELECT cllw_compare_lex($1, $2)", &[&a.as_ref(), &b.as_ref()])
+    let response = setup_db()
+        .query(
+            "SELECT cllw_compare_lex($1, $2)",
+            &[&a.as_ref(), &b.as_ref()],
+        )
         .expect("Failed to execute query");
 
-    let row = response.get(0)
-        .expect("Expected a result");
+    let row = response.get(0).expect("Expected a result");
 
     row.get(0)
-}
-
-fn expect(a: u64, b: u64) -> i32 {
-    if a < b {
-        return -1;
-    } else if a > b {
-        return 1;
-    } else {
-        return 0;
-    }
 }
 
 #[test]
 fn test_compare_string_eq() {
     let key = Key::from([0; 32]);
-    let a = key.encrypt("cat");
-    let b = key.encrypt("cat");
+    let a = key.encrypt("cat").unwrap();
+    let b = key.encrypt("cat").unwrap();
 
     assert_eq!(sql_compare_lex(a.as_ref(), b.as_ref()), 0);
 }
 
-
 #[test]
 fn test_compare_string_prefix() {
     let key = Key::from([0; 32]);
-    let a = key.encrypt("cat");
-    let b = key.encrypt("catskills");
-
-    println!("a: {:?}", hex::encode(&a));
-    println!("b: {:?}", hex::encode(&b));
+    let a = key.encrypt("cat").unwrap();
+    let b = key.encrypt("catskills").unwrap();
 
     assert_eq!(sql_compare_lex(a.as_ref(), b.as_ref()), 1);
 }
-
-
