@@ -1,4 +1,3 @@
-
 pub struct Biterator<T> {
     input: T,
     count: u32,
@@ -77,19 +76,26 @@ impl Iterator for Biterator<u8> {
     }
 }
 
-pub struct StringBiterator<I> where I: Iterator<Item = u8> {
+pub struct StringBiterator<I>
+where
+    I: Iterator<Item = u8>,
+{
     iter: I,
 }
 
 pub fn string_biter(input: &str) -> StringBiterator<impl Iterator<Item = u8> + '_> {
-    let iter = input.as_bytes().iter().flat_map(|byte| {
-        Biterator::new(*byte)
-    });
+    let iter = input
+        .as_bytes()
+        .iter()
+        .flat_map(|byte| Biterator::new(*byte));
 
     StringBiterator { iter }
 }
 
-impl<I> Iterator for StringBiterator<I> where I: Iterator<Item = u8> {
+impl<I> Iterator for StringBiterator<I>
+where
+    I: Iterator<Item = u8>,
+{
     type Item = u8;
 
     fn next(&mut self) -> Option<Self::Item> {
