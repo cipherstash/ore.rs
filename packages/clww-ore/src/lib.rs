@@ -37,6 +37,7 @@ pub trait CllwOreEncrypt: Sized {
     fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Output<u8>, Error>;
 }
 
+#[derive(Debug, Clone)]
 pub struct Output<Elem> {
     bytes: Vec<u8>,
     _elem: std::marker::PhantomData<Elem>,

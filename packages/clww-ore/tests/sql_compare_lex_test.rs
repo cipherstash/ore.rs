@@ -8,10 +8,7 @@ fn setup_db() -> Client {
 
 fn sql_compare_lex(a: &[u8], b: &[u8]) -> i32 {
     let response = setup_db()
-        .query(
-            "SELECT cllw_compare_lex($1, $2)",
-            &[&a, &b],
-        )
+        .query("SELECT ore_cllw_8_v1_compare_lex($1, $2)", &[&a, &b])
         .expect("Failed to execute query");
 
     let row = response.first().expect("Expected a result");

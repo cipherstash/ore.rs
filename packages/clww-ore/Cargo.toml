@@ -14,9 +14,13 @@ vitaminc = { version = "0.1.0-pre2", features = ["protected", "random"] }
 
 [dev-dependencies]
 criterion = "0.5.1"
+derive = "1.0.0"
+features = "0.10.0"
 hex.workspace = true
 paste = "1.0.15"
 postgres = "0.19.9"
+postgres-derive = "0.4.6"
+postgres-types = { version = "0.2.8", features = ["derive"] }
 quickcheck = "1.0.3"
 
 [[bench]]
