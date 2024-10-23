@@ -72,6 +72,16 @@ impl Output<u8> {
     }
 }
 
+impl From<Vec<u8>> for Output<u8> {
+    fn from(bytes: Vec<u8>) -> Self {
+        Self {
+            num_elements: bytes.len(),
+            bytes,
+            _elem: std::marker::PhantomData,
+        }
+    }
+}
+
 impl AsRef<[u8]> for Output<u8> {
     fn as_ref(&self) -> &[u8] {
         &self.bytes
