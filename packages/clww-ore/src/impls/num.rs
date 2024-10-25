@@ -1,0 +1,207 @@
+use std::cmp::Ordering;
+use crate::{biterator::Biterator, CllwOreEncrypt, Error, Key};
+use postgres_types::ToSql;
+
+#[derive(Debug, ToSql)]
+#[postgres(name = "ore_cllw_8_v1")]
+pub struct OreCllw8V1<const N: usize> {
+    pub(super) bytes: [u8; N],
+}
+
+impl CllwOreEncrypt for u32 {
+    type Output = OreCllw8V1<32>;
+
+    fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+        let mut hasher = blake3::Hasher::new_keyed(&key.0);
+        if let Some(salt) = salt {
+            hasher.update(salt);
+        }
+
+        let mut bytes: [u8; 32] = [0; 32];
+        // TODO: Split this bit into a separate function
+        Biterator::new(self)
+            .enumerate()
+            .for_each(|(i, bit)| {
+                let mut buf: [u8; 16] = [0; 16];
+                hasher.finalize_xof().fill(&mut buf);
+                let byte = u128::from_be_bytes(buf).wrapping_add(bit as u128) & 0xFF;
+                hasher.update(&[bit]);
+                bytes[i] = byte as u8;
+            });
+        
+        Ok(OreCllw8V1 { bytes })
+    }
+}
+
+impl CllwOreEncrypt for u64 {
+    type Output = OreCllw8V1<64>;
+
+    fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+        let mut hasher = blake3::Hasher::new_keyed(&key.0);
+        if let Some(salt) = salt {
+            hasher.update(salt);
+        }
+
+        let mut bytes: [u8; 64] = [0; 64];
+        Biterator::new(self)
+            .enumerate()
+            .for_each(|(i, bit)| {
+                let mut buf: [u8; 16] = [0; 16];
+                hasher.finalize_xof().fill(&mut buf);
+                let byte = u128::from_be_bytes(buf).wrapping_add(bit as u128) & 0xFF;
+                hasher.update(&[bit]);
+                bytes[i] = byte as u8;
+            });
+        
+        Ok(OreCllw8V1 { bytes })
+    }
+}
+
+impl<const N: usize> Ord for OreCllw8V1<N> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        super::compare_slice(self.bytes.as_slice(), other.bytes.as_slice())
+    }
+}
+
+impl<const N: usize> PartialOrd for OreCllw8V1<N> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<const N: usize> PartialEq for OreCllw8V1<N> {
+    fn eq(&self, other: &Self) -> bool {
+        // TODO: Use constant time (Paranoid? or at least subtle)
+        self.bytes == other.bytes
+    }
+}
+
+impl<const N: usize> Eq for OreCllw8V1<N> { }
+
+
+#[cfg(test)]
+mod tests {
+    use paste::paste;
+    use quickcheck::{quickcheck, TestResult};
+    use crate::Key;
+    use super::*;
+
+    macro_rules! quickcheck_type {
+        ($ty:ident) => {
+            paste! {
+                quickcheck! {
+                    fn [<prop_eq_ $ty>](key: Key, x: $ty) -> bool {
+                        let a = key.encrypt(x).unwrap();
+                        let b = key.encrypt(x).unwrap();
+
+                        a == b
+                    }
+
+
+                    fn [<prop_cmp_ $ty>](key: Key, x: $ty, y: $ty) -> bool {
+                        let a = key.encrypt(x).unwrap();
+                        let b = key.encrypt(y).unwrap();
+
+                        a.cmp(&b) == x.cmp(&y)
+                    }
+
+                    fn [<prop_low_order_bit_greater_ $ty>](key: Key) -> bool {
+                        let x1 = key.encrypt(1 as $ty).unwrap();
+                        let x2 = key.encrypt(0 as $ty).unwrap();
+                        x1.cmp(&x2) == Ordering::Greater
+                    }
+
+                    fn [<prop_high_order_bit_greater_ $ty>](key: Key) -> bool {
+                        let x1 = key.encrypt::<$ty>(1 << ($ty::BITS - 1)).unwrap();
+                        let x2 = key.encrypt::<$ty>(0).unwrap();
+                        x1.cmp(&x2) == Ordering::Greater
+                    }
+
+                    fn [<prop_high_order_bit_less_ $ty>](key: Key) -> bool {
+                        let x1 = key.encrypt::<$ty>(0).unwrap();
+                        let x2 = key.encrypt::<$ty>(1 << ($ty::BITS - 1)).unwrap();
+                        x1.cmp(&x2) == Ordering::Less
+                    }
+
+                    fn [<prop_high_order_bit_eq_ $ty>](key: Key) -> bool {
+                        let x1 = key.encrypt::<$ty>(1 << ($ty::BITS - 1)).unwrap();
+                        let x2 = key.encrypt::<$ty>(1 << ($ty::BITS - 1)).unwrap();
+                        x1.cmp(&x2) == Ordering::Equal
+                    }
+
+                    fn [<prop_low_order_bit_less_ $ty>](key: Key) -> bool {
+                        let x1 = key.encrypt::<$ty>(0).unwrap();
+                        let x2 = key.encrypt::<$ty>(1).unwrap();
+                        x1.cmp(&x2) == Ordering::Less
+                    }
+
+                    fn [<prop_low_order_bit_eq_ $ty>](key: Key) -> bool {
+                        let x1 = key.encrypt::<$ty>(1).unwrap();
+                        let x2 = key.encrypt::<$ty>(1).unwrap();
+                        x1.cmp(&x2) == Ordering::Equal
+                    }
+
+                    fn [<prop_zero_ $ty>](key: Key) -> bool {
+                        let x1 = key.encrypt::<$ty>(0).unwrap();
+                        let x2 = key.encrypt::<$ty>(0).unwrap();
+                        x1.cmp(&x2) == Ordering::Equal
+                    }
+
+                    fn [<prop_max_ $ty>](key: Key) -> bool {
+                        let x1 = key.encrypt($ty::MAX).unwrap();
+                        let x2 = key.encrypt($ty::MAX).unwrap();
+                        x1.cmp(&x2) == Ordering::Equal
+                    }
+
+                    fn [<prop_less_than_max_right_ $ty>](key: Key, x: $ty) -> TestResult {
+                        if x == $ty::MAX {
+                            return TestResult::discard();
+                        }
+                        let x1 = key.encrypt(x).unwrap();
+                        let x2 = key.encrypt($ty::MAX).unwrap();
+                        TestResult::from_bool(x1.cmp(&x2) == Ordering::Less)
+                    }
+
+                    fn [<prop_more_than_max_left_ $ty>](key: Key, x: $ty) -> TestResult {
+                        if x == $ty::MAX {
+                            return TestResult::discard();
+                        }
+                        let x1 = key.encrypt($ty::MAX).unwrap();
+                        let x2 = key.encrypt::<$ty>(0).unwrap();
+                        TestResult::from_bool(x1.cmp(&x2) == Ordering::Greater)
+                    }
+
+                    fn [<prop_more_than_zero_left_ $ty>](key: Key, x: $ty) -> TestResult {
+                        if x == 0 {
+                            return TestResult::discard();
+                        }
+                        let x1 = key.encrypt::<$ty>(0).unwrap();
+                        let x2 = key.encrypt(x).unwrap();
+                        TestResult::from_bool(x1.cmp(&x2) == Ordering::Less)
+                    }
+
+                    fn [<prop_more_than_zero_right_ $ty>](key: Key, x: $ty) -> TestResult {
+                        if x == 0 {
+                            return TestResult::discard();
+                        }
+                        let x1 = key.encrypt(x).unwrap();
+                        let x2 = key.encrypt::<$ty>(0).unwrap();
+                        TestResult::from_bool(x1.cmp(&x2) == Ordering::Greater)
+                    }
+
+                    fn [<prop_one_less_than_ $ty>](key: Key, x: $ty) -> TestResult {
+                        if x <= 1 {
+                            return TestResult::discard();
+                        }
+                        let x1 = key.encrypt(x - 1).unwrap();
+                        let x2 = key.encrypt(x).unwrap();
+                        TestResult::from_bool(x1.cmp(&x2) == Ordering::Less)
+                    }
+                }
+            }
+        };
+    }
+
+    quickcheck_type!(u32);
+    quickcheck_type!(u64);
+}

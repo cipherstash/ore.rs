@@ -40,51 +40,6 @@ pub trait CllwOreEncrypt: Sized {
     fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error>;
 }
 
-#[derive(Debug, Clone)]
-pub struct Output<Elem> {
-    bytes: Vec<u8>,
-    _elem: std::marker::PhantomData<Elem>,
-    num_elements: usize,
-}
-
-impl Output<u8> {
-    pub fn into_bytes(self) -> Vec<u8> {
-        self.bytes
-    }
-
-    fn new(num_elements: usize) -> Self {
-        Self {
-            bytes: Vec::with_capacity(num_elements),
-            _elem: std::marker::PhantomData,
-            num_elements,
-        }
-    }
-
-    fn push_into(mut self, elem: u8) -> Self {
-        self.bytes.push(elem);
-        self
-    }
-
-    /// Returns the number of elements (which is not necessarily the number of bytes)
-    fn len(&self) -> usize {
-        self.num_elements
-    }
-
-    fn is_empty(&self) -> bool {
-        self.bytes.is_empty()
-    }
-}
-
-impl From<Vec<u8>> for Output<u8> {
-    fn from(bytes: Vec<u8>) -> Self {
-        Self {
-            num_elements: bytes.len(),
-            bytes,
-            _elem: std::marker::PhantomData,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

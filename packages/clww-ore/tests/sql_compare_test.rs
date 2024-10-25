@@ -1,37 +1,8 @@
+mod common;
+use common::*; 
 use cllw_ore::{Key, OreCllw8V1};
-use postgres::{Client, NoTls};
 use quickcheck::quickcheck;
-use std::{
-    cmp::Ordering,
-    fmt::{self, Display, Formatter},
-};
-
-fn setup_db() -> Client {
-    Client::connect("dbname=cllwtest host=localhost user=postgres", NoTls)
-        .expect("Failed to connect to database")
-}
-
-enum SqlOp {
-    Eq,
-    Lt,
-    Lte,
-    Gt,
-    Gte,
-    Ne,
-}
-
-impl Display for SqlOp {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        match self {
-            SqlOp::Eq => write!(f, "="),
-            SqlOp::Lt => write!(f, "<"),
-            SqlOp::Lte => write!(f, "<="),
-            SqlOp::Gt => write!(f, ">"),
-            SqlOp::Gte => write!(f, ">="),
-            SqlOp::Ne => write!(f, "<>"),
-        }
-    }
-}
+use std::cmp::Ordering;
 
 /// Compare two values using a SQL function.
 fn sql_compare<const N: usize>(a: &OreCllw8V1<N>, b: &OreCllw8V1<N>) -> i32 {
