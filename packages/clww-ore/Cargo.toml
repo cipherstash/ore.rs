@@ -7,6 +7,8 @@ edition = "2021"
 bit-vec = "0.8.0"
 bitvec = "1.0.1"
 blake3 = "1.5.4"
+postgres-derive = "0.4.6"
+postgres-types = { version = "0.2.8", features = ["derive", "array-impls"] }
 regex = "1.11.0"
 subtle = "2.6.1"
 thiserror.workspace = true
@@ -19,8 +21,6 @@ features = "0.10.0"
 hex.workspace = true
 paste = "1.0.15"
 postgres = "0.19.9"
-postgres-derive = "0.4.6"
-postgres-types = { version = "0.2.8", features = ["derive"] }
 quickcheck = "1.0.3"
 
 [[bench]]

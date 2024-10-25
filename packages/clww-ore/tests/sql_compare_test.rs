@@ -1,25 +1,10 @@
-use cllw_ore::{Key, Output};
+use cllw_ore::{Key, OreCllw8V1};
 use postgres::{Client, NoTls};
-use postgres_types::{FromSql, ToSql};
 use quickcheck::quickcheck;
 use std::{
     cmp::Ordering,
     fmt::{self, Display, Formatter},
 };
-
-#[derive(Debug, ToSql, FromSql)]
-#[postgres(name = "ore_cllw_8_v1")]
-struct OreCllw8V1 {
-    bytes: Vec<u8>,
-}
-
-impl From<&Output<u8>> for OreCllw8V1 {
-    fn from(output: &Output<u8>) -> Self {
-        OreCllw8V1 {
-            bytes: output.clone().into_bytes(),
-        }
-    }
-}
 
 fn setup_db() -> Client {
     Client::connect("dbname=cllwtest host=localhost user=postgres", NoTls)
@@ -49,10 +34,7 @@ impl Display for SqlOp {
 }
 
 /// Compare two values using a SQL function.
-fn sql_compare(a: &Output<u8>, b: &Output<u8>) -> i32 {
-    let a = OreCllw8V1::from(a);
-    let b = OreCllw8V1::from(b);
-
+fn sql_compare<const N: usize>(a: &OreCllw8V1<N>, b: &OreCllw8V1<N>) -> i32 {
     let response = setup_db()
         .query("SELECT compare_ore_cllw_8_v1($1, $2)", &[&a, &b])
         .expect("Failed to execute query");
@@ -63,11 +45,8 @@ fn sql_compare(a: &Output<u8>, b: &Output<u8>) -> i32 {
 }
 
 /// Compare two values using a SQL operator.
-fn sql_compare_op(a: &Output<u8>, b: &Output<u8>, op: SqlOp) -> bool {
-    let a = OreCllw8V1::from(a);
-    let b = OreCllw8V1::from(b);
-
-    let query = format!("SELECT $1 {op} $2");
+fn sql_compare_op<const N: usize>(a: &OreCllw8V1<N>, b: &OreCllw8V1<N>, op: SqlOp) -> bool {
+    let query = format!("SELECT $1::ore_cllw_8_v1 {op} $2::ore_cllw_8_v1");
 
     let response = setup_db()
         .query(&query, &[&a, &b])

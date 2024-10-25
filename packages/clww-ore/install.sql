@@ -6,6 +6,28 @@ CREATE TYPE ore_cllw_8_v1 AS (
   bytes bytea
 );
 
+-- Constant time comparison of 2 bytea values
+CREATE OR REPLACE FUNCTION __bytea_ct_eq(a bytea, b bytea) RETURNS boolean AS $$
+DECLARE
+    result boolean;
+    differing bytea;
+BEGIN
+    -- Check if the bytea values are the same length
+    IF LENGTH(a) != LENGTH(b) THEN
+        RETURN false;
+    END IF;
+
+    -- Compare each byte in the bytea values
+    result := true;
+    FOR i IN 1..LENGTH(a) LOOP
+        IF SUBSTRING(a FROM i FOR 1) != SUBSTRING(b FROM i FOR 1) THEN
+            result := result AND false;
+        END IF;
+    END LOOP;
+
+    RETURN result;
+END;
+$$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION __compare_inner_ore_cllw_8_v1(a ore_cllw_8_v1, b ore_cllw_8_v1) 
 RETURNS int AS $$
@@ -60,7 +82,7 @@ BEGIN
     len_b := LENGTH(b.bytes);
     
     IF len_a != len_b THEN
-        RAISE EXCEPTION 'Bytea arguments must have the same length';
+        RAISE EXCEPTION 'ORE comparison requires bytea values of the same length, consider using the ORE lexical comparison functions (e.g. >~)';
     END IF;
 
     RETURN __compare_inner_ore_cllw_8_v1(a, b);
@@ -109,11 +131,11 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION ore_cllw_8_v1_eq(a ore_cllw_8_v1, b ore_cllw_8_v1) RETURNS boolean AS $$
-  SELECT compare_ore_cllw_8_v1(a, b) = 0
+  SELECT __bytea_ct_eq(a.bytes, b.bytes)
 $$ LANGUAGE SQL;
 
 CREATE OR REPLACE FUNCTION ore_cllw_8_v1_neq(a ore_cllw_8_v1, b ore_cllw_8_v1) RETURNS boolean AS $$
-  SELECT compare_ore_cllw_8_v1(a, b) <> 0
+  SELECT not __bytea_ct_eq(a.bytes, b.bytes) 
 $$ LANGUAGE SQL;
 
 CREATE OR REPLACE FUNCTION ore_cllw_8_v1_lt(a ore_cllw_8_v1, b ore_cllw_8_v1) RETURNS boolean AS $$
@@ -198,6 +220,68 @@ CREATE OPERATOR <= (
   MERGES
 );
 
+-- Lexical comparison operators
+
+CREATE OR REPLACE FUNCTION ore_cllw_8_v1_lt_lex(a ore_cllw_8_v1, b ore_cllw_8_v1) RETURNS boolean AS $$
+  SELECT compare_lex_ore_cllw_8_v1(a, b) = -1
+$$ LANGUAGE SQL;
+
+CREATE OR REPLACE FUNCTION ore_cllw_8_v1_lte_lex(a ore_cllw_8_v1, b ore_cllw_8_v1) RETURNS boolean AS $$
+  SELECT compare_lex_ore_cllw_8_v1(a, b) != 1
+$$ LANGUAGE SQL;
+
+CREATE OR REPLACE FUNCTION ore_cllw_8_v1_gt_lex(a ore_cllw_8_v1, b ore_cllw_8_v1) RETURNS boolean AS $$
+  SELECT compare_lex_ore_cllw_8_v1(a, b) = 1
+$$ LANGUAGE SQL;
+
+CREATE OR REPLACE FUNCTION ore_cllw_8_v1_gte_lex(a ore_cllw_8_v1, b ore_cllw_8_v1) RETURNS boolean AS $$
+  SELECT compare_lex_ore_cllw_8_v1(a, b) != -1
+$$ LANGUAGE SQL;
+
+CREATE OPERATOR >~ (
+  PROCEDURE="ore_cllw_8_v1_gt_lex",
+  LEFTARG=ore_cllw_8_v1,
+  RIGHTARG=ore_cllw_8_v1,
+  NEGATOR = <=~,
+  RESTRICT = scalarltsel,
+  JOIN = scalarltjoinsel,
+  HASHES,
+  MERGES
+);
+
+CREATE OPERATOR <~ (
+  PROCEDURE="ore_cllw_8_v1_lt_lex",
+  LEFTARG=ore_cllw_8_v1,
+  RIGHTARG=ore_cllw_8_v1,
+  NEGATOR = >=~,
+  RESTRICT = scalargtsel,
+  JOIN = scalargtjoinsel,
+  HASHES,
+  MERGES
+);
+
+CREATE OPERATOR >=~ (
+  PROCEDURE="ore_cllw_8_v1_gte_lex",
+  LEFTARG=ore_cllw_8_v1,
+  RIGHTARG=ore_cllw_8_v1,
+  NEGATOR = <~,
+  RESTRICT = scalarltsel,
+  JOIN = scalarltjoinsel,
+  HASHES,
+  MERGES
+);
+
+CREATE OPERATOR <=~ (
+  PROCEDURE="ore_cllw_8_v1_lte_lex",
+  LEFTARG=ore_cllw_8_v1,
+  RIGHTARG=ore_cllw_8_v1,
+  NEGATOR = >~,
+  RESTRICT = scalargtsel,
+  JOIN = scalargtjoinsel,
+  HASHES,
+  MERGES
+);
+
 CREATE OPERATOR FAMILY ore_cllw_8_v1_btree_ops USING btree;
 CREATE OPERATOR CLASS ore_cllw_8_v1_btree_ops DEFAULT FOR TYPE ore_cllw_8_v1 USING btree FAMILY ore_cllw_8_v1_btree_ops  AS
         OPERATOR 1 <,
@@ -206,3 +290,14 @@ CREATE OPERATOR CLASS ore_cllw_8_v1_btree_ops DEFAULT FOR TYPE ore_cllw_8_v1 USI
         OPERATOR 4 >=,
         OPERATOR 5 >,
         FUNCTION 1 compare_ore_cllw_8_v1(a ore_cllw_8_v1, b ore_cllw_8_v1);
+
+-- Lexical comparison operator class
+CREATE OPERATOR FAMILY ore_cllw_8_v1_lex_btree_ops USING btree;
+CREATE OPERATOR CLASS ore_cllw_8_v1_lex_btree_ops FOR TYPE ore_cllw_8_v1 USING btree FAMILY ore_cllw_8_v1_lex_btree_ops  AS
+        OPERATOR 1 <~,
+        OPERATOR 2 <=~,
+        -- Equality is the same as non-lexical comparison
+        OPERATOR 3 =,
+        OPERATOR 4 >=~,
+        OPERATOR 5 >~,
+        FUNCTION 1 compare_lex_ore_cllw_8_v1(a ore_cllw_8_v1, b ore_cllw_8_v1);
