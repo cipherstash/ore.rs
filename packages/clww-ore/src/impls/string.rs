@@ -8,6 +8,12 @@ pub struct OreCllw8VariableV1 {
     bytes: Vec<u8>,
 }
 
+impl AsRef<[u8]> for OreCllw8VariableV1 {
+    fn as_ref(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
 impl CllwOreEncrypt for &str {
     type Output = OreCllw8VariableV1;
 

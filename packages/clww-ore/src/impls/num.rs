@@ -8,6 +8,12 @@ pub struct OreCllw8V1<const N: usize> {
     pub(super) bytes: [u8; N],
 }
 
+impl<const N: usize> AsRef<[u8]> for OreCllw8V1<N> {
+    fn as_ref(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
 impl CllwOreEncrypt for u32 {
     type Output = OreCllw8V1<32>;
 
