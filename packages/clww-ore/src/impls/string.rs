@@ -1,6 +1,8 @@
-use std::cmp::Ordering;
+use crate::{
+    biterator::string_biter, orderize_string::orderize_string, CllwOreEncrypt, Error, Key,
+};
 use postgres_types::ToSql;
-use crate::{biterator::string_biter, orderize_string::orderize_string, CllwOreEncrypt, Error, Key};
+use std::cmp::Ordering;
 
 #[derive(Debug, ToSql)]
 #[postgres(name = "ore_cllw_8_variable_v1")]
@@ -11,6 +13,12 @@ pub struct OreCllw8VariableV1 {
 impl AsRef<[u8]> for OreCllw8VariableV1 {
     fn as_ref(&self) -> &[u8] {
         &self.bytes
+    }
+}
+
+impl From<Vec<u8>> for OreCllw8VariableV1 {
+    fn from(bytes: Vec<u8>) -> Self {
+        Self { bytes }
     }
 }
 
@@ -86,7 +94,7 @@ fn compare_lex(a: &OreCllw8VariableV1, b: &OreCllw8VariableV1) -> Ordering {
 #[cfg(test)]
 mod tests {
     use crate::Key;
-     
+
     #[test]
     fn test_string() {
         let key = Key::from([0; 32]);
@@ -121,5 +129,4 @@ mod tests {
             TestResult::from_bool(compare_lex(&a, &b) == Ordering::Greater)
         }
     }*/
-
 }

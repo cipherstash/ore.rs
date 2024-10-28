@@ -1,5 +1,5 @@
-use std::fmt::{self, Display, Formatter};
 use postgres::{Client, NoTls};
+use std::fmt::{self, Display, Formatter};
 
 pub fn setup_db() -> Client {
     Client::connect("dbname=cllwtest host=localhost user=postgres", NoTls)

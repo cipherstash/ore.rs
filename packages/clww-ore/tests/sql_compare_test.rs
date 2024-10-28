@@ -1,6 +1,6 @@
 mod common;
-use common::*; 
 use cllw_ore::{Key, OreCllw8V1};
+use common::*;
 use quickcheck::quickcheck;
 use std::cmp::Ordering;
 

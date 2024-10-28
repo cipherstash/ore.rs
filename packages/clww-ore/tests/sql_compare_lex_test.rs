@@ -1,6 +1,6 @@
 mod common;
-use common::*; 
 use cllw_ore::{Key, OreCllw8VariableV1};
+use common::*;
 use quickcheck::{quickcheck, TestResult};
 
 fn sql_compare_lex(a: &OreCllw8VariableV1, b: &OreCllw8VariableV1) -> i32 {
@@ -56,7 +56,7 @@ fn test_compare_string_prefix_gt() {
     assert!(sql_compare_lex_op(&a, &b, SqlOp::Gt));
     assert!(sql_compare_lex_op(&a, &b, SqlOp::Gte));
     assert!(sql_compare_lex_op(&a, &b, SqlOp::Ne));
-    
+
     // Refutes
     assert!(!sql_compare_lex_op(&a, &b, SqlOp::Lte));
     assert!(!sql_compare_lex_op(&a, &b, SqlOp::Lt));

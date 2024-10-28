@@ -1,12 +1,12 @@
 use std::cmp::Ordering;
 
-pub mod string;
 pub mod num;
+pub mod string;
 
 /// Compare 2 CLLW ORE encrypted slices of the same length
 fn compare_slice(a: &[u8], b: &[u8]) -> Ordering {
     assert_eq!(a.len(), b.len());
-    
+
     let mut differing: Option<(u8, u8)> = None;
     for (x, y) in a.iter().zip(b.iter()) {
         // TODO: More work required to make this constant time

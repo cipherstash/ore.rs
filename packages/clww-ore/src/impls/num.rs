@@ -1,6 +1,6 @@
-use std::cmp::Ordering;
 use crate::{biterator::Biterator, CllwOreEncrypt, Error, Key};
 use postgres_types::ToSql;
+use std::cmp::Ordering;
 
 #[derive(Debug, ToSql)]
 #[postgres(name = "ore_cllw_8_v1")]
@@ -11,6 +11,23 @@ pub struct OreCllw8V1<const N: usize> {
 impl<const N: usize> AsRef<[u8]> for OreCllw8V1<N> {
     fn as_ref(&self) -> &[u8] {
         &self.bytes
+    }
+}
+
+impl<const N: usize> TryFrom<&[u8]> for OreCllw8V1<N> {
+    type Error = Error;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        if value.len() != N {
+            return Err(Error::InvalidLength {
+                expected: N,
+                actual: value.len(),
+            });
+        }
+
+        let mut bytes: [u8; N] = [0; N];
+        bytes.copy_from_slice(value);
+        Ok(OreCllw8V1 { bytes })
     }
 }
 
@@ -25,16 +42,14 @@ impl CllwOreEncrypt for u32 {
 
         let mut bytes: [u8; 32] = [0; 32];
         // TODO: Split this bit into a separate function
-        Biterator::new(self)
-            .enumerate()
-            .for_each(|(i, bit)| {
-                let mut buf: [u8; 16] = [0; 16];
-                hasher.finalize_xof().fill(&mut buf);
-                let byte = u128::from_be_bytes(buf).wrapping_add(bit as u128) & 0xFF;
-                hasher.update(&[bit]);
-                bytes[i] = byte as u8;
-            });
-        
+        Biterator::new(self).enumerate().for_each(|(i, bit)| {
+            let mut buf: [u8; 16] = [0; 16];
+            hasher.finalize_xof().fill(&mut buf);
+            let byte = u128::from_be_bytes(buf).wrapping_add(bit as u128) & 0xFF;
+            hasher.update(&[bit]);
+            bytes[i] = byte as u8;
+        });
+
         Ok(OreCllw8V1 { bytes })
     }
 }
@@ -49,16 +64,14 @@ impl CllwOreEncrypt for u64 {
         }
 
         let mut bytes: [u8; 64] = [0; 64];
-        Biterator::new(self)
-            .enumerate()
-            .for_each(|(i, bit)| {
-                let mut buf: [u8; 16] = [0; 16];
-                hasher.finalize_xof().fill(&mut buf);
-                let byte = u128::from_be_bytes(buf).wrapping_add(bit as u128) & 0xFF;
-                hasher.update(&[bit]);
-                bytes[i] = byte as u8;
-            });
-        
+        Biterator::new(self).enumerate().for_each(|(i, bit)| {
+            let mut buf: [u8; 16] = [0; 16];
+            hasher.finalize_xof().fill(&mut buf);
+            let byte = u128::from_be_bytes(buf).wrapping_add(bit as u128) & 0xFF;
+            hasher.update(&[bit]);
+            bytes[i] = byte as u8;
+        });
+
         Ok(OreCllw8V1 { bytes })
     }
 }
@@ -82,15 +95,14 @@ impl<const N: usize> PartialEq for OreCllw8V1<N> {
     }
 }
 
-impl<const N: usize> Eq for OreCllw8V1<N> { }
-
+impl<const N: usize> Eq for OreCllw8V1<N> {}
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::Key;
     use paste::paste;
     use quickcheck::{quickcheck, TestResult};
-    use crate::Key;
-    use super::*;
 
     macro_rules! quickcheck_type {
         ($ty:ident) => {
