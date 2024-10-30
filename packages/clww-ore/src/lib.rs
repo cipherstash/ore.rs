@@ -2,16 +2,12 @@ use thiserror::Error;
 mod biterator;
 mod impls;
 mod nibble_iterator;
-mod orderize_string;
 
 pub use impls::num::OreCllw8V1;
 pub use impls::string::OreCllw8VariableV1;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("String must be ASCII to encode for ORE")]
-    NotAscii,
-
     #[error("Invalid length: expected {expected}, got {actual}")]
     InvalidLength { expected: usize, actual: usize },
 }

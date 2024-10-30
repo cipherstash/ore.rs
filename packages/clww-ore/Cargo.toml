@@ -12,6 +12,7 @@ postgres-types = { version = "0.2.8", features = ["derive", "array-impls"] }
 regex = "1.11.0"
 subtle = "2.6.1"
 thiserror.workspace = true
+unicode-normalization = "0.1.24"
 vitaminc = { version = "0.1.0-pre2", features = ["protected", "random"] }
 
 [dev-dependencies]
