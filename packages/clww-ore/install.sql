@@ -1,4 +1,6 @@
-
+---
+--- ORE CLLW types, functions, and operators
+---
 
 -- Represents a ciphertext encrypted with the CLLW ORE scheme for a fixed output size
 -- Each output block is 8-bits
@@ -12,8 +14,10 @@ CREATE TYPE ore_cllw_8_variable_v1 AS (
   bytes bytea
 );
 
+DROP FUNCTION IF EXISTS __bytea_ct_eq(a bytea, b bytea);
+
 -- Constant time comparison of 2 bytea values
-CREATE OR REPLACE FUNCTION __bytea_ct_eq(a bytea, b bytea) RETURNS boolean AS $$
+CREATE FUNCTION __bytea_ct_eq(a bytea, b bytea) RETURNS boolean AS $$
 DECLARE
     result boolean;
     differing bytea;
@@ -35,8 +39,9 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Compare 2 byte slices using CLLW ORE logic
-CREATE OR REPLACE FUNCTION __compare_inner_ore_cllw_8_v1(a bytea, b bytea)
+DROP FUNCTION IF EXISTS __compare_inner_ore_cllw_8_v1(a bytea, b bytea);
+
+CREATE FUNCTION __compare_inner_ore_cllw_8_v1(a bytea, b bytea)
 RETURNS int AS $$
 DECLARE
     len_a INT;
@@ -46,14 +51,13 @@ DECLARE
     differing RECORD;
 BEGIN
     len_a := LENGTH(a);
-    
+
     -- Iterate over each byte and compare them
     FOR i IN 1..len_a LOOP
         x := SUBSTRING(a FROM i FOR 1);
         y := SUBSTRING(b FROM i FOR 1);
-        
+
         -- Check if there's a difference
-        -- TODO: Don't exit right away (constant time)
         IF x != y THEN
             differing := (x, y);
             EXIT;
@@ -74,7 +78,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 
-CREATE OR REPLACE FUNCTION compare_ore_cllw_8_v1(a ore_cllw_8_v1, b ore_cllw_8_v1) 
+DROP FUNCTION IF EXISTS compare_ore_cllw_8_v1(a ore_cllw_8_v1, b ore_cllw_8_v1);
+
+CREATE FUNCTION compare_ore_cllw_8_v1(a ore_cllw_8_v1, b ore_cllw_8_v1)
 RETURNS int AS $$
 DECLARE
     len_a INT;
@@ -87,23 +93,26 @@ BEGIN
     -- Check if the lengths of the two bytea arguments are the same
     len_a := LENGTH(a.bytes);
     len_b := LENGTH(b.bytes);
-    
+
     IF len_a != len_b THEN
-        RAISE EXCEPTION 'Numeric ORE comparison requires bytea values of the same length';
+      RAISE EXCEPTION 'Numeric ORE comparison requires bytea values of the same length';
     END IF;
 
     RETURN __compare_inner_ore_cllw_8_v1(a.bytes, b.bytes);
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION compare_lex_ore_cllw_8_v1(a ore_cllw_8_variable_v1, b ore_cllw_8_variable_v1)
+
+DROP FUNCTION IF EXISTS compare_lex_ore_cllw_8_v1(a ore_cllw_8_variable_v1, b ore_cllw_8_variable_v1);
+
+CREATE FUNCTION compare_lex_ore_cllw_8_v1(a ore_cllw_8_variable_v1, b ore_cllw_8_variable_v1)
 RETURNS int AS $$
 DECLARE
     len_a INT;
     len_b INT;
     -- length of the common part of the two bytea values
     common_len INT;
-    cmp_result int;
+    cmp_result INT;
 BEGIN
     -- Get the lengths of both bytea inputs
     len_a := LENGTH(a.bytes);
@@ -149,29 +158,56 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION ore_cllw_8_v1_eq(a ore_cllw_8_v1, b ore_cllw_8_v1) RETURNS boolean AS $$
+
+DROP FUNCTION IF EXISTS ore_cllw_8_v1_eq(a ore_cllw_8_v1, b ore_cllw_8_v1);
+
+CREATE FUNCTION ore_cllw_8_v1_eq(a ore_cllw_8_v1, b ore_cllw_8_v1)
+RETURNS boolean AS $$
   SELECT __bytea_ct_eq(a.bytes, b.bytes)
 $$ LANGUAGE SQL;
 
-CREATE OR REPLACE FUNCTION ore_cllw_8_v1_neq(a ore_cllw_8_v1, b ore_cllw_8_v1) RETURNS boolean AS $$
-  SELECT not __bytea_ct_eq(a.bytes, b.bytes) 
+
+DROP FUNCTION IF EXISTS ore_cllw_8_v1_neq(a ore_cllw_8_v1, b ore_cllw_8_v1);
+
+CREATE FUNCTION ore_cllw_8_v1_neq(a ore_cllw_8_v1, b ore_cllw_8_v1)
+RETURNS boolean AS $$
+  SELECT not __bytea_ct_eq(a.bytes, b.bytes)
 $$ LANGUAGE SQL;
 
-CREATE OR REPLACE FUNCTION ore_cllw_8_v1_lt(a ore_cllw_8_v1, b ore_cllw_8_v1) RETURNS boolean AS $$
+
+DROP FUNCTION IF EXISTS ore_cllw_8_v1_lt(a ore_cllw_8_v1, b ore_cllw_8_v1);
+
+CREATE FUNCTION ore_cllw_8_v1_lt(a ore_cllw_8_v1, b ore_cllw_8_v1)
+RETURNS boolean AS $$
   SELECT compare_ore_cllw_8_v1(a, b) = -1
 $$ LANGUAGE SQL;
 
-CREATE OR REPLACE FUNCTION ore_cllw_8_v1_lte(a ore_cllw_8_v1, b ore_cllw_8_v1) RETURNS boolean AS $$
+
+DROP FUNCTION IF EXISTS ore_cllw_8_v1_lte(a ore_cllw_8_v1, b ore_cllw_8_v1);
+
+CREATE FUNCTION ore_cllw_8_v1_lte(a ore_cllw_8_v1, b ore_cllw_8_v1)
+RETURNS boolean AS $$
   SELECT compare_ore_cllw_8_v1(a, b) != 1
 $$ LANGUAGE SQL;
 
-CREATE OR REPLACE FUNCTION ore_cllw_8_v1_gt(a ore_cllw_8_v1, b ore_cllw_8_v1) RETURNS boolean AS $$
+
+DROP FUNCTION IF EXISTS ore_cllw_8_v1_gt(a ore_cllw_8_v1, b ore_cllw_8_v1);
+
+CREATE FUNCTION ore_cllw_8_v1_gt(a ore_cllw_8_v1, b ore_cllw_8_v1)
+RETURNS boolean AS $$
   SELECT compare_ore_cllw_8_v1(a, b) = 1
 $$ LANGUAGE SQL;
 
-CREATE OR REPLACE FUNCTION ore_cllw_8_v1_gte(a ore_cllw_8_v1, b ore_cllw_8_v1) RETURNS boolean AS $$
+
+DROP FUNCTION IF EXISTS ore_cllw_8_v1_gte(a ore_cllw_8_v1, b ore_cllw_8_v1);
+
+CREATE FUNCTION ore_cllw_8_v1_gte(a ore_cllw_8_v1, b ore_cllw_8_v1)
+RETURNS boolean AS $$
   SELECT compare_ore_cllw_8_v1(a, b) != -1
 $$ LANGUAGE SQL;
+
+
+DROP OPERATOR IF EXISTS = (ore_cllw_8_v1, ore_cllw_8_v1);
 
 CREATE OPERATOR = (
   PROCEDURE="ore_cllw_8_v1_eq",
@@ -184,6 +220,9 @@ CREATE OPERATOR = (
   MERGES
 );
 
+
+DROP OPERATOR IF EXISTS <> (ore_cllw_8_v1, ore_cllw_8_v1);
+
 CREATE OPERATOR <> (
   PROCEDURE="ore_cllw_8_v1_neq",
   LEFTARG=ore_cllw_8_v1,
@@ -194,6 +233,9 @@ CREATE OPERATOR <> (
   HASHES,
   MERGES
 );
+
+
+DROP OPERATOR IF EXISTS > (ore_cllw_8_v1, ore_cllw_8_v1);
 
 CREATE OPERATOR > (
   PROCEDURE="ore_cllw_8_v1_gt",
@@ -206,6 +248,9 @@ CREATE OPERATOR > (
   MERGES
 );
 
+
+DROP OPERATOR IF EXISTS < (ore_cllw_8_v1, ore_cllw_8_v1);
+
 CREATE OPERATOR < (
   PROCEDURE="ore_cllw_8_v1_lt",
   LEFTARG=ore_cllw_8_v1,
@@ -217,6 +262,9 @@ CREATE OPERATOR < (
   MERGES
 );
 
+
+DROP OPERATOR IF EXISTS >= (ore_cllw_8_v1, ore_cllw_8_v1);
+
 CREATE OPERATOR >= (
   PROCEDURE="ore_cllw_8_v1_gte",
   LEFTARG=ore_cllw_8_v1,
@@ -227,6 +275,9 @@ CREATE OPERATOR >= (
   HASHES,
   MERGES
 );
+
+
+DROP OPERATOR IF EXISTS <= (ore_cllw_8_v1, ore_cllw_8_v1);
 
 CREATE OPERATOR <= (
   PROCEDURE="ore_cllw_8_v1_lte",
@@ -241,29 +292,43 @@ CREATE OPERATOR <= (
 
 -- Lexical comparison operators
 
+DROP FUNCTION IF EXISTS ore_cllw_8_variable_v1_eq(a ore_cllw_8_variable_v1, b ore_cllw_8_variable_v1);
+
 CREATE OR REPLACE FUNCTION ore_cllw_8_variable_v1_eq(a ore_cllw_8_variable_v1, b ore_cllw_8_variable_v1) RETURNS boolean AS $$
   SELECT __bytea_ct_eq(a.bytes, b.bytes)
 $$ LANGUAGE SQL;
 
+DROP FUNCTION IF EXISTS ore_cllw_8_variable_v1_neq(a ore_cllw_8_variable_v1, b ore_cllw_8_variable_v1);
+
 CREATE OR REPLACE FUNCTION ore_cllw_8_variable_v1_neq(a ore_cllw_8_variable_v1, b ore_cllw_8_variable_v1) RETURNS boolean AS $$
-  SELECT not __bytea_ct_eq(a.bytes, b.bytes) 
+  SELECT not __bytea_ct_eq(a.bytes, b.bytes)
 $$ LANGUAGE SQL;
+
+DROP FUNCTION IF EXISTS ore_cllw_8_v1_lt_lex(a ore_cllw_8_variable_v1, b ore_cllw_8_variable_v1);
 
 CREATE OR REPLACE FUNCTION ore_cllw_8_v1_lt_lex(a ore_cllw_8_variable_v1, b ore_cllw_8_variable_v1) RETURNS boolean AS $$
   SELECT compare_lex_ore_cllw_8_v1(a, b) = -1
 $$ LANGUAGE SQL;
 
+DROP FUNCTION IF EXISTS ore_cllw_8_v1_lte_lex(a ore_cllw_8_variable_v1, b ore_cllw_8_variable_v1);
+
 CREATE OR REPLACE FUNCTION ore_cllw_8_v1_lte_lex(a ore_cllw_8_variable_v1, b ore_cllw_8_variable_v1) RETURNS boolean AS $$
   SELECT compare_lex_ore_cllw_8_v1(a, b) != 1
 $$ LANGUAGE SQL;
+
+DROP FUNCTION IF EXISTS ore_cllw_8_v1_gt_lex(a ore_cllw_8_variable_v1, b ore_cllw_8_variable_v1);
 
 CREATE OR REPLACE FUNCTION ore_cllw_8_v1_gt_lex(a ore_cllw_8_variable_v1, b ore_cllw_8_variable_v1) RETURNS boolean AS $$
   SELECT compare_lex_ore_cllw_8_v1(a, b) = 1
 $$ LANGUAGE SQL;
 
+DROP FUNCTION IF EXISTS ore_cllw_8_v1_gte_lex(a ore_cllw_8_variable_v1, b ore_cllw_8_variable_v1);
+
 CREATE OR REPLACE FUNCTION ore_cllw_8_v1_gte_lex(a ore_cllw_8_variable_v1, b ore_cllw_8_variable_v1) RETURNS boolean AS $$
   SELECT compare_lex_ore_cllw_8_v1(a, b) != -1
 $$ LANGUAGE SQL;
+
+DROP OPERATOR IF EXISTS = (ore_cllw_8_variable_v1, ore_cllw_8_variable_v1);
 
 CREATE OPERATOR = (
   PROCEDURE="ore_cllw_8_variable_v1_eq",
@@ -276,6 +341,8 @@ CREATE OPERATOR = (
   MERGES
 );
 
+DROP OPERATOR IF EXISTS <> (ore_cllw_8_variable_v1, ore_cllw_8_variable_v1);
+
 CREATE OPERATOR <> (
   PROCEDURE="ore_cllw_8_variable_v1_neq",
   LEFTARG=ore_cllw_8_variable_v1,
@@ -286,6 +353,8 @@ CREATE OPERATOR <> (
   HASHES,
   MERGES
 );
+
+DROP OPERATOR IF EXISTS > (ore_cllw_8_variable_v1, ore_cllw_8_variable_v1);
 
 CREATE OPERATOR > (
   PROCEDURE="ore_cllw_8_v1_gt_lex",
@@ -298,6 +367,8 @@ CREATE OPERATOR > (
   MERGES
 );
 
+DROP OPERATOR IF EXISTS < (ore_cllw_8_variable_v1, ore_cllw_8_variable_v1);
+
 CREATE OPERATOR < (
   PROCEDURE="ore_cllw_8_v1_lt_lex",
   LEFTARG=ore_cllw_8_variable_v1,
@@ -308,6 +379,8 @@ CREATE OPERATOR < (
   HASHES,
   MERGES
 );
+
+DROP OPERATOR IF EXISTS >= (ore_cllw_8_variable_v1, ore_cllw_8_variable_v1);
 
 CREATE OPERATOR >= (
   PROCEDURE="ore_cllw_8_v1_gte_lex",
@@ -320,6 +393,8 @@ CREATE OPERATOR >= (
   MERGES
 );
 
+DROP OPERATOR IF EXISTS <= (ore_cllw_8_variable_v1, ore_cllw_8_variable_v1);
+
 CREATE OPERATOR <= (
   PROCEDURE="ore_cllw_8_v1_lte_lex",
   LEFTARG=ore_cllw_8_variable_v1,
@@ -331,7 +406,13 @@ CREATE OPERATOR <= (
   MERGES
 );
 
+
+DROP OPERATOR FAMILY IF EXISTS ore_cllw_8_v1_btree_ops USING btree;
+
 CREATE OPERATOR FAMILY ore_cllw_8_v1_btree_ops USING btree;
+
+DROP OPERATOR CLASS IF EXISTS ore_cllw_8_v1_btree_ops USING btree;
+
 CREATE OPERATOR CLASS ore_cllw_8_v1_btree_ops DEFAULT FOR TYPE ore_cllw_8_v1 USING btree FAMILY ore_cllw_8_v1_btree_ops  AS
         OPERATOR 1 <,
         OPERATOR 2 <=,
@@ -341,7 +422,13 @@ CREATE OPERATOR CLASS ore_cllw_8_v1_btree_ops DEFAULT FOR TYPE ore_cllw_8_v1 USI
         FUNCTION 1 compare_ore_cllw_8_v1(a ore_cllw_8_v1, b ore_cllw_8_v1);
 
 -- Lexical comparison operator class
+
+DROP OPERATOR FAMILY IF EXISTS ore_cllw_8_v1_variable_btree_ops USING btree;
+
 CREATE OPERATOR FAMILY ore_cllw_8_v1_variable_btree_ops USING btree;
+
+DROP OPERATOR CLASS IF EXISTS ore_cllw_8_v1_variable_btree_ops USING btree;
+
 CREATE OPERATOR CLASS ore_cllw_8_v1_variable_btree_ops DEFAULT FOR TYPE ore_cllw_8_variable_v1 USING btree FAMILY ore_cllw_8_v1_variable_btree_ops  AS
         OPERATOR 1 <,
         OPERATOR 2 <=,
