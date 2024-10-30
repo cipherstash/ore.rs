@@ -1,3 +1,6 @@
+#![doc(html_no_source)]
+#![doc(html_favicon_url = "https://cipherstash.com/favicon.ico")]
+#![doc = include_str!("../README.md")]
 use thiserror::Error;
 mod biterator;
 mod impls;
