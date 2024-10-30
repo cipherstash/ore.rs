@@ -1,6 +1,4 @@
-use crate::{
-    biterator::string_biter, CllwOreEncrypt, Error, Key,
-};
+use crate::{biterator::string_biter, CllwOreEncrypt, Error, Key};
 use postgres_types::ToSql;
 use std::cmp::Ordering;
 use unicode_normalization::char::decompose_canonical;
@@ -85,14 +83,14 @@ fn compare_lex(a: &OreCllw8VariableV1, b: &OreCllw8VariableV1) -> Ordering {
         Ordering::Less => Ordering::Less,
         Ordering::Greater => Ordering::Greater,
         // Shorter strings are less than longer strings (i.e. they sort first)
-        Ordering::Equal => a.bytes.len().cmp(&b.bytes.len())
+        Ordering::Equal => a.bytes.len().cmp(&b.bytes.len()),
     }
 }
 
-/// Normalizes the string use Unicode = NFKC normalization, and then removes any 
+/// Normalizes the string use Unicode = NFKC normalization, and then removes any
 /// characters that are not alphanumeric, whitespace, or ASCII punctuation.
 /// This is a "rough" collation that is used to orderize strings for encryption.
-/// 
+///
 /// Eventually, this will move to a more sophisticated collation that can handle
 /// more complex strings using the [Unicode Collation Algorithm](https://www.unicode.org/reports/tr10/).
 fn orderize_string(input: &str) -> String {
@@ -110,8 +108,8 @@ fn orderize_string(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::cmp::Ordering;
     use crate::Key;
+    use std::cmp::Ordering;
 
     fn encrypt_cmp(x: &str, y: &str) -> Ordering {
         let key = Key::from([0; 32]);

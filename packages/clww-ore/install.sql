@@ -92,7 +92,7 @@ BEGIN
         RAISE EXCEPTION 'Numeric ORE comparison requires bytea values of the same length';
     END IF;
 
-    RETURN __compare_inner_ore_cllw_8_v1(a, b);
+    RETURN __compare_inner_ore_cllw_8_v1(a.bytes, b.bytes);
 END;
 $$ LANGUAGE plpgsql;
 
@@ -140,9 +140,9 @@ BEGIN
 
     -- If the bytea comparison is 'equal', compare lengths
     IF len_a < len_b THEN
-        RETURN 1;
-    ELSIF len_a > len_b THEN
         RETURN -1;
+    ELSIF len_a > len_b THEN
+        RETURN 1;
     ELSE
         RETURN 0;
     END IF;

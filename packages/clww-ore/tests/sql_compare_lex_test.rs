@@ -43,23 +43,23 @@ fn test_compare_string_prefix() {
     let a = key.encrypt("cat").unwrap();
     let b = key.encrypt("catskills").unwrap();
 
-    assert_eq!(sql_compare_lex(&a, &b), 1);
+    assert_eq!(sql_compare_lex(&a, &b), -1);
 }
 
 #[test]
 #[ignore = "E2E"]
-fn test_compare_string_prefix_gt() {
+fn test_compare_string_prefix_lt() {
     let key = Key::from([0; 32]);
     let a = key.encrypt("cat").unwrap();
     let b = key.encrypt("catskills").unwrap();
 
-    assert!(sql_compare_lex_op(&a, &b, SqlOp::Gt));
-    assert!(sql_compare_lex_op(&a, &b, SqlOp::Gte));
+    assert!(sql_compare_lex_op(&a, &b, SqlOp::Lt));
+    assert!(sql_compare_lex_op(&a, &b, SqlOp::Lte));
     assert!(sql_compare_lex_op(&a, &b, SqlOp::Ne));
 
     // Refutes
-    assert!(!sql_compare_lex_op(&a, &b, SqlOp::Lte));
-    assert!(!sql_compare_lex_op(&a, &b, SqlOp::Lt));
+    assert!(!sql_compare_lex_op(&a, &b, SqlOp::Gte));
+    assert!(!sql_compare_lex_op(&a, &b, SqlOp::Gt));
     assert!(!sql_compare_lex_op(&a, &b, SqlOp::Eq));
 }
 
