@@ -29,7 +29,7 @@ impl<'s> NibbleIterator<'s> {
     }
 }
 
-impl<'s> Iterator for NibbleIterator<'s> {
+impl Iterator for NibbleIterator<'_> {
     type Item = Nibble;
 
     fn next(&mut self) -> Option<Self::Item> {
