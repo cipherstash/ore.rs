@@ -44,7 +44,7 @@ impl Iterator for Biterator<u32> {
         if self.count ^ u32::MAX == 0 {
             return None;
         }
-        let bit = (self.input & 1 << self.count) >> self.count;
+        let bit = (self.input & (1 << self.count)) >> self.count;
         self.count = self.count.wrapping_sub(1);
         Some(bit as u8)
     }
@@ -57,7 +57,7 @@ impl Iterator for Biterator<u64> {
         if self.count ^ u32::MAX == 0 {
             return None;
         }
-        let bit = (self.input & 1 << self.count) >> self.count;
+        let bit = (self.input & (1 << self.count)) >> self.count;
         self.count = self.count.wrapping_sub(1);
         Some(bit as u8)
     }
@@ -70,7 +70,7 @@ impl Iterator for Biterator<u8> {
         if self.count ^ u32::MAX == 0 {
             return None;
         }
-        let bit = (self.input & 1 << self.count) >> self.count;
+        let bit = (self.input & (1 << self.count)) >> self.count;
         self.count = self.count.wrapping_sub(1);
         Some(bit)
     }
