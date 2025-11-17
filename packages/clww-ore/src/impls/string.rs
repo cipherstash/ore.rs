@@ -1,4 +1,5 @@
 use crate::{biterator::string_biter, CllwOreEncrypt, Error, Key};
+use hex::{FromHex, FromHexError};
 use postgres_types::ToSql;
 use std::cmp::Ordering;
 use unicode_normalization::char::decompose_canonical;
@@ -15,6 +16,18 @@ impl AsRef<[u8]> for OreCllw8VariableV1 {
     }
 }
 
+impl FromHex for OreCllw8VariableV1 {
+    type Error = FromHexError;
+
+    fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
+        Ok(Self {
+            bytes: hex::decode(hex)?,
+        })
+    }
+}
+
+/// FIXME: this impl should not exist - there are infinitely many Vec lengths that will not contain a valid term.
+/// Fallibility is a must. Switch to TryFrom.
 impl From<Vec<u8>> for OreCllw8VariableV1 {
     fn from(bytes: Vec<u8>) -> Self {
         Self { bytes }

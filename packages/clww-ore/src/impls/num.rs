@@ -1,4 +1,5 @@
 use crate::{biterator::Biterator, CllwOreEncrypt, Error, Key};
+use hex::FromHex;
 use postgres_types::ToSql;
 use std::cmp::Ordering;
 
@@ -11,6 +12,20 @@ pub struct OreCllw8V1<const N: usize> {
 impl<const N: usize> AsRef<[u8]> for OreCllw8V1<N> {
     fn as_ref(&self) -> &[u8] {
         &self.bytes
+    }
+}
+
+impl<const N: usize> FromHex for OreCllw8V1<N> {
+    type Error = Error;
+
+    fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, <Self as FromHex>::Error> {
+        let mut out = [0u8; N];
+        let actual_len = hex.as_ref().len();
+        hex::decode_to_slice(hex, &mut out as &mut [u8]).map_err(|_| Error::InvalidLength {
+            expected: N,
+            actual: actual_len,
+        })?;
+        Ok(Self { bytes: out })
     }
 }
 
