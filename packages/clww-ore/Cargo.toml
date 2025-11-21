@@ -1,6 +1,6 @@
 [package]
 name = "cllw-ore"
-version = "0.1.0"
+version = "0.2.0"
 description = "Fast, efficient Order-Revealing Encryption using CLLW scheme"
 documentation = "https://docs.rs/cllw-ore"
 license-file = "LICENSE"
