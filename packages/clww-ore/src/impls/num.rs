@@ -282,6 +282,12 @@ mod tests {
                         let x2 = key.encrypt(x).unwrap();
                         TestResult::from_bool(x1.cmp(&x2) == Ordering::Less)
                     }
+
+                    fn [<prop_decrypt_ $ty>](key: Key, x: $ty) -> bool {
+                        let ciphertext = key.encrypt(x).unwrap();
+                        let decrypted = key.decrypt(ciphertext).unwrap();
+                        x == decrypted
+                    }
                 }
             }
         };
@@ -289,38 +295,4 @@ mod tests {
 
     quickcheck_type!(u32);
     quickcheck_type!(u64);
-
-    #[test]
-    fn test_decrypt_u32() {
-        let key = Key::from([0; 32]);
-        let plaintext: u32 = 42;
-        let ciphertext = key.encrypt(plaintext).unwrap();
-        let decrypted = key.decrypt(ciphertext).unwrap();
-        assert_eq!(plaintext, decrypted);
-    }
-
-    quickcheck! {
-        fn prop_decrypt_u32(key: Key, x: u32) -> bool {
-            let ciphertext = key.encrypt(x).unwrap();
-            let decrypted = key.decrypt(ciphertext).unwrap();
-            x == decrypted
-        }
-    }
-
-    #[test]
-    fn test_decrypt_u64() {
-        let key = Key::from([0; 32]);
-        let plaintext: u64 = 42;
-        let ciphertext = key.encrypt(plaintext).unwrap();
-        let decrypted = key.decrypt(ciphertext).unwrap();
-        assert_eq!(plaintext, decrypted);
-    }
-
-    quickcheck! {
-        fn prop_decrypt_u64(key: Key, x: u64) -> bool {
-            let ciphertext = key.encrypt(x).unwrap();
-            let decrypted = key.decrypt(ciphertext).unwrap();
-            x == decrypted
-        }
-    }
 }
