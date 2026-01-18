@@ -51,7 +51,7 @@ impl OreCllw8VariableV1 {
     pub fn decrypt_to_bytes(&self, key: &Key, salt: Option<&[u8]>) -> Result<Vec<u8>, Error> {
         // Validate that ciphertext length is a multiple of 8
         // Each plaintext byte requires exactly 8 ciphertext bytes (one per bit)
-        if self.bytes.len() % 8 != 0 {
+        if !self.bytes.len().is_multiple_of(8) {
             return Err(Error::InvalidLength {
                 expected: (self.bytes.len() / 8 + 1) * 8, // Next valid length
                 actual: self.bytes.len(),
