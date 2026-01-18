@@ -293,4 +293,109 @@ mod tests {
     quickcheck_type!(u32);
     quickcheck_type!(u64);
     quickcheck_type!(u128);
+
+    // Salt tests for numeric types
+
+    #[test]
+    fn test_u32_different_salts_produce_different_ciphertexts() {
+        use crate::CllwOreEncrypt;
+        
+        let key = Key::from([0; 32]);
+        let value: u32 = 42;
+        let salt1 = b"domain1";
+        let salt2 = b"domain2";
+
+        let ct1 = value.encrypt_with_salt(&key, Some(salt1)).unwrap();
+        let ct2 = value.encrypt_with_salt(&key, Some(salt2)).unwrap();
+
+        // Different salts should produce different ciphertexts
+        assert_ne!(ct1, ct2);
+    }
+
+    #[test]
+    fn test_u64_wrong_salt_produces_wrong_plaintext() {
+        use crate::{CllwOreEncrypt, CllwOreDecrypt};
+        
+        let key = Key::from([0; 32]);
+        let value: u64 = 12345;
+        let salt1 = b"domain1";
+        let salt2 = b"domain2";
+
+        let ciphertext = value.encrypt_with_salt(&key, Some(salt1)).unwrap();
+        let decrypted = ciphertext.decrypt_with_salt(&key, Some(salt2)).unwrap();
+
+        // Using wrong salt should produce incorrect plaintext
+        assert_ne!(value, decrypted);
+    }
+
+    #[test]
+    fn test_u128_correct_salt_decrypts_correctly() {
+        use crate::{CllwOreEncrypt, CllwOreDecrypt};
+        
+        let key = Key::from([0; 32]);
+        let value: u128 = 999999;
+        let salt = b"my-domain";
+
+        let ciphertext = value.encrypt_with_salt(&key, Some(salt)).unwrap();
+        let decrypted = ciphertext.decrypt_with_salt(&key, Some(salt)).unwrap();
+
+        // Using correct salt should decrypt correctly
+        assert_eq!(value, decrypted);
+    }
+
+    #[test]
+    fn test_u16_no_salt_and_none_salt_are_equivalent() {
+        use crate::CllwOreEncrypt;
+        
+        let key = Key::from([0; 32]);
+        let value: u16 = 100;
+
+        let ct1 = value.encrypt(&key).unwrap();
+        let ct2 = value.encrypt_with_salt(&key, None).unwrap();
+
+        // No salt and None salt should produce identical ciphertexts
+        assert_eq!(ct1, ct2);
+    }
+
+    #[test]
+    fn test_u32_empty_salt_same_as_no_salt() {
+        use crate::CllwOreEncrypt;
+        
+        let key = Key::from([0; 32]);
+        let value: u32 = 42;
+
+        let ct_no_salt = value.encrypt_with_salt(&key, None).unwrap();
+        let ct_empty_salt = value.encrypt_with_salt(&key, Some(b"")).unwrap();
+
+        // Empty salt produces same result as no salt (empty bytes don't change hash)
+        assert_eq!(ct_no_salt, ct_empty_salt);
+    }
+
+    #[test]
+    fn test_u64_salt_preserves_ordering() {
+        use crate::CllwOreEncrypt;
+        
+        let key = Key::from([0; 32]);
+        let salt = b"domain";
+
+        let ct1 = 100u64.encrypt_with_salt(&key, Some(salt)).unwrap();
+        let ct2 = 200u64.encrypt_with_salt(&key, Some(salt)).unwrap();
+
+        // Ordering should be preserved even with salt
+        assert!(ct1 < ct2);
+    }
+
+    #[test]
+    fn test_u128_salt_ordering_with_max_values() {
+        use crate::CllwOreEncrypt;
+        
+        let key = Key::from([0; 32]);
+        let salt = b"test-domain";
+
+        let ct_zero = 0u128.encrypt_with_salt(&key, Some(salt)).unwrap();
+        let ct_max = u128::MAX.encrypt_with_salt(&key, Some(salt)).unwrap();
+
+        // Ordering should be preserved: 0 < MAX
+        assert!(ct_zero < ct_max);
+    }
 }

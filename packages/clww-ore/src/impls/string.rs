@@ -344,4 +344,194 @@ mod tests {
         let decrypted_bytes = ciphertext.decrypt_to_bytes(&key, None).unwrap();
         assert_eq!(data, decrypted_bytes.as_slice());
     }
+
+    // Salt tests for strings
+
+    #[test]
+    fn test_string_different_salts_produce_different_ciphertexts() {
+        use crate::CllwOreEncrypt;
+        
+        let key = Key::from([0; 32]);
+        let plaintext = "hello";
+        let salt1 = b"domain1";
+        let salt2 = b"domain2";
+
+        let ct1 = plaintext.encrypt_with_salt(&key, Some(salt1)).unwrap();
+        let ct2 = plaintext.encrypt_with_salt(&key, Some(salt2)).unwrap();
+
+        // Different salts should produce different ciphertexts
+        assert_ne!(ct1, ct2);
+    }
+
+    #[test]
+    fn test_string_wrong_salt_fails_or_produces_garbage() {
+        use crate::{CllwOreEncrypt, CllwOreDecrypt};
+        
+        let key = Key::from([0; 32]);
+        let plaintext = "hello";
+        let salt1 = b"domain1";
+        let salt2 = b"domain2";
+
+        let ciphertext = plaintext.encrypt_with_salt(&key, Some(salt1)).unwrap();
+        
+        // Using wrong salt typically produces invalid UTF-8 and fails
+        // or in rare cases produces garbage if it happens to be valid UTF-8
+        match ciphertext.decrypt_with_salt(&key, Some(salt2)) {
+            Err(_) => {}, // Expected: invalid UTF-8
+            Ok(decrypted) => {
+                // If it succeeds, it should be garbage (not the original)
+                assert_ne!(plaintext, decrypted);
+            }
+        }
+    }
+
+    #[test]
+    fn test_string_correct_salt_decrypts_correctly() {
+        use crate::{CllwOreEncrypt, CllwOreDecrypt};
+        
+        let key = Key::from([0; 32]);
+        let plaintext = "hello world";
+        let salt = b"my-domain";
+
+        let ciphertext = plaintext.encrypt_with_salt(&key, Some(salt)).unwrap();
+        let decrypted = ciphertext.decrypt_with_salt(&key, Some(salt)).unwrap();
+
+        // Using correct salt should decrypt correctly
+        assert_eq!(plaintext, decrypted);
+    }
+
+    #[test]
+    fn test_string_no_salt_and_none_salt_are_equivalent() {
+        use crate::CllwOreEncrypt;
+        
+        let key = Key::from([0; 32]);
+        let plaintext = "hello";
+
+        let ct1 = plaintext.encrypt(&key).unwrap();
+        let ct2 = plaintext.encrypt_with_salt(&key, None).unwrap();
+
+        // No salt and None salt should produce identical ciphertexts
+        assert_eq!(ct1, ct2);
+    }
+
+    #[test]
+    fn test_string_empty_salt_same_as_no_salt() {
+        use crate::CllwOreEncrypt;
+        
+        let key = Key::from([0; 32]);
+        let plaintext = "hello";
+
+        let ct_no_salt = plaintext.encrypt_with_salt(&key, None).unwrap();
+        let ct_empty_salt = plaintext.encrypt_with_salt(&key, Some(b"")).unwrap();
+
+        // Empty salt produces same result as no salt (empty bytes don't change hash)
+        assert_eq!(ct_no_salt, ct_empty_salt);
+    }
+
+    #[test]
+    fn test_string_salt_preserves_ordering() {
+        use crate::CllwOreEncrypt;
+        
+        let key = Key::from([0; 32]);
+        let salt = b"domain";
+
+        let ct1 = "alice".encrypt_with_salt(&key, Some(salt)).unwrap();
+        let ct2 = "bob".encrypt_with_salt(&key, Some(salt)).unwrap();
+
+        // Ordering should be preserved even with salt
+        assert!(ct1 < ct2);
+    }
+
+    // Salt tests for byte slices
+
+    #[test]
+    fn test_bytes_different_salts_produce_different_ciphertexts() {
+        use crate::CllwOreEncrypt;
+        
+        let key = Key::from([0; 32]);
+        let data: &[u8] = b"hello";
+        let salt1 = b"domain1";
+        let salt2 = b"domain2";
+
+        let ct1 = data.encrypt_with_salt(&key, Some(salt1)).unwrap();
+        let ct2 = data.encrypt_with_salt(&key, Some(salt2)).unwrap();
+
+        // Different salts should produce different ciphertexts
+        assert_ne!(ct1, ct2);
+    }
+
+    #[test]
+    fn test_bytes_wrong_salt_produces_wrong_plaintext() {
+        use crate::CllwOreEncrypt;
+        
+        let key = Key::from([0; 32]);
+        let data: &[u8] = b"hello";
+        let salt1 = b"domain1";
+        let salt2 = b"domain2";
+
+        let ciphertext = data.encrypt_with_salt(&key, Some(salt1)).unwrap();
+        let decrypted = ciphertext.decrypt_to_bytes(&key, Some(salt2)).unwrap();
+
+        // Using wrong salt should produce incorrect plaintext
+        assert_ne!(data, decrypted.as_slice());
+    }
+
+    #[test]
+    fn test_bytes_correct_salt_decrypts_correctly() {
+        use crate::CllwOreEncrypt;
+        
+        let key = Key::from([0; 32]);
+        let data: &[u8] = &[0xFF, 0x00, 0xAB, 0xCD];
+        let salt = b"my-domain";
+
+        let ciphertext = data.encrypt_with_salt(&key, Some(salt)).unwrap();
+        let decrypted = ciphertext.decrypt_to_bytes(&key, Some(salt)).unwrap();
+
+        // Using correct salt should decrypt correctly
+        assert_eq!(data, decrypted.as_slice());
+    }
+
+    #[test]
+    fn test_bytes_no_salt_and_none_salt_are_equivalent() {
+        use crate::CllwOreEncrypt;
+        
+        let key = Key::from([0; 32]);
+        let data: &[u8] = b"hello";
+
+        let ct1 = data.encrypt(&key).unwrap();
+        let ct2 = data.encrypt_with_salt(&key, None).unwrap();
+
+        // No salt and None salt should produce identical ciphertexts
+        assert_eq!(ct1, ct2);
+    }
+
+    #[test]
+    fn test_bytes_empty_salt_same_as_no_salt() {
+        use crate::CllwOreEncrypt;
+        
+        let key = Key::from([0; 32]);
+        let data: &[u8] = b"hello";
+
+        let ct_no_salt = data.encrypt_with_salt(&key, None).unwrap();
+        let ct_empty_salt = data.encrypt_with_salt(&key, Some(b"")).unwrap();
+
+        // Empty salt produces same result as no salt (empty bytes don't change hash)
+        assert_eq!(ct_no_salt, ct_empty_salt);
+    }
+
+    #[test]
+    fn test_bytes_salt_preserves_ordering() {
+        use crate::CllwOreEncrypt;
+        
+        let key = Key::from([0; 32]);
+        let salt = b"domain";
+        let data1: &[u8] = &[1, 2, 3];
+        let data2: &[u8] = &[1, 2, 4];
+
+        let ct1 = data1.encrypt_with_salt(&key, Some(salt)).unwrap();
+        let ct2 = data2.encrypt_with_salt(&key, Some(salt)).unwrap();
+
+        // Ordering should be preserved even with salt
+        assert!(ct1 < ct2);
+    }
 }
