@@ -1,5 +1,6 @@
 use crate::{biterator::Biterator, CllwOreDecrypt, CllwOreEncrypt, Error, Key};
 use hex::FromHex;
+#[cfg(feature = "postgres-types")]
 use postgres_types::ToSql;
 use std::cmp::Ordering;
 use subtle::ConstantTimeEq;
@@ -13,8 +14,9 @@ use subtle::ConstantTimeEq;
 /// - `OreCllw8V1<32>` encrypts `u32` (32 bytes)
 /// - `OreCllw8V1<64>` encrypts `u64` (64 bytes)
 /// - `OreCllw8V1<128>` encrypts `u128` (128 bytes)
-#[derive(Debug, Clone, Copy, ToSql)]
-#[postgres(name = "ore_cllw_8_v1")]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "postgres-types", derive(ToSql))]
+#[cfg_attr(feature = "postgres-types", postgres(name = "ore_cllw_8_v1"))]
 pub struct OreCllw8V1<const N: usize> {
     pub(super) bytes: [u8; N],
 }

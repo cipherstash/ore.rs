@@ -3,6 +3,7 @@ use crate::{
     CllwOreDecrypt, CllwOreEncrypt, Error, Key,
 };
 use hex::{FromHex, FromHexError};
+#[cfg(feature = "postgres-types")]
 use postgres_types::ToSql;
 use std::cmp::Ordering;
 use subtle::ConstantTimeEq;
@@ -14,8 +15,9 @@ use unicode_normalization::char::decompose_canonical;
 /// for variable-length data types like `&str` and `&[u8]`.
 ///
 /// The ciphertext length is proportional to the input length (8 bytes per input byte).
-#[derive(Debug, Clone, ToSql)]
-#[postgres(name = "ore_cllw_8_variable_v1")]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "postgres-types", derive(ToSql))]
+#[cfg_attr(feature = "postgres-types", postgres(name = "ore_cllw_8_variable_v1"))]
 pub struct OreCllw8VariableV1 {
     bytes: Vec<u8>,
 }

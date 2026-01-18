@@ -10,10 +10,16 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+# WARNING: The postgres-types feature is currently enabled by default for backwards compatibility,
+# but this will change in a future major version. Please explicitly enable this feature if you need it.
+default = ["postgres-types"]
+postgres-types = ["dep:postgres-types"]
+
 [dependencies]
 blake3 = "1.5.4"
 hex = { workspace = true }
-postgres-types = { version = "0.2.8", features = ["derive", "array-impls"] }
+postgres-types = { version = "0.2.8", features = ["derive", "array-impls"], optional = true }
 subtle = "2.6.1"
 thiserror.workspace = true
 unicode-normalization = "0.1.24"
