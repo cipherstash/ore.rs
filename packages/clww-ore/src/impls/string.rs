@@ -1,4 +1,4 @@
-use crate::{biterator::string_biter, CllwOreEncrypt, Error, Key};
+use crate::{biterator::string_biter, CllwOreDecrypt, CllwOreEncrypt, Error, Key};
 use hex::{FromHex, FromHexError};
 use postgres_types::ToSql;
 use std::cmp::Ordering;
@@ -32,6 +32,47 @@ impl FromHex for OreCllw8VariableV1 {
 impl From<Vec<u8>> for OreCllw8VariableV1 {
     fn from(bytes: Vec<u8>) -> Self {
         Self { bytes }
+    }
+}
+
+impl CllwOreDecrypt for OreCllw8VariableV1 {
+    type Output = String;
+
+    fn decrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+        let mut hasher = blake3::Hasher::new_keyed(&key.0);
+        if let Some(salt) = salt {
+            hasher.update(salt);
+        }
+
+        let mut result_bytes = Vec::with_capacity(self.bytes.len() / 8);
+        let mut current_byte: u8 = 0;
+
+        for (i, &ciphertext_byte) in self.bytes.iter().enumerate() {
+            let mut buf: [u8; 16] = [0; 16];
+            hasher.finalize_xof().fill(&mut buf);
+            let prf_block = u128::from_be_bytes(buf) & 0xFF;
+            // Recover the bit by subtracting ciphertext from PRF block
+            let bit = ciphertext_byte.wrapping_sub(prf_block as u8) & 0x01;
+            hasher.update(&[bit]);
+            
+            // Build up the byte MSB-first (8 bits per byte)
+            // Use constant-time operation to avoid timing side-channel
+            let bit_position = i % 8;
+            current_byte |= bit << (7 - bit_position);
+            
+            // Push the byte when we've collected 8 bits (every 8th iteration)
+            // Check using modulo which is constant-time for the bit position
+            if bit_position == 7 {
+                result_bytes.push(current_byte);
+                current_byte = 0;
+            }
+        }
+
+        // Convert bytes back to string
+        String::from_utf8(result_bytes).map_err(|_| Error::InvalidLength {
+            expected: 0,
+            actual: 0,
+        })
     }
 }
 
@@ -174,5 +215,41 @@ mod tests {
         assert_eq!(encrypt_cmp(" hello", "helloo"), Ordering::Less);
         assert_eq!(encrypt_cmp("hello world", "helloXworld"), Ordering::Less);
         assert_eq!(encrypt_cmp("hello world", "hello?world"), Ordering::Less);
+    }
+
+    #[test]
+    fn test_decrypt_string() {
+        let key = Key::from([0; 32]);
+        let plaintext = "hello";
+        let ciphertext = key.encrypt(plaintext).unwrap();
+        let decrypted = key.decrypt(ciphertext).unwrap();
+        assert_eq!(plaintext, decrypted);
+    }
+
+    #[test]
+    fn test_decrypt_string_with_whitespace() {
+        let key = Key::from([0; 32]);
+        let plaintext = "hello world";
+        let ciphertext = key.encrypt(plaintext).unwrap();
+        let decrypted = key.decrypt(ciphertext).unwrap();
+        assert_eq!(plaintext, decrypted);
+    }
+
+    #[test]
+    fn test_decrypt_string_with_numbers() {
+        let key = Key::from([0; 32]);
+        let plaintext = "hello123";
+        let ciphertext = key.encrypt(plaintext).unwrap();
+        let decrypted = key.decrypt(ciphertext).unwrap();
+        assert_eq!(plaintext, decrypted);
+    }
+
+    #[test]
+    fn test_decrypt_empty_string() {
+        let key = Key::from([0; 32]);
+        let plaintext = "";
+        let ciphertext = key.encrypt(plaintext).unwrap();
+        let decrypted = key.decrypt(ciphertext).unwrap();
+        assert_eq!(plaintext, decrypted);
     }
 }
