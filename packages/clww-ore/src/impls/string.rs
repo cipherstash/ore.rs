@@ -1,4 +1,4 @@
-use crate::{biterator::string_biter, CllwOreDecrypt, CllwOreEncrypt, Error, Key};
+use crate::{biterator::{string_biter, Biterator}, CllwOreDecrypt, CllwOreEncrypt, Error, Key};
 use hex::{FromHex, FromHexError};
 use postgres_types::ToSql;
 use std::cmp::Ordering;
@@ -35,10 +35,9 @@ impl From<Vec<u8>> for OreCllw8VariableV1 {
     }
 }
 
-impl CllwOreDecrypt for OreCllw8VariableV1 {
-    type Output = String;
-
-    fn decrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+impl OreCllw8VariableV1 {
+    /// Decrypt the ciphertext to raw bytes
+    pub fn decrypt_to_bytes(&self, key: &Key, salt: Option<&[u8]>) -> Result<Vec<u8>, Error> {
         let mut hasher = blake3::Hasher::new_keyed(&key.0);
         if let Some(salt) = salt {
             hasher.update(salt);
@@ -68,11 +67,46 @@ impl CllwOreDecrypt for OreCllw8VariableV1 {
             }
         }
 
+        Ok(result_bytes)
+    }
+}
+
+impl CllwOreDecrypt for OreCllw8VariableV1 {
+    type Output = String;
+
+    fn decrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+        let result_bytes = self.decrypt_to_bytes(key, salt)?;
         // Convert bytes back to string
         String::from_utf8(result_bytes).map_err(|_| Error::InvalidLength {
             expected: 0,
             actual: 0,
         })
+    }
+}
+
+impl CllwOreEncrypt for &[u8] {
+    type Output = OreCllw8VariableV1;
+
+    fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+        let len = self.len() * u8::BITS as usize;
+        let mut hasher = blake3::Hasher::new_keyed(&key.0);
+        if let Some(salt) = salt {
+            hasher.update(salt);
+        }
+        
+        // Process each byte through the Biterator (MSB first)
+        let bytes = self.iter()
+            .flat_map(|&byte| Biterator::new(byte))
+            .fold(Vec::with_capacity(len), |mut out, bit| {
+                let mut buf: [u8; 16] = [0; 16];
+                hasher.finalize_xof().fill(&mut buf);
+                let byte = u128::from_be_bytes(buf).wrapping_add(bit as u128) & 0xFF;
+                hasher.update(&[bit]);
+                out.push(byte as u8);
+                out
+            });
+
+        Ok(OreCllw8VariableV1 { bytes })
     }
 }
 
@@ -251,5 +285,51 @@ mod tests {
         let ciphertext = key.encrypt(plaintext).unwrap();
         let decrypted = key.decrypt(ciphertext).unwrap();
         assert_eq!(plaintext, decrypted);
+    }
+
+    #[test]
+    fn test_encrypt_bytes() {
+        let key = Key::from([0; 32]);
+        let data: &[u8] = b"hello";
+        let ciphertext = key.encrypt(data).unwrap();
+        let decrypted_bytes = ciphertext.decrypt_to_bytes(&key, None).unwrap();
+        assert_eq!(data, decrypted_bytes.as_slice());
+    }
+
+    #[test]
+    fn test_encrypt_bytes_with_zeros() {
+        let key = Key::from([0; 32]);
+        let data: &[u8] = &[0, 1, 2, 3, 4];
+        let ciphertext = key.encrypt(data).unwrap();
+        let decrypted_bytes = ciphertext.decrypt_to_bytes(&key, None).unwrap();
+        assert_eq!(data, decrypted_bytes.as_slice());
+    }
+
+    #[test]
+    fn test_encrypt_empty_bytes() {
+        let key = Key::from([0; 32]);
+        let data: &[u8] = &[];
+        let ciphertext = key.encrypt(data).unwrap();
+        let decrypted_bytes = ciphertext.decrypt_to_bytes(&key, None).unwrap();
+        assert_eq!(data, decrypted_bytes.as_slice());
+    }
+
+    #[test]
+    fn test_encrypt_bytes_preserves_order() {
+        let key = Key::from([0; 32]);
+        let data1: &[u8] = b"abc";
+        let data2: &[u8] = b"abd";
+        let ct1 = key.encrypt(data1).unwrap();
+        let ct2 = key.encrypt(data2).unwrap();
+        assert_eq!(ct1.cmp(&ct2), Ordering::Less);
+    }
+
+    #[test]
+    fn test_encrypt_bytes_binary_data() {
+        let key = Key::from([0; 32]);
+        let data: &[u8] = &[0xFF, 0x00, 0xAB, 0xCD];
+        let ciphertext = key.encrypt(data).unwrap();
+        let decrypted_bytes = ciphertext.decrypt_to_bytes(&key, None).unwrap();
+        assert_eq!(data, decrypted_bytes.as_slice());
     }
 }
