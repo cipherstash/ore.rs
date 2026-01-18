@@ -87,9 +87,8 @@ impl CllwOreDecrypt for OreCllw8V1<32> {
             let bit = ciphertext_byte.wrapping_sub(prf_block as u8) & 0x01;
             hasher.update(&[bit]);
             // Set the bit in the result (MSB first, so bit 31 is at index 0)
-            if bit == 1 {
-                result |= 1 << (31 - i);
-            }
+            // Use constant-time operation to avoid timing side-channel
+            result |= (bit as u32) << (31 - i);
         }
 
         Ok(result)
