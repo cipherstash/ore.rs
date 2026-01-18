@@ -25,6 +25,12 @@ impl BitSize for u8 {
     }
 }
 
+impl BitSize for u16 {
+    fn msb(&self) -> u32 {
+        Self::BITS - 1
+    }
+}
+
 impl BitSize for u32 {
     fn msb(&self) -> u32 {
         Self::BITS - 1
@@ -34,6 +40,25 @@ impl BitSize for u32 {
 impl BitSize for u64 {
     fn msb(&self) -> u32 {
         Self::BITS - 1
+    }
+}
+
+impl BitSize for u128 {
+    fn msb(&self) -> u32 {
+        Self::BITS - 1
+    }
+}
+
+impl Iterator for Biterator<u16> {
+    type Item = u8;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.count ^ u32::MAX == 0 {
+            return None;
+        }
+        let bit = (self.input & (1 << self.count)) >> self.count;
+        self.count = self.count.wrapping_sub(1);
+        Some(bit as u8)
     }
 }
 
@@ -51,6 +76,19 @@ impl Iterator for Biterator<u32> {
 }
 
 impl Iterator for Biterator<u64> {
+    type Item = u8;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.count ^ u32::MAX == 0 {
+            return None;
+        }
+        let bit = (self.input & (1 << self.count)) >> self.count;
+        self.count = self.count.wrapping_sub(1);
+        Some(bit as u8)
+    }
+}
+
+impl Iterator for Biterator<u128> {
     type Item = u8;
 
     fn next(&mut self) -> Option<Self::Item> {

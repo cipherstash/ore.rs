@@ -47,102 +47,64 @@ impl<const N: usize> TryFrom<&[u8]> for OreCllw8V1<N> {
     }
 }
 
-impl CllwOreEncrypt for u32 {
-    type Output = OreCllw8V1<32>;
+/// Macro to implement CllwOreEncrypt and CllwOreDecrypt for unsigned integer types
+macro_rules! impl_cllw_ore_uint {
+    ($uint_type:ty, $array_size:expr) => {
+        impl CllwOreEncrypt for $uint_type {
+            type Output = OreCllw8V1<$array_size>;
 
-    fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
-        let mut hasher = blake3::Hasher::new_keyed(&key.0);
-        if let Some(salt) = salt {
-            hasher.update(salt);
+            fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+                let mut hasher = blake3::Hasher::new_keyed(&key.0);
+                if let Some(salt) = salt {
+                    hasher.update(salt);
+                }
+
+                let mut bytes: [u8; $array_size] = [0; $array_size];
+                Biterator::new(self).enumerate().for_each(|(i, bit)| {
+                    let mut buf: [u8; 16] = [0; 16];
+                    hasher.finalize_xof().fill(&mut buf);
+                    let byte = u128::from_be_bytes(buf).wrapping_add(bit as u128) & 0xFF;
+                    hasher.update(&[bit]);
+                    bytes[i] = byte as u8;
+                });
+
+                Ok(OreCllw8V1 { bytes })
+            }
         }
 
-        let mut bytes: [u8; 32] = [0; 32];
-        // TODO: Split this bit into a separate function
-        Biterator::new(self).enumerate().for_each(|(i, bit)| {
-            let mut buf: [u8; 16] = [0; 16];
-            hasher.finalize_xof().fill(&mut buf);
-            let byte = u128::from_be_bytes(buf).wrapping_add(bit as u128) & 0xFF;
-            hasher.update(&[bit]);
-            bytes[i] = byte as u8;
-        });
+        impl CllwOreDecrypt for OreCllw8V1<$array_size> {
+            type Output = $uint_type;
 
-        Ok(OreCllw8V1 { bytes })
-    }
+            fn decrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+                let mut hasher = blake3::Hasher::new_keyed(&key.0);
+                if let Some(salt) = salt {
+                    hasher.update(salt);
+                }
+
+                let mut result: $uint_type = 0;
+                for (i, &ciphertext_byte) in self.bytes.iter().enumerate() {
+                    let mut buf: [u8; 16] = [0; 16];
+                    hasher.finalize_xof().fill(&mut buf);
+                    let prf_block = u128::from_be_bytes(buf) & 0xFF;
+                    // Recover the bit by subtracting ciphertext from PRF block
+                    let bit = ciphertext_byte.wrapping_sub(prf_block as u8) & 0x01;
+                    hasher.update(&[bit]);
+                    // Set the bit in the result (MSB first)
+                    // Use constant-time operation to avoid timing side-channel
+                    result |= (bit as $uint_type) << ((<$uint_type>::BITS - 1) - i as u32);
+                }
+
+                Ok(result)
+            }
+        }
+    };
 }
 
-impl CllwOreDecrypt for OreCllw8V1<32> {
-    type Output = u32;
-
-    fn decrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
-        let mut hasher = blake3::Hasher::new_keyed(&key.0);
-        if let Some(salt) = salt {
-            hasher.update(salt);
-        }
-
-        let mut result: u32 = 0;
-        for (i, &ciphertext_byte) in self.bytes.iter().enumerate() {
-            let mut buf: [u8; 16] = [0; 16];
-            hasher.finalize_xof().fill(&mut buf);
-            let prf_block = u128::from_be_bytes(buf) & 0xFF;
-            // Recover the bit by subtracting ciphertext from PRF block
-            let bit = ciphertext_byte.wrapping_sub(prf_block as u8) & 0x01;
-            hasher.update(&[bit]);
-            // Set the bit in the result (MSB first, so bit 31 is at index 0)
-            // Use constant-time operation to avoid timing side-channel
-            result |= (bit as u32) << (31 - i);
-        }
-
-        Ok(result)
-    }
-}
-
-impl CllwOreDecrypt for OreCllw8V1<64> {
-    type Output = u64;
-
-    fn decrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
-        let mut hasher = blake3::Hasher::new_keyed(&key.0);
-        if let Some(salt) = salt {
-            hasher.update(salt);
-        }
-
-        let mut result: u64 = 0;
-        for (i, &ciphertext_byte) in self.bytes.iter().enumerate() {
-            let mut buf: [u8; 16] = [0; 16];
-            hasher.finalize_xof().fill(&mut buf);
-            let prf_block = u128::from_be_bytes(buf) & 0xFF;
-            // Recover the bit by subtracting ciphertext from PRF block
-            let bit = ciphertext_byte.wrapping_sub(prf_block as u8) & 0x01;
-            hasher.update(&[bit]);
-            // Set the bit in the result (MSB first, so bit 63 is at index 0)
-            // Use constant-time operation to avoid timing side-channel
-            result |= (bit as u64) << (63 - i);
-        }
-
-        Ok(result)
-    }
-}
-
-impl CllwOreEncrypt for u64 {
-    type Output = OreCllw8V1<64>;
-
-    fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
-        let mut hasher = blake3::Hasher::new_keyed(&key.0);
-        if let Some(salt) = salt {
-            hasher.update(salt);
-        }
-
-        let mut bytes: [u8; 64] = [0; 64];
-        Biterator::new(self).enumerate().for_each(|(i, bit)| {
-            let mut buf: [u8; 16] = [0; 16];
-            hasher.finalize_xof().fill(&mut buf);
-            let byte = u128::from_be_bytes(buf).wrapping_add(bit as u128) & 0xFF;
-            hasher.update(&[bit]);
-            bytes[i] = byte as u8;
-        });
-
-        Ok(OreCllw8V1 { bytes })
-    }
-}
+// Generate encrypt/decrypt implementations for all unsigned integer types
+impl_cllw_ore_uint!(u16, 16);
+impl_cllw_ore_uint!(u32, 32);
+impl_cllw_ore_uint!(u64, 64);
+impl_cllw_ore_uint!(u128, 128);
 
 impl<const N: usize> Ord for OreCllw8V1<N> {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -175,6 +137,7 @@ mod tests {
         ($ty:ident) => {
             paste! {
                 quickcheck! {
+                    /// Test that encrypting the same value twice produces equal ciphertexts
                     fn [<prop_eq_ $ty>](key: Key, x: $ty) -> bool {
                         let a = key.encrypt(x).unwrap();
                         let b = key.encrypt(x).unwrap();
@@ -182,7 +145,7 @@ mod tests {
                         a == b
                     }
 
-
+                    /// Test that the encryption preserves the ordering relationship between any two values
                     fn [<prop_cmp_ $ty>](key: Key, x: $ty, y: $ty) -> bool {
                         let a = key.encrypt(x).unwrap();
                         let b = key.encrypt(y).unwrap();
@@ -190,54 +153,63 @@ mod tests {
                         a.cmp(&b) == x.cmp(&y)
                     }
 
+                    /// Test that 1 encrypts to a value greater than 0 (tests low-order bit ordering)
                     fn [<prop_low_order_bit_greater_ $ty>](key: Key) -> bool {
                         let x1 = key.encrypt(1 as $ty).unwrap();
                         let x2 = key.encrypt(0 as $ty).unwrap();
                         x1.cmp(&x2) == Ordering::Greater
                     }
 
+                    /// Test that the MSB value (2^(BITS-1)) encrypts to a value greater than 0
                     fn [<prop_high_order_bit_greater_ $ty>](key: Key) -> bool {
                         let x1 = key.encrypt::<$ty>(1 << ($ty::BITS - 1)).unwrap();
                         let x2 = key.encrypt::<$ty>(0).unwrap();
                         x1.cmp(&x2) == Ordering::Greater
                     }
 
+                    /// Test that 0 encrypts to a value less than the MSB value (2^(BITS-1))
                     fn [<prop_high_order_bit_less_ $ty>](key: Key) -> bool {
                         let x1 = key.encrypt::<$ty>(0).unwrap();
                         let x2 = key.encrypt::<$ty>(1 << ($ty::BITS - 1)).unwrap();
                         x1.cmp(&x2) == Ordering::Less
                     }
 
+                    /// Test that the MSB value encrypts to equal ciphertexts (determinism check)
                     fn [<prop_high_order_bit_eq_ $ty>](key: Key) -> bool {
                         let x1 = key.encrypt::<$ty>(1 << ($ty::BITS - 1)).unwrap();
                         let x2 = key.encrypt::<$ty>(1 << ($ty::BITS - 1)).unwrap();
                         x1.cmp(&x2) == Ordering::Equal
                     }
 
+                    /// Test that 0 encrypts to a value less than 1 (tests low-order bit ordering)
                     fn [<prop_low_order_bit_less_ $ty>](key: Key) -> bool {
                         let x1 = key.encrypt::<$ty>(0).unwrap();
                         let x2 = key.encrypt::<$ty>(1).unwrap();
                         x1.cmp(&x2) == Ordering::Less
                     }
 
+                    /// Test that 1 encrypts to equal ciphertexts (determinism check)
                     fn [<prop_low_order_bit_eq_ $ty>](key: Key) -> bool {
                         let x1 = key.encrypt::<$ty>(1).unwrap();
                         let x2 = key.encrypt::<$ty>(1).unwrap();
                         x1.cmp(&x2) == Ordering::Equal
                     }
 
+                    /// Test that 0 encrypts to equal ciphertexts (determinism check for min value)
                     fn [<prop_zero_ $ty>](key: Key) -> bool {
                         let x1 = key.encrypt::<$ty>(0).unwrap();
                         let x2 = key.encrypt::<$ty>(0).unwrap();
                         x1.cmp(&x2) == Ordering::Equal
                     }
 
+                    /// Test that MAX encrypts to equal ciphertexts (determinism check for max value)
                     fn [<prop_max_ $ty>](key: Key) -> bool {
                         let x1 = key.encrypt($ty::MAX).unwrap();
                         let x2 = key.encrypt($ty::MAX).unwrap();
                         x1.cmp(&x2) == Ordering::Equal
                     }
 
+                    /// Test that any value less than MAX encrypts to a value less than MAX
                     fn [<prop_less_than_max_right_ $ty>](key: Key, x: $ty) -> TestResult {
                         if x == $ty::MAX {
                             return TestResult::discard();
@@ -247,6 +219,7 @@ mod tests {
                         TestResult::from_bool(x1.cmp(&x2) == Ordering::Less)
                     }
 
+                    /// Test that MAX encrypts to a value greater than 0
                     fn [<prop_more_than_max_left_ $ty>](key: Key, x: $ty) -> TestResult {
                         if x == $ty::MAX {
                             return TestResult::discard();
@@ -256,6 +229,7 @@ mod tests {
                         TestResult::from_bool(x1.cmp(&x2) == Ordering::Greater)
                     }
 
+                    /// Test that 0 encrypts to a value less than any non-zero value
                     fn [<prop_more_than_zero_left_ $ty>](key: Key, x: $ty) -> TestResult {
                         if x == 0 {
                             return TestResult::discard();
@@ -265,6 +239,7 @@ mod tests {
                         TestResult::from_bool(x1.cmp(&x2) == Ordering::Less)
                     }
 
+                    /// Test that any non-zero value encrypts to a value greater than 0
                     fn [<prop_more_than_zero_right_ $ty>](key: Key, x: $ty) -> TestResult {
                         if x == 0 {
                             return TestResult::discard();
@@ -274,6 +249,7 @@ mod tests {
                         TestResult::from_bool(x1.cmp(&x2) == Ordering::Greater)
                     }
 
+                    /// Test that (x-1) encrypts to a value less than x for all x > 1
                     fn [<prop_one_less_than_ $ty>](key: Key, x: $ty) -> TestResult {
                         if x <= 1 {
                             return TestResult::discard();
@@ -283,6 +259,7 @@ mod tests {
                         TestResult::from_bool(x1.cmp(&x2) == Ordering::Less)
                     }
 
+                    /// Test that decryption correctly recovers the original plaintext value
                     fn [<prop_decrypt_ $ty>](key: Key, x: $ty) -> bool {
                         let ciphertext = key.encrypt(x).unwrap();
                         let decrypted = key.decrypt(ciphertext).unwrap();
@@ -293,6 +270,8 @@ mod tests {
         };
     }
 
+    quickcheck_type!(u16);
     quickcheck_type!(u32);
     quickcheck_type!(u64);
+    quickcheck_type!(u128);
 }
