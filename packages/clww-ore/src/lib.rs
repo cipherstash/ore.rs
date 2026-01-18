@@ -1,6 +1,95 @@
 #![doc(html_no_source)]
 #![doc(html_favicon_url = "https://cipherstash.com/favicon.ico")]
 #![doc = include_str!("../README.md")]
+//! ## Features
+//!
+//! - **Order-Revealing**: Relative order of plaintexts can be determined at query time
+//! - **Deterministic**: The same plaintext always produces the same ciphertext for a given key
+//! - **Constant-Time**: Operations use constant-time algorithms to prevent timing attacks
+//! - **Multiple Types**: Support for integers (`u16`, `u32`, `u64`, `u128`), strings, and byte slices
+//!
+//! ## Basic Usage
+//!
+//! ```
+//! use cllw_ore::Key;
+//! use std::cmp::Ordering;
+//!
+//! // Create an encryption key
+//! let key = Key::from([0u8; 32]);
+//!
+//! // Encrypt integers
+//! let ct1 = key.encrypt(10u32).unwrap();
+//! let ct2 = key.encrypt(20u32).unwrap();
+//!
+//! // Compare encrypted values
+//! assert_eq!(ct1.cmp(&ct2), Ordering::Less);
+//!
+//! // Decrypt values
+//! assert_eq!(key.decrypt(ct1).unwrap(), 10u32);
+//! assert_eq!(key.decrypt(ct2).unwrap(), 20u32);
+//! ```
+//!
+//! ## Supported Types
+//!
+//! ### Unsigned Integers
+//!
+//! ```
+//! use cllw_ore::Key;
+//!
+//! let key = Key::from([0u8; 32]);
+//!
+//! // u16, u32, u64, u128 are all supported
+//! let ct16 = key.encrypt(100u16).unwrap();
+//! let ct32 = key.encrypt(1000u32).unwrap();
+//! let ct64 = key.encrypt(10000u64).unwrap();
+//! let ct128 = key.encrypt(100000u128).unwrap();
+//!
+//! assert_eq!(key.decrypt(ct32).unwrap(), 1000u32);
+//! ```
+//!
+//! ### Strings
+//!
+//! ```
+//! use cllw_ore::Key;
+//!
+//! let key = Key::from([0u8; 32]);
+//!
+//! let ct1 = key.encrypt("alice").unwrap();
+//! let ct2 = key.encrypt("bob").unwrap();
+//!
+//! assert!(ct1 < ct2);
+//! assert_eq!(key.decrypt(ct1).unwrap(), "alice");
+//! ```
+//!
+//! ### Byte Slices
+//!
+//! ```
+//! use cllw_ore::Key;
+//!
+//! let key = Key::from([0u8; 32]);
+//! let data: &[u8] = &[0xFF, 0x00, 0xAB];
+//!
+//! let ciphertext = key.encrypt(data).unwrap();
+//! let decrypted = ciphertext.decrypt_to_bytes(&key, None).unwrap();
+//!
+//! assert_eq!(data, decrypted.as_slice());
+//! ```
+//!
+//! ## Using Salts for Domain Separation
+//!
+//! ```
+//! use cllw_ore::{Key, CllwOreEncrypt, CllwOreDecrypt};
+//!
+//! let key = Key::from([0u8; 32]);
+//! let salt = b"my-domain";
+//!
+//! // Encrypt with a salt
+//! let ct = 42u32.encrypt_with_salt(&key, Some(salt)).unwrap();
+//!
+//! // Must use the same salt to decrypt
+//! let pt = ct.decrypt_with_salt(&key, Some(salt)).unwrap();
+//! assert_eq!(pt, 42u32);
+//! ```
 use thiserror::Error;
 mod biterator;
 mod impls;
@@ -9,15 +98,60 @@ mod nibble_iterator;
 pub use impls::num::OreCllw8V1;
 pub use impls::string::OreCllw8VariableV1;
 
+/// Errors that can occur during encryption or decryption operations.
 #[derive(Debug, Error)]
 pub enum Error {
+    /// The input length does not match the expected length.
     #[error("Invalid length: expected {expected}, got {actual}")]
     InvalidLength { expected: usize, actual: usize },
 }
 
+/// A 256-bit encryption key for CLLW Order-Revealing Encryption.
+///
+/// The key is used to encrypt and decrypt values while preserving their ordering.
+/// All encryption operations are deterministic for a given key.
+///
+/// # Examples
+///
+/// ```
+/// use cllw_ore::Key;
+///
+/// // Create a key from a 32-byte array
+/// let key = Key::from([0u8; 32]);
+///
+/// // Encrypt an integer
+/// let plaintext: u32 = 42;
+/// let ciphertext = key.encrypt(plaintext).unwrap();
+///
+/// // Decrypt back to the original value
+/// let decrypted = key.decrypt(ciphertext).unwrap();
+/// assert_eq!(plaintext, decrypted);
+/// ```
 pub struct Key([u8; 32]);
 
 impl Key {
+    /// Encrypts a value using CLLW Order-Revealing Encryption.
+    ///
+    /// The encryption is deterministic and preserves the ordering of values.
+    /// Supported types: `u16`, `u32`, `u64`, `u128`, `&str`, `&[u8]`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cllw_ore::Key;
+    /// use std::cmp::Ordering;
+    ///
+    /// let key = Key::from([0u8; 32]);
+    ///
+    /// // Order is preserved
+    /// let a = key.encrypt(10u32).unwrap();
+    /// let b = key.encrypt(20u32).unwrap();
+    /// assert_eq!(a.cmp(&b), Ordering::Less);
+    ///
+    /// // Encryption is deterministic
+    /// let c = key.encrypt(10u32).unwrap();
+    /// assert_eq!(a, c);
+    /// ```
     pub fn encrypt<T>(&self, input: T) -> Result<<T as CllwOreEncrypt>::Output, Error>
     where
         T: CllwOreEncrypt,
@@ -25,6 +159,21 @@ impl Key {
         input.encrypt(self)
     }
 
+    /// Decrypts a ciphertext back to its original value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cllw_ore::Key;
+    ///
+    /// let key = Key::from([0u8; 32]);
+    /// let plaintext = 12345u64;
+    ///
+    /// let ciphertext = key.encrypt(plaintext).unwrap();
+    /// let decrypted = key.decrypt(ciphertext).unwrap();
+    ///
+    /// assert_eq!(plaintext, decrypted);
+    /// ```
     pub fn decrypt<T>(&self, input: T) -> Result<<T as CllwOreDecrypt>::Output, Error>
     where
         T: CllwOreDecrypt,
@@ -39,23 +188,64 @@ impl From<[u8; 32]> for Key {
     }
 }
 
+/// Trait for types that can be encrypted using CLLW Order-Revealing Encryption.
+///
+/// This trait is implemented for unsigned integer types (`u16`, `u32`, `u64`, `u128`),
+/// strings (`&str`), and byte slices (`&[u8]`).
+///
+/// # Examples
+///
+/// ```
+/// use cllw_ore::{Key, CllwOreEncrypt};
+///
+/// let key = Key::from([0u8; 32]);
+///
+/// // Using the trait directly
+/// let ciphertext = 42u32.encrypt(&key).unwrap();
+///
+/// // Using the Key::encrypt method (more ergonomic)
+/// let ciphertext2 = key.encrypt(42u32).unwrap();
+/// assert_eq!(ciphertext, ciphertext2);
+/// ```
 pub trait CllwOreEncrypt: Sized {
+    /// The output type of the encryption operation.
     type Output;
 
+    /// Encrypts the value without a salt.
     fn encrypt(self, key: &Key) -> Result<Self::Output, Error> {
         self.encrypt_with_salt(key, None)
     }
 
+    /// Encrypts the value with an optional salt for domain separation.
     fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error>;
 }
 
+/// Trait for types that can be decrypted from CLLW Order-Revealing Encryption.
+///
+/// This trait is implemented for the ciphertext types `OreCllw8V1<N>` and `OreCllw8VariableV1`.
+///
+/// # Examples
+///
+/// ```
+/// use cllw_ore::{Key, CllwOreDecrypt};
+///
+/// let key = Key::from([0u8; 32]);
+/// let ciphertext = key.encrypt(100u32).unwrap();
+///
+/// // Using the trait directly
+/// let plaintext = ciphertext.decrypt(&key).unwrap();
+/// assert_eq!(plaintext, 100u32);
+/// ```
 pub trait CllwOreDecrypt: Sized {
+    /// The output type of the decryption operation.
     type Output;
 
+    /// Decrypts the ciphertext without a salt.
     fn decrypt(self, key: &Key) -> Result<Self::Output, Error> {
         self.decrypt_with_salt(key, None)
     }
 
+    /// Decrypts the ciphertext with an optional salt (must match the salt used during encryption).
     fn decrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error>;
 }
 
