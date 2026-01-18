@@ -49,6 +49,15 @@ impl From<Vec<u8>> for OreCllw8VariableV1 {
 impl OreCllw8VariableV1 {
     /// Decrypt the ciphertext to raw bytes
     pub fn decrypt_to_bytes(&self, key: &Key, salt: Option<&[u8]>) -> Result<Vec<u8>, Error> {
+        // Validate that ciphertext length is a multiple of 8
+        // Each plaintext byte requires exactly 8 ciphertext bytes (one per bit)
+        if self.bytes.len() % 8 != 0 {
+            return Err(Error::InvalidLength {
+                expected: (self.bytes.len() / 8 + 1) * 8, // Next valid length
+                actual: self.bytes.len(),
+            });
+        }
+
         let mut hasher = blake3::Hasher::new_keyed(&key.0);
         if let Some(salt) = salt {
             let _ = hasher.update(salt);
@@ -209,7 +218,8 @@ fn orderize_string(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::Key;
+    use super::OreCllw8VariableV1;
+    use crate::{Error, Key};
     use std::cmp::Ordering;
 
     fn encrypt_cmp(x: &str, y: &str) -> Ordering {
@@ -533,5 +543,93 @@ mod tests {
 
         // Ordering should be preserved even with salt
         assert!(ct1 < ct2);
+    }
+
+    // Ciphertext validation tests
+
+    #[test]
+    fn test_malformed_ciphertext_length_not_multiple_of_8() {
+        let key = Key::from([0; 32]);
+        
+        // Create a valid ciphertext and then truncate it to an invalid length
+        let data: &[u8] = b"test";
+        let ciphertext = key.encrypt(data).unwrap();
+        
+        // Truncate to make length not a multiple of 8
+        // Valid length would be 32 (4 bytes * 8 bits), so try 30
+        let invalid_bytes = ciphertext.as_ref()[..30].to_vec();
+        let malformed_ct = OreCllw8VariableV1::from(invalid_bytes);
+        
+        // Decryption should fail with InvalidLength error
+        let result = malformed_ct.decrypt_to_bytes(&key, None);
+        assert!(result.is_err());
+        
+        match result {
+            Err(Error::InvalidLength { expected, actual }) => {
+                assert_eq!(actual, 30);
+                assert_eq!(expected, 32); // Next valid length (4 * 8)
+            }
+            _ => panic!("Expected InvalidLength error"),
+        }
+    }
+
+    #[test]
+    fn test_malformed_ciphertext_length_7() {
+        let key = Key::from([0; 32]);
+        
+        // Create a ciphertext with length 7 (not multiple of 8)
+        let invalid_bytes = vec![0u8; 7];
+        let malformed_ct = OreCllw8VariableV1::from(invalid_bytes);
+        
+        // Decryption should fail
+        let result = malformed_ct.decrypt_to_bytes(&key, None);
+        assert!(result.is_err());
+        
+        match result {
+            Err(Error::InvalidLength { expected, actual }) => {
+                assert_eq!(actual, 7);
+                assert_eq!(expected, 8); // Next valid length
+            }
+            _ => panic!("Expected InvalidLength error"),
+        }
+    }
+
+    #[test]
+    fn test_valid_ciphertext_length_0() {
+        let key = Key::from([0; 32]);
+        
+        // Empty ciphertext (length 0) is valid - represents empty input
+        let empty_ct = OreCllw8VariableV1::from(vec![]);
+        
+        let result = empty_ct.decrypt_to_bytes(&key, None);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn test_valid_ciphertext_length_8() {
+        let key = Key::from([0; 32]);
+        
+        // Length 8 is valid (represents 1 byte)
+        let data: &[u8] = &[42];
+        let ciphertext = key.encrypt(data).unwrap();
+        
+        assert_eq!(ciphertext.as_ref().len(), 8);
+        
+        let decrypted = ciphertext.decrypt_to_bytes(&key, None).unwrap();
+        assert_eq!(decrypted.as_slice(), data);
+    }
+
+    #[test]
+    fn test_malformed_string_ciphertext_fails_gracefully() {
+        let key = Key::from([0; 32]);
+        
+        // Create a malformed ciphertext (length not multiple of 8)
+        let invalid_bytes = vec![0u8; 15];
+        let malformed_ct = OreCllw8VariableV1::from(invalid_bytes);
+        
+        // String decryption should also fail with the same error
+        let result = key.decrypt(malformed_ct);
+        assert!(result.is_err());
     }
 }
