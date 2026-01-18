@@ -4,6 +4,15 @@ use postgres_types::ToSql;
 use std::cmp::Ordering;
 use subtle::ConstantTimeEq;
 
+/// Fixed-size CLLW ORE ciphertext for unsigned integer types.
+///
+/// This type represents an encrypted value using the CLLW Order-Revealing Encryption scheme.
+/// The size `N` corresponds to the number of bits in the plaintext (one byte per bit).
+///
+/// - `OreCllw8V1<16>` encrypts `u16` (16 bytes)
+/// - `OreCllw8V1<32>` encrypts `u32` (32 bytes)
+/// - `OreCllw8V1<64>` encrypts `u64` (64 bytes)
+/// - `OreCllw8V1<128>` encrypts `u128` (128 bytes)
 #[derive(Debug, ToSql)]
 #[postgres(name = "ore_cllw_8_v1")]
 pub struct OreCllw8V1<const N: usize> {
@@ -60,7 +69,7 @@ macro_rules! impl_cllw_ore_uint {
             ) -> Result<Self::Output, Error> {
                 let mut hasher = blake3::Hasher::new_keyed(&key.0);
                 if let Some(salt) = salt {
-                    hasher.update(salt);
+                    let _ = hasher.update(salt);
                 }
 
                 let mut bytes: [u8; $array_size] = [0; $array_size];
@@ -68,7 +77,7 @@ macro_rules! impl_cllw_ore_uint {
                     let mut buf: [u8; 16] = [0; 16];
                     hasher.finalize_xof().fill(&mut buf);
                     let byte = u128::from_be_bytes(buf).wrapping_add(bit as u128) & 0xFF;
-                    hasher.update(&[bit]);
+                    let _ = hasher.update(&[bit]);
                     bytes[i] = byte as u8;
                 });
 
@@ -86,7 +95,7 @@ macro_rules! impl_cllw_ore_uint {
             ) -> Result<Self::Output, Error> {
                 let mut hasher = blake3::Hasher::new_keyed(&key.0);
                 if let Some(salt) = salt {
-                    hasher.update(salt);
+                    let _ = hasher.update(salt);
                 }
 
                 let mut result: $uint_type = 0;
@@ -96,7 +105,7 @@ macro_rules! impl_cllw_ore_uint {
                     let prf_block = u128::from_be_bytes(buf) & 0xFF;
                     // Recover the bit by subtracting ciphertext from PRF block
                     let bit = ciphertext_byte.wrapping_sub(prf_block as u8) & 0x01;
-                    hasher.update(&[bit]);
+                    let _ = hasher.update(&[bit]);
                     // Set the bit in the result (MSB first)
                     // Use constant-time operation to avoid timing side-channel
                     result |= (bit as $uint_type) << ((<$uint_type>::BITS - 1) - i as u32);

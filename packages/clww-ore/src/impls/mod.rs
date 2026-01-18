@@ -1,8 +1,8 @@
 use std::cmp::Ordering;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
-pub mod num;
-pub mod string;
+pub(crate) mod num;
+pub(crate) mod string;
 
 /// Compare 2 CLLW ORE encrypted slices of the same length in constant time
 fn compare_slice(a: &[u8], b: &[u8]) -> Ordering {

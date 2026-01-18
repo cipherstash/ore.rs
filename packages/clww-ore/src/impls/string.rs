@@ -8,6 +8,12 @@ use std::cmp::Ordering;
 use subtle::ConstantTimeEq;
 use unicode_normalization::char::decompose_canonical;
 
+/// Variable-length CLLW ORE ciphertext for strings and byte slices.
+///
+/// This type represents an encrypted value using the CLLW Order-Revealing Encryption scheme
+/// for variable-length data types like `&str` and `&[u8]`.
+///
+/// The ciphertext length is proportional to the input length (8 bytes per input byte).
 #[derive(Debug, ToSql)]
 #[postgres(name = "ore_cllw_8_variable_v1")]
 pub struct OreCllw8VariableV1 {
@@ -43,7 +49,7 @@ impl OreCllw8VariableV1 {
     pub fn decrypt_to_bytes(&self, key: &Key, salt: Option<&[u8]>) -> Result<Vec<u8>, Error> {
         let mut hasher = blake3::Hasher::new_keyed(&key.0);
         if let Some(salt) = salt {
-            hasher.update(salt);
+            let _ = hasher.update(salt);
         }
 
         let mut result_bytes = Vec::with_capacity(self.bytes.len() / 8);
@@ -55,7 +61,7 @@ impl OreCllw8VariableV1 {
             let prf_block = u128::from_be_bytes(buf) & 0xFF;
             // Recover the bit by subtracting ciphertext from PRF block
             let bit = ciphertext_byte.wrapping_sub(prf_block as u8) & 0x01;
-            hasher.update(&[bit]);
+            let _ = hasher.update(&[bit]);
 
             // Build up the byte MSB-first (8 bits per byte)
             // Use constant-time operation to avoid timing side-channel
@@ -94,7 +100,7 @@ impl CllwOreEncrypt for &[u8] {
         let len = self.len() * u8::BITS as usize;
         let mut hasher = blake3::Hasher::new_keyed(&key.0);
         if let Some(salt) = salt {
-            hasher.update(salt);
+            let _ = hasher.update(salt);
         }
 
         // Process each byte through the Biterator (MSB first)
@@ -104,7 +110,7 @@ impl CllwOreEncrypt for &[u8] {
                 let mut buf: [u8; 16] = [0; 16];
                 hasher.finalize_xof().fill(&mut buf);
                 let byte = u128::from_be_bytes(buf).wrapping_add(bit as u128) & 0xFF;
-                hasher.update(&[bit]);
+                let _ = hasher.update(&[bit]);
                 out.push(byte as u8);
                 out
             },
@@ -122,13 +128,13 @@ impl CllwOreEncrypt for &str {
         let len = string.len() * u8::BITS as usize;
         let mut hasher = blake3::Hasher::new_keyed(&key.0);
         if let Some(salt) = salt {
-            hasher.update(salt);
+            let _ = hasher.update(salt);
         }
         let bytes = string_biter(&string).fold(Vec::with_capacity(len), |mut out, bit| {
             let mut buf: [u8; 16] = [0; 16];
             hasher.finalize_xof().fill(&mut buf);
             let byte = u128::from_be_bytes(buf).wrapping_add(bit as u128) & 0xFF;
-            hasher.update(&[bit]);
+            let _ = hasher.update(&[bit]);
             out.push(byte as u8);
             out
         });

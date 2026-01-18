@@ -1,27 +1,27 @@
 #[cfg_attr(test, derive(Debug))]
 #[derive(PartialEq, Eq, Clone, Copy)]
-pub struct Nibble(u8);
+pub(crate) struct Nibble(u8);
 
 impl Nibble {
     #[allow(dead_code)]
-    pub fn one_more_than(&self, other: Self) -> bool {
+    pub(crate) fn one_more_than(&self, other: Self) -> bool {
         self.wrapping_add(&Self(1)) == other
     }
 
     #[allow(dead_code)]
-    pub fn wrapping_add(&self, other: &Self) -> Self {
+    pub(crate) fn wrapping_add(&self, other: &Self) -> Self {
         Self((self.0 + other.0) & 0xF)
     }
 }
 
-pub struct NibbleIterator<'s> {
+pub(crate) struct NibbleIterator<'s> {
     slice_iter: std::slice::Iter<'s, u8>,
     curr: Option<u8>,
 }
 
 impl<'s> NibbleIterator<'s> {
     #[allow(dead_code)]
-    pub fn new(slice: &'s [u8]) -> Self {
+    pub(crate) fn new(slice: &'s [u8]) -> Self {
         Self {
             slice_iter: slice.iter(),
             curr: None,

@@ -1,10 +1,10 @@
-pub struct Biterator<T> {
+pub(crate) struct Biterator<T> {
     input: T,
     count: u32,
 }
 
 impl<T> Biterator<T> {
-    pub fn new(input: T) -> Self
+    pub(crate) fn new(input: T) -> Self
     where
         T: BitSize,
     {
@@ -15,7 +15,7 @@ impl<T> Biterator<T> {
     }
 }
 
-pub trait BitSize {
+pub(crate) trait BitSize {
     fn msb(&self) -> u32;
 }
 
@@ -114,14 +114,14 @@ impl Iterator for Biterator<u8> {
     }
 }
 
-pub struct StringBiterator<I>
+pub(crate) struct StringBiterator<I>
 where
     I: Iterator<Item = u8>,
 {
     iter: I,
 }
 
-pub fn string_biter(input: &str) -> StringBiterator<impl Iterator<Item = u8> + '_> {
+pub(crate) fn string_biter(input: &str) -> StringBiterator<impl Iterator<Item = u8> + '_> {
     let iter = input
         .as_bytes()
         .iter()
@@ -141,7 +141,7 @@ where
     }
 }
 
-pub struct VecBiterator<I>
+pub(crate) struct VecBiterator<I>
 where
     I: Iterator<Item = u8>,
 {
@@ -149,7 +149,7 @@ where
 }
 
 #[allow(dead_code)]
-pub fn vec_biter(input: Vec<u8>) -> VecBiterator<impl Iterator<Item = u8>> {
+pub(crate) fn vec_biter(input: Vec<u8>) -> VecBiterator<impl Iterator<Item = u8>> {
     let iter = input.into_iter().flat_map(Biterator::new);
 
     VecBiterator { iter }

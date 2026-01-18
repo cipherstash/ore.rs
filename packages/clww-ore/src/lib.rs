@@ -1,6 +1,38 @@
 #![doc(html_no_source)]
 #![doc(html_favicon_url = "https://cipherstash.com/favicon.ico")]
 #![doc = include_str!("../README.md")]
+//
+// Security-focused lints
+//
+// Deny unsafe code to ensure memory safety
+#![deny(unsafe_code)]
+// Deny missing documentation for public API
+#![deny(missing_docs)]
+// Catch potential security issues from unused results
+#![warn(unused_results)]
+#![warn(unused_must_use)]
+// Ensure proper error handling
+#![warn(unreachable_pub)]
+// Memory safety warnings
+#![warn(clippy::mem_forget)]
+#![warn(clippy::missing_safety_doc)]
+// Note: clippy::arithmetic_side_effects is available but too strict for cryptographic code
+// where bit shifts and arithmetic are fundamental operations. Consider enabling it and
+// using #[allow] annotations on specific crypto functions if needed.
+// Ensure proper error propagation
+#![warn(clippy::unwrap_used)]
+#![warn(clippy::expect_used)]
+#![warn(clippy::panic)]
+// Security: avoid potential data leaks
+#![warn(clippy::print_stdout)]
+#![warn(clippy::print_stderr)]
+#![warn(clippy::dbg_macro)]
+// Code quality lints that help prevent bugs
+#![warn(clippy::clone_on_ref_ptr)]
+#![warn(clippy::todo)]
+#![warn(clippy::unimplemented)]
+// Ensure we use constant-time comparisons where appropriate
+#![warn(clippy::if_then_some_else_none)]
 //! ## Features
 //!
 //! - **Order-Revealing**: Relative order of plaintexts can be determined at query time
@@ -103,7 +135,12 @@ pub use impls::string::OreCllw8VariableV1;
 pub enum Error {
     /// The input length does not match the expected length.
     #[error("Invalid length: expected {expected}, got {actual}")]
-    InvalidLength { expected: usize, actual: usize },
+    InvalidLength {
+        /// The expected length in bytes.
+        expected: usize,
+        /// The actual length in bytes that was provided.
+        actual: usize,
+    },
 }
 
 /// A 256-bit encryption key for CLLW Order-Revealing Encryption.
