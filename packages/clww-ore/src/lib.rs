@@ -10,7 +10,6 @@
 #![deny(missing_docs)]
 // Catch potential security issues from unused results
 #![warn(unused_results)]
-#![warn(unused_must_use)]
 // Ensure proper error handling
 #![warn(unreachable_pub)]
 // Memory safety warnings
