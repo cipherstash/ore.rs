@@ -13,7 +13,7 @@ use subtle::ConstantTimeEq;
 /// - `OreCllw8V1<32>` encrypts `u32` (32 bytes)
 /// - `OreCllw8V1<64>` encrypts `u64` (64 bytes)
 /// - `OreCllw8V1<128>` encrypts `u128` (128 bytes)
-#[derive(Debug, ToSql)]
+#[derive(Debug, Clone, Copy, ToSql)]
 #[postgres(name = "ore_cllw_8_v1")]
 pub struct OreCllw8V1<const N: usize> {
     pub(super) bytes: [u8; N],

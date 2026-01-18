@@ -14,7 +14,7 @@ use unicode_normalization::char::decompose_canonical;
 /// for variable-length data types like `&str` and `&[u8]`.
 ///
 /// The ciphertext length is proportional to the input length (8 bytes per input byte).
-#[derive(Debug, ToSql)]
+#[derive(Debug, Clone, ToSql)]
 #[postgres(name = "ore_cllw_8_variable_v1")]
 pub struct OreCllw8VariableV1 {
     bytes: Vec<u8>,
