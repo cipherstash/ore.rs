@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn test_u32_different_salts_produce_different_ciphertexts() {
         use crate::CllwOreEncrypt;
-        
+
         let key = Key::from([0; 32]);
         let value: u32 = 42;
         let salt1 = b"domain1";
@@ -314,8 +314,8 @@ mod tests {
 
     #[test]
     fn test_u64_wrong_salt_produces_wrong_plaintext() {
-        use crate::{CllwOreEncrypt, CllwOreDecrypt};
-        
+        use crate::{CllwOreDecrypt, CllwOreEncrypt};
+
         let key = Key::from([0; 32]);
         let value: u64 = 12345;
         let salt1 = b"domain1";
@@ -330,8 +330,8 @@ mod tests {
 
     #[test]
     fn test_u128_correct_salt_decrypts_correctly() {
-        use crate::{CllwOreEncrypt, CllwOreDecrypt};
-        
+        use crate::{CllwOreDecrypt, CllwOreEncrypt};
+
         let key = Key::from([0; 32]);
         let value: u128 = 999999;
         let salt = b"my-domain";
@@ -346,7 +346,7 @@ mod tests {
     #[test]
     fn test_u16_no_salt_and_none_salt_are_equivalent() {
         use crate::CllwOreEncrypt;
-        
+
         let key = Key::from([0; 32]);
         let value: u16 = 100;
 
@@ -360,7 +360,7 @@ mod tests {
     #[test]
     fn test_u32_empty_salt_same_as_no_salt() {
         use crate::CllwOreEncrypt;
-        
+
         let key = Key::from([0; 32]);
         let value: u32 = 42;
 
@@ -374,7 +374,7 @@ mod tests {
     #[test]
     fn test_u64_salt_preserves_ordering() {
         use crate::CllwOreEncrypt;
-        
+
         let key = Key::from([0; 32]);
         let salt = b"domain";
 
@@ -388,7 +388,7 @@ mod tests {
     #[test]
     fn test_u128_salt_ordering_with_max_values() {
         use crate::CllwOreEncrypt;
-        
+
         let key = Key::from([0; 32]);
         let salt = b"test-domain";
 

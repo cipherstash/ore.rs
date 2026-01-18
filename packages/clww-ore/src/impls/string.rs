@@ -360,7 +360,7 @@ mod tests {
     #[test]
     fn test_string_different_salts_produce_different_ciphertexts() {
         use crate::CllwOreEncrypt;
-        
+
         let key = Key::from([0; 32]);
         let plaintext = "hello";
         let salt1 = b"domain1";
@@ -375,19 +375,19 @@ mod tests {
 
     #[test]
     fn test_string_wrong_salt_fails_or_produces_garbage() {
-        use crate::{CllwOreEncrypt, CllwOreDecrypt};
-        
+        use crate::{CllwOreDecrypt, CllwOreEncrypt};
+
         let key = Key::from([0; 32]);
         let plaintext = "hello";
         let salt1 = b"domain1";
         let salt2 = b"domain2";
 
         let ciphertext = plaintext.encrypt_with_salt(&key, Some(salt1)).unwrap();
-        
+
         // Using wrong salt typically produces invalid UTF-8 and fails
         // or in rare cases produces garbage if it happens to be valid UTF-8
         match ciphertext.decrypt_with_salt(&key, Some(salt2)) {
-            Err(_) => {}, // Expected: invalid UTF-8
+            Err(_) => {} // Expected: invalid UTF-8
             Ok(decrypted) => {
                 // If it succeeds, it should be garbage (not the original)
                 assert_ne!(plaintext, decrypted);
@@ -397,8 +397,8 @@ mod tests {
 
     #[test]
     fn test_string_correct_salt_decrypts_correctly() {
-        use crate::{CllwOreEncrypt, CllwOreDecrypt};
-        
+        use crate::{CllwOreDecrypt, CllwOreEncrypt};
+
         let key = Key::from([0; 32]);
         let plaintext = "hello world";
         let salt = b"my-domain";
@@ -413,7 +413,7 @@ mod tests {
     #[test]
     fn test_string_no_salt_and_none_salt_are_equivalent() {
         use crate::CllwOreEncrypt;
-        
+
         let key = Key::from([0; 32]);
         let plaintext = "hello";
 
@@ -427,7 +427,7 @@ mod tests {
     #[test]
     fn test_string_empty_salt_same_as_no_salt() {
         use crate::CllwOreEncrypt;
-        
+
         let key = Key::from([0; 32]);
         let plaintext = "hello";
 
@@ -441,7 +441,7 @@ mod tests {
     #[test]
     fn test_string_salt_preserves_ordering() {
         use crate::CllwOreEncrypt;
-        
+
         let key = Key::from([0; 32]);
         let salt = b"domain";
 
@@ -457,7 +457,7 @@ mod tests {
     #[test]
     fn test_bytes_different_salts_produce_different_ciphertexts() {
         use crate::CllwOreEncrypt;
-        
+
         let key = Key::from([0; 32]);
         let data: &[u8] = b"hello";
         let salt1 = b"domain1";
@@ -473,7 +473,7 @@ mod tests {
     #[test]
     fn test_bytes_wrong_salt_produces_wrong_plaintext() {
         use crate::CllwOreEncrypt;
-        
+
         let key = Key::from([0; 32]);
         let data: &[u8] = b"hello";
         let salt1 = b"domain1";
@@ -489,7 +489,7 @@ mod tests {
     #[test]
     fn test_bytes_correct_salt_decrypts_correctly() {
         use crate::CllwOreEncrypt;
-        
+
         let key = Key::from([0; 32]);
         let data: &[u8] = &[0xFF, 0x00, 0xAB, 0xCD];
         let salt = b"my-domain";
@@ -504,7 +504,7 @@ mod tests {
     #[test]
     fn test_bytes_no_salt_and_none_salt_are_equivalent() {
         use crate::CllwOreEncrypt;
-        
+
         let key = Key::from([0; 32]);
         let data: &[u8] = b"hello";
 
@@ -518,7 +518,7 @@ mod tests {
     #[test]
     fn test_bytes_empty_salt_same_as_no_salt() {
         use crate::CllwOreEncrypt;
-        
+
         let key = Key::from([0; 32]);
         let data: &[u8] = b"hello";
 
@@ -532,7 +532,7 @@ mod tests {
     #[test]
     fn test_bytes_salt_preserves_ordering() {
         use crate::CllwOreEncrypt;
-        
+
         let key = Key::from([0; 32]);
         let salt = b"domain";
         let data1: &[u8] = &[1, 2, 3];
@@ -550,20 +550,20 @@ mod tests {
     #[test]
     fn test_malformed_ciphertext_length_not_multiple_of_8() {
         let key = Key::from([0; 32]);
-        
+
         // Create a valid ciphertext and then truncate it to an invalid length
         let data: &[u8] = b"test";
         let ciphertext = key.encrypt(data).unwrap();
-        
+
         // Truncate to make length not a multiple of 8
         // Valid length would be 32 (4 bytes * 8 bits), so try 30
         let invalid_bytes = ciphertext.as_ref()[..30].to_vec();
         let malformed_ct = OreCllw8VariableV1::from(invalid_bytes);
-        
+
         // Decryption should fail with InvalidLength error
         let result = malformed_ct.decrypt_to_bytes(&key, None);
         assert!(result.is_err());
-        
+
         match result {
             Err(Error::InvalidLength { expected, actual }) => {
                 assert_eq!(actual, 30);
@@ -576,15 +576,15 @@ mod tests {
     #[test]
     fn test_malformed_ciphertext_length_7() {
         let key = Key::from([0; 32]);
-        
+
         // Create a ciphertext with length 7 (not multiple of 8)
         let invalid_bytes = vec![0u8; 7];
         let malformed_ct = OreCllw8VariableV1::from(invalid_bytes);
-        
+
         // Decryption should fail
         let result = malformed_ct.decrypt_to_bytes(&key, None);
         assert!(result.is_err());
-        
+
         match result {
             Err(Error::InvalidLength { expected, actual }) => {
                 assert_eq!(actual, 7);
@@ -597,10 +597,10 @@ mod tests {
     #[test]
     fn test_valid_ciphertext_length_0() {
         let key = Key::from([0; 32]);
-        
+
         // Empty ciphertext (length 0) is valid - represents empty input
         let empty_ct = OreCllw8VariableV1::from(vec![]);
-        
+
         let result = empty_ct.decrypt_to_bytes(&key, None);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Vec::<u8>::new());
@@ -609,13 +609,13 @@ mod tests {
     #[test]
     fn test_valid_ciphertext_length_8() {
         let key = Key::from([0; 32]);
-        
+
         // Length 8 is valid (represents 1 byte)
         let data: &[u8] = &[42];
         let ciphertext = key.encrypt(data).unwrap();
-        
+
         assert_eq!(ciphertext.as_ref().len(), 8);
-        
+
         let decrypted = ciphertext.decrypt_to_bytes(&key, None).unwrap();
         assert_eq!(decrypted.as_slice(), data);
     }
@@ -623,11 +623,11 @@ mod tests {
     #[test]
     fn test_malformed_string_ciphertext_fails_gracefully() {
         let key = Key::from([0; 32]);
-        
+
         // Create a malformed ciphertext (length not multiple of 8)
         let invalid_bytes = vec![0u8; 15];
         let malformed_ct = OreCllw8VariableV1::from(invalid_bytes);
-        
+
         // String decryption should also fail with the same error
         let result = key.decrypt(malformed_ct);
         assert!(result.is_err());

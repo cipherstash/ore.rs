@@ -22,6 +22,12 @@
 #![warn(clippy::unwrap_used)]
 #![warn(clippy::expect_used)]
 #![warn(clippy::panic)]
+// Allow these lints in test code where they are acceptable
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+#![cfg_attr(test, allow(clippy::expect_used))]
+#![cfg_attr(test, allow(clippy::panic))]
+#![cfg_attr(test, allow(unused_results))]
+#![cfg_attr(test, allow(unused_must_use))]
 // Security: avoid potential data leaks
 #![warn(clippy::print_stdout)]
 #![warn(clippy::print_stderr)]
