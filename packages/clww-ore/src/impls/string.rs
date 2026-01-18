@@ -2,6 +2,7 @@ use crate::{biterator::string_biter, CllwOreEncrypt, Error, Key};
 use hex::{FromHex, FromHexError};
 use postgres_types::ToSql;
 use std::cmp::Ordering;
+use subtle::ConstantTimeEq;
 use unicode_normalization::char::decompose_canonical;
 
 #[derive(Debug, ToSql)]
@@ -71,32 +72,32 @@ impl PartialOrd for OreCllw8VariableV1 {
 
 impl PartialEq for OreCllw8VariableV1 {
     fn eq(&self, other: &Self) -> bool {
-        // TODO: Use ct_eq
-        self.bytes == other.bytes
+        self.bytes.ct_eq(&other.bytes).into()
     }
 }
 
 impl Eq for OreCllw8VariableV1 {}
 
-/// Compare two outputs lexicographically.
+/// Compare two outputs lexicographically in constant time.
 /// This is useful for strings where the length of the output is not necessarily the same.
 /// A shorter string is considered less than a longer string if it is a prefix of the longer string.
 fn compare_lex(a: &OreCllw8VariableV1, b: &OreCllw8VariableV1) -> Ordering {
-    if a.bytes.is_empty() && b.bytes.is_empty() {
-        return Ordering::Equal;
+    let a_len = a.bytes.len();
+    let b_len = b.bytes.len();
+    let slice_len = a_len.min(b_len);
+    
+    // Handle empty slices
+    if slice_len == 0 {
+        return a_len.cmp(&b_len);
     }
-    if a.bytes.is_empty() {
-        return Ordering::Less;
-    }
-    if b.bytes.is_empty() {
-        return Ordering::Greater;
-    }
-    let slice_len = a.bytes.len().min(b.bytes.len());
-    match super::compare_slice(&a.bytes[..slice_len], &b.bytes[..slice_len]) {
-        Ordering::Less => Ordering::Less,
-        Ordering::Greater => Ordering::Greater,
-        // Shorter strings are less than longer strings (i.e. they sort first)
-        Ordering::Equal => a.bytes.len().cmp(&b.bytes.len()),
+    
+    // Compare the common prefix
+    let prefix_ordering = super::compare_slice(&a.bytes[..slice_len], &b.bytes[..slice_len]);
+    
+    // If prefix is equal, compare by length; otherwise return prefix comparison
+    match prefix_ordering {
+        Ordering::Equal => a_len.cmp(&b_len),
+        other => other,
     }
 }
 

@@ -2,6 +2,7 @@ use crate::{biterator::Biterator, CllwOreDecrypt, CllwOreEncrypt, Error, Key};
 use hex::FromHex;
 use postgres_types::ToSql;
 use std::cmp::Ordering;
+use subtle::ConstantTimeEq;
 
 #[derive(Debug, ToSql)]
 #[postgres(name = "ore_cllw_8_v1")]
@@ -131,8 +132,7 @@ impl<const N: usize> PartialOrd for OreCllw8V1<N> {
 
 impl<const N: usize> PartialEq for OreCllw8V1<N> {
     fn eq(&self, other: &Self) -> bool {
-        // TODO: Use constant time (Paranoid? or at least subtle)
-        self.bytes == other.bytes
+        self.bytes.ct_eq(&other.bytes).into()
     }
 }
 
