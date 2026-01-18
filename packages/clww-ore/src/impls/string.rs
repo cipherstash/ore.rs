@@ -1,4 +1,7 @@
-use crate::{biterator::{string_biter, Biterator}, CllwOreDecrypt, CllwOreEncrypt, Error, Key};
+use crate::{
+    biterator::{string_biter, Biterator},
+    CllwOreDecrypt, CllwOreEncrypt, Error, Key,
+};
 use hex::{FromHex, FromHexError};
 use postgres_types::ToSql;
 use std::cmp::Ordering;
@@ -53,12 +56,12 @@ impl OreCllw8VariableV1 {
             // Recover the bit by subtracting ciphertext from PRF block
             let bit = ciphertext_byte.wrapping_sub(prf_block as u8) & 0x01;
             hasher.update(&[bit]);
-            
+
             // Build up the byte MSB-first (8 bits per byte)
             // Use constant-time operation to avoid timing side-channel
             let bit_position = i % 8;
             current_byte |= bit << (7 - bit_position);
-            
+
             // Push the byte when we've collected 8 bits (every 8th iteration)
             // Check using modulo which is constant-time for the bit position
             if bit_position == 7 {
@@ -93,18 +96,19 @@ impl CllwOreEncrypt for &[u8] {
         if let Some(salt) = salt {
             hasher.update(salt);
         }
-        
+
         // Process each byte through the Biterator (MSB first)
-        let bytes = self.iter()
-            .flat_map(|&byte| Biterator::new(byte))
-            .fold(Vec::with_capacity(len), |mut out, bit| {
+        let bytes = self.iter().flat_map(|&byte| Biterator::new(byte)).fold(
+            Vec::with_capacity(len),
+            |mut out, bit| {
                 let mut buf: [u8; 16] = [0; 16];
                 hasher.finalize_xof().fill(&mut buf);
                 let byte = u128::from_be_bytes(buf).wrapping_add(bit as u128) & 0xFF;
                 hasher.update(&[bit]);
                 out.push(byte as u8);
                 out
-            });
+            },
+        );
 
         Ok(OreCllw8VariableV1 { bytes })
     }
@@ -160,15 +164,15 @@ fn compare_lex(a: &OreCllw8VariableV1, b: &OreCllw8VariableV1) -> Ordering {
     let a_len = a.bytes.len();
     let b_len = b.bytes.len();
     let slice_len = a_len.min(b_len);
-    
+
     // Handle empty slices
     if slice_len == 0 {
         return a_len.cmp(&b_len);
     }
-    
+
     // Compare the common prefix
     let prefix_ordering = super::compare_slice(&a.bytes[..slice_len], &b.bytes[..slice_len]);
-    
+
     // If prefix is equal, compare by length; otherwise return prefix comparison
     match prefix_ordering {
         Ordering::Equal => a_len.cmp(&b_len),

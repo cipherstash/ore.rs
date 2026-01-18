@@ -53,7 +53,11 @@ macro_rules! impl_cllw_ore_uint {
         impl CllwOreEncrypt for $uint_type {
             type Output = OreCllw8V1<$array_size>;
 
-            fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+            fn encrypt_with_salt(
+                self,
+                key: &Key,
+                salt: Option<&[u8]>,
+            ) -> Result<Self::Output, Error> {
                 let mut hasher = blake3::Hasher::new_keyed(&key.0);
                 if let Some(salt) = salt {
                     hasher.update(salt);
@@ -75,7 +79,11 @@ macro_rules! impl_cllw_ore_uint {
         impl CllwOreDecrypt for OreCllw8V1<$array_size> {
             type Output = $uint_type;
 
-            fn decrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+            fn decrypt_with_salt(
+                self,
+                key: &Key,
+                salt: Option<&[u8]>,
+            ) -> Result<Self::Output, Error> {
                 let mut hasher = blake3::Hasher::new_keyed(&key.0);
                 if let Some(salt) = salt {
                     hasher.update(salt);
