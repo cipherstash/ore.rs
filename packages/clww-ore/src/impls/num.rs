@@ -1,4 +1,4 @@
-use crate::{biterator::Biterator, CllwOreEncrypt, Error, Key};
+use crate::{biterator::Biterator, CllwOreDecrypt, CllwOreEncrypt, Error, Key};
 use hex::FromHex;
 use postgres_types::ToSql;
 use std::cmp::Ordering;
@@ -66,6 +66,33 @@ impl CllwOreEncrypt for u32 {
         });
 
         Ok(OreCllw8V1 { bytes })
+    }
+}
+
+impl CllwOreDecrypt for OreCllw8V1<32> {
+    type Output = u32;
+
+    fn decrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+        let mut hasher = blake3::Hasher::new_keyed(&key.0);
+        if let Some(salt) = salt {
+            hasher.update(salt);
+        }
+
+        let mut result: u32 = 0;
+        for (i, &ciphertext_byte) in self.bytes.iter().enumerate() {
+            let mut buf: [u8; 16] = [0; 16];
+            hasher.finalize_xof().fill(&mut buf);
+            let prf_block = u128::from_be_bytes(buf) & 0xFF;
+            // Recover the bit by subtracting ciphertext from PRF block
+            let bit = ciphertext_byte.wrapping_sub(prf_block as u8) & 0x01;
+            hasher.update(&[bit]);
+            // Set the bit in the result (MSB first, so bit 31 is at index 0)
+            if bit == 1 {
+                result |= 1 << (31 - i);
+            }
+        }
+
+        Ok(result)
     }
 }
 
@@ -237,4 +264,21 @@ mod tests {
 
     quickcheck_type!(u32);
     quickcheck_type!(u64);
+
+    #[test]
+    fn test_decrypt_u32() {
+        let key = Key::from([0; 32]);
+        let plaintext: u32 = 42;
+        let ciphertext = key.encrypt(plaintext).unwrap();
+        let decrypted = key.decrypt(ciphertext).unwrap();
+        assert_eq!(plaintext, decrypted);
+    }
+
+    quickcheck! {
+        fn prop_decrypt_u32(key: Key, x: u32) -> bool {
+            let ciphertext = key.encrypt(x).unwrap();
+            let decrypted = key.decrypt(ciphertext).unwrap();
+            x == decrypted
+        }
+    }
 }

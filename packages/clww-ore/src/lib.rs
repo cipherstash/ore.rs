@@ -24,6 +24,13 @@ impl Key {
     {
         input.encrypt(self)
     }
+
+    pub fn decrypt<T>(&self, input: T) -> Result<<T as CllwOreDecrypt>::Output, Error>
+    where
+        T: CllwOreDecrypt,
+    {
+        input.decrypt(self)
+    }
 }
 
 impl From<[u8; 32]> for Key {
@@ -40,6 +47,16 @@ pub trait CllwOreEncrypt: Sized {
     }
 
     fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error>;
+}
+
+pub trait CllwOreDecrypt: Sized {
+    type Output;
+
+    fn decrypt(self, key: &Key) -> Result<Self::Output, Error> {
+        self.decrypt_with_salt(key, None)
+    }
+
+    fn decrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error>;
 }
 
 #[cfg(test)]
