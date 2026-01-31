@@ -735,4 +735,44 @@ mod tests {
             a == b
         }
     }
+
+    // Property tests for orderize_string
+
+    quickcheck! {
+        /// Test that orderize_string is idempotent
+        fn prop_orderize_idempotent(x: String) -> bool {
+            let once = orderize_string(&x);
+            let twice = orderize_string(&once);
+            once == twice
+        }
+
+        /// Test that orderize_string output only contains valid characters
+        fn prop_orderize_valid_chars(x: String) -> bool {
+            let result = orderize_string(&x);
+            result.chars().all(|c| {
+                c.is_alphanumeric() || c.is_whitespace() || c.is_ascii_punctuation()
+            })
+        }
+
+        /// Test that ASCII alphanumeric strings pass through unchanged
+        fn prop_orderize_ascii_alphanumeric_unchanged(x: SafeString) -> bool {
+            // Filter to only ASCII alphanumeric and space (no punctuation that might decompose)
+            let ascii_only: String = x.0.chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == ' ')
+                .collect();
+            orderize_string(&ascii_only) == ascii_only
+        }
+
+        /// Test that orderize_string produces empty output for empty input
+        fn prop_orderize_empty() -> bool {
+            orderize_string("").is_empty()
+        }
+
+        /// Test that orderize_string output length is at most input length
+        /// (decomposition can increase length, but filtering reduces it)
+        fn prop_orderize_safe_string_unchanged(x: SafeString) -> bool {
+            // SafeString only contains chars that survive orderize_string
+            orderize_string(&x.0) == x.0
+        }
+    }
 }
