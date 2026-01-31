@@ -9,6 +9,8 @@ use std::cmp::Ordering;
 use subtle::ConstantTimeEq;
 use unicode_normalization::char::decompose_canonical;
 
+const BITS_PER_BYTE: usize = 8;
+
 /// Variable-length CLLW ORE ciphertext for strings and byte slices.
 ///
 /// This type represents an encrypted value using the CLLW Order-Revealing Encryption scheme
@@ -52,7 +54,7 @@ impl OreCllw8VariableV1 {
         // Validate that ciphertext length is a multiple of 8
         // Each plaintext byte requires exactly 8 ciphertext bytes (one per bit)
         // Use Unspecified error to avoid oracle attacks that could exploit specific error messages
-        if !self.bytes.len().is_multiple_of(8) {
+        if !self.bytes.len().is_multiple_of(BITS_PER_BYTE) {
             return Err(Error);
         }
 
@@ -61,7 +63,7 @@ impl OreCllw8VariableV1 {
             let _ = hasher.update(salt);
         }
 
-        let mut result_bytes = Vec::with_capacity(self.bytes.len() / 8);
+        let mut result_bytes = Vec::with_capacity(self.bytes.len() / BITS_PER_BYTE);
         let mut current_byte: u8 = 0;
 
         for (i, &ciphertext_byte) in self.bytes.iter().enumerate() {
@@ -74,7 +76,7 @@ impl OreCllw8VariableV1 {
 
             // Build up the byte MSB-first (8 bits per byte)
             // Use constant-time operation to avoid timing side-channel
-            let bit_position = i % 8;
+            let bit_position = i % BITS_PER_BYTE;
             current_byte |= bit << (7 - bit_position);
 
             // Push the byte when we've collected 8 bits (every 8th iteration)
