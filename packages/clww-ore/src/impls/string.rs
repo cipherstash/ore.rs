@@ -216,9 +216,31 @@ fn orderize_string(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::OreCllw8VariableV1;
+    use super::{orderize_string, OreCllw8VariableV1};
     use crate::{Error, Key};
+    use quickcheck::{quickcheck, Arbitrary, Gen};
     use std::cmp::Ordering;
+
+    /// A string type that only contains characters that survive `orderize_string`.
+    /// This enables meaningful property tests for roundtrip and ordering.
+    #[derive(Debug, Clone)]
+    struct SafeString(String);
+
+    impl Arbitrary for SafeString {
+        fn arbitrary(g: &mut Gen) -> Self {
+            // Characters that survive orderize_string: ASCII alphanumeric, space, and ASCII punctuation
+            const SAFE_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
+
+            let len = usize::arbitrary(g) % 32; // Limit length to keep tests fast
+            let s: String = (0..len)
+                .map(|_| {
+                    let idx = usize::arbitrary(g) % SAFE_CHARS.len();
+                    SAFE_CHARS[idx] as char
+                })
+                .collect();
+            SafeString(s)
+        }
+    }
 
     fn encrypt_cmp(x: &str, y: &str) -> Ordering {
         let key = Key::from([0; 32]);
@@ -613,5 +635,104 @@ mod tests {
         // String decryption should also fail with the same error
         let result = key.decrypt(malformed_ct);
         assert!(result.is_err());
+    }
+
+    // Property tests for strings
+
+    quickcheck! {
+        /// Test that encrypting the same string twice produces equal ciphertexts
+        fn prop_string_eq(key: Key, x: SafeString) -> bool {
+            let a = key.encrypt(x.0.as_str()).unwrap();
+            let b = key.encrypt(x.0.as_str()).unwrap();
+            a == b
+        }
+
+        /// Test that encryption preserves the ordering relationship between any two strings
+        fn prop_string_cmp(key: Key, x: SafeString, y: SafeString) -> bool {
+            let a = key.encrypt(x.0.as_str()).unwrap();
+            let b = key.encrypt(y.0.as_str()).unwrap();
+
+            // Compare the orderized forms since that's what gets encrypted
+            let x_ord = orderize_string(&x.0);
+            let y_ord = orderize_string(&y.0);
+
+            a.cmp(&b) == x_ord.cmp(&y_ord)
+        }
+
+        /// Test that decryption correctly recovers the original string
+        fn prop_string_decrypt(key: Key, x: SafeString) -> bool {
+            let ciphertext = key.encrypt(x.0.as_str()).unwrap();
+            let decrypted: String = key.decrypt(ciphertext).unwrap();
+
+            // The decrypted value should match the orderized input
+            let expected = orderize_string(&x.0);
+            decrypted == expected
+        }
+
+        /// Test that empty string encrypts deterministically
+        fn prop_string_empty(key: Key) -> bool {
+            let a = key.encrypt("").unwrap();
+            let b = key.encrypt("").unwrap();
+            a == b
+        }
+
+        /// Test that empty string is less than any non-empty string
+        fn prop_string_empty_less_than(key: Key, x: SafeString) -> bool {
+            let x_ord = orderize_string(&x.0);
+            if x_ord.is_empty() {
+                return true; // Skip if x normalizes to empty
+            }
+
+            let empty = key.encrypt("").unwrap();
+            let non_empty = key.encrypt(x.0.as_str()).unwrap();
+            empty < non_empty
+        }
+
+        /// Test that a string is less than itself with an appended character
+        fn prop_string_prefix_less_than(key: Key, x: SafeString) -> bool {
+            let mut extended = x.0.clone();
+            extended.push('a'); // Append a safe character
+
+            let a = key.encrypt(x.0.as_str()).unwrap();
+            let b = key.encrypt(extended.as_str()).unwrap();
+
+            let x_ord = orderize_string(&x.0);
+            let ext_ord = orderize_string(&extended);
+
+            a.cmp(&b) == x_ord.cmp(&ext_ord)
+        }
+    }
+
+    // Property tests for byte slices
+
+    quickcheck! {
+        /// Test that encrypting the same bytes twice produces equal ciphertexts
+        fn prop_bytes_eq(key: Key, x: Vec<u8>) -> bool {
+            let a = key.encrypt(x.as_slice()).unwrap();
+            let b = key.encrypt(x.as_slice()).unwrap();
+            a == b
+        }
+
+        /// Test that encryption preserves the ordering relationship between any two byte slices
+        fn prop_bytes_cmp(key: Key, x: Vec<u8>, y: Vec<u8>) -> bool {
+            let a = key.encrypt(x.as_slice()).unwrap();
+            let b = key.encrypt(y.as_slice()).unwrap();
+            a.cmp(&b) == x.cmp(&y)
+        }
+
+        /// Test that decryption correctly recovers the original bytes
+        fn prop_bytes_decrypt(key: Key, x: Vec<u8>) -> bool {
+            let ciphertext = key.encrypt(x.as_slice()).unwrap();
+            let decrypted = ciphertext.decrypt_to_bytes(&key, None).unwrap();
+            decrypted == x
+        }
+
+        /// Test that empty bytes encrypts deterministically
+        fn prop_bytes_empty(key: Key) -> bool {
+            let empty: &[u8] = &[];
+            let a = key.encrypt(empty).unwrap();
+            let b = key.encrypt(empty).unwrap();
+            a == b
+        }
     }
 }
