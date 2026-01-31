@@ -10,6 +10,7 @@ use subtle::ConstantTimeEq;
 /// This type represents an encrypted value using the CLLW Order-Revealing Encryption scheme.
 /// The size `N` corresponds to the number of bits in the plaintext (one byte per bit).
 ///
+/// - `OreCllw8V1<8>` encrypts `u8` (8 bytes)
 /// - `OreCllw8V1<16>` encrypts `u16` (16 bytes)
 /// - `OreCllw8V1<32>` encrypts `u32` (32 bytes)
 /// - `OreCllw8V1<64>` encrypts `u64` (64 bytes)
@@ -113,6 +114,7 @@ macro_rules! impl_cllw_ore_uint {
 }
 
 // Generate encrypt/decrypt implementations for all unsigned integer types
+impl_cllw_ore_uint!(u8, 8);
 impl_cllw_ore_uint!(u16, 16);
 impl_cllw_ore_uint!(u32, 32);
 impl_cllw_ore_uint!(u64, 64);
