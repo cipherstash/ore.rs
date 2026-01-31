@@ -51,11 +51,9 @@ impl OreCllw8VariableV1 {
     pub fn decrypt_to_bytes(&self, key: &Key, salt: Option<&[u8]>) -> Result<Vec<u8>, Error> {
         // Validate that ciphertext length is a multiple of 8
         // Each plaintext byte requires exactly 8 ciphertext bytes (one per bit)
+        // Use Unspecified error to avoid oracle attacks that could exploit specific error messages
         if !self.bytes.len().is_multiple_of(8) {
-            return Err(Error::InvalidLength {
-                expected: (self.bytes.len() / 8 + 1) * 8, // Next valid length
-                actual: self.bytes.len(),
-            });
+            return Err(Error);
         }
 
         let mut hasher = blake3::Hasher::new_keyed(&key.0);
@@ -97,10 +95,8 @@ impl CllwOreDecrypt for OreCllw8VariableV1 {
     fn decrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         let result_bytes = self.decrypt_to_bytes(key, salt)?;
         // Convert bytes back to string
-        String::from_utf8(result_bytes).map_err(|_| Error::InvalidLength {
-            expected: 0,
-            actual: 0,
-        })
+        // Use Unspecified error to avoid oracle attacks that could exploit specific error messages
+        String::from_utf8(result_bytes).map_err(|_| Error)
     }
 }
 
@@ -560,17 +556,9 @@ mod tests {
         let invalid_bytes = ciphertext.as_ref()[..30].to_vec();
         let malformed_ct = OreCllw8VariableV1::from(invalid_bytes);
 
-        // Decryption should fail with InvalidLength error
+        // Decryption should fail with Unspecified error
         let result = malformed_ct.decrypt_to_bytes(&key, None);
-        assert!(result.is_err());
-
-        match result {
-            Err(Error::InvalidLength { expected, actual }) => {
-                assert_eq!(actual, 30);
-                assert_eq!(expected, 32); // Next valid length (4 * 8)
-            }
-            _ => panic!("Expected InvalidLength error"),
-        }
+        assert!(matches!(result, Err(Error)));
     }
 
     #[test]
@@ -584,14 +572,6 @@ mod tests {
         // Decryption should fail
         let result = malformed_ct.decrypt_to_bytes(&key, None);
         assert!(result.is_err());
-
-        match result {
-            Err(Error::InvalidLength { expected, actual }) => {
-                assert_eq!(actual, 7);
-                assert_eq!(expected, 8); // Next valid length
-            }
-            _ => panic!("Expected InvalidLength error"),
-        }
     }
 
     #[test]

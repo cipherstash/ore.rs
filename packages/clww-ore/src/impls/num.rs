@@ -32,11 +32,7 @@ impl<const N: usize> FromHex for OreCllw8V1<N> {
 
     fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, <Self as FromHex>::Error> {
         let mut out = [0u8; N];
-        let actual_len = hex.as_ref().len();
-        hex::decode_to_slice(hex, &mut out as &mut [u8]).map_err(|_| Error::InvalidLength {
-            expected: N,
-            actual: actual_len,
-        })?;
+        hex::decode_to_slice(hex, &mut out as &mut [u8]).map_err(|_| Error)?;
         Ok(Self { bytes: out })
     }
 }
@@ -46,10 +42,7 @@ impl<const N: usize> TryFrom<&[u8]> for OreCllw8V1<N> {
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
         if value.len() != N {
-            return Err(Error::InvalidLength {
-                expected: N,
-                actual: value.len(),
-            });
+            return Err(Error);
         }
 
         let mut bytes: [u8; N] = [0; N];

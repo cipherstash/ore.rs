@@ -135,18 +135,13 @@ mod nibble_iterator;
 pub use impls::num::OreCllw8V1;
 pub use impls::string::OreCllw8VariableV1;
 
-/// Errors that can occur during encryption or decryption operations.
+/// An error occurred during encryption or decryption.
+///
+/// This error is intentionally vague to prevent oracle attacks where
+/// specific error messages could leak information about the plaintext.
 #[derive(Debug, Error)]
-pub enum Error {
-    /// The input length does not match the expected length.
-    #[error("Invalid length: expected {expected}, got {actual}")]
-    InvalidLength {
-        /// The expected length in bytes.
-        expected: usize,
-        /// The actual length in bytes that was provided.
-        actual: usize,
-    },
-}
+#[error("Operation failed")]
+pub struct Error;
 
 /// A 256-bit encryption key for CLLW Order-Revealing Encryption.
 ///
