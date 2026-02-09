@@ -221,6 +221,11 @@ mod tests {
     use quickcheck::{quickcheck, Arbitrary, Gen};
     use std::cmp::Ordering;
 
+    /// The set of characters that survive `orderize_string`: ASCII alphanumeric, space, and ASCII
+    /// punctuation. These are the characters that are preserved after NFKC normalization and
+    /// filtering.
+    const ORDERIZE_SAFE_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
+
     /// A string type that only contains characters that survive `orderize_string`.
     /// This enables meaningful property tests for roundtrip and ordering.
     #[derive(Debug, Clone)]
@@ -228,14 +233,11 @@ mod tests {
 
     impl Arbitrary for SafeString {
         fn arbitrary(g: &mut Gen) -> Self {
-            // Characters that survive orderize_string: ASCII alphanumeric, space, and ASCII punctuation
-            const SAFE_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
-
             let len = usize::arbitrary(g) % 32; // Limit length to keep tests fast
             let s: String = (0..len)
                 .map(|_| {
-                    let idx = usize::arbitrary(g) % SAFE_CHARS.len();
-                    SAFE_CHARS[idx] as char
+                    let idx = usize::arbitrary(g) % ORDERIZE_SAFE_CHARS.len();
+                    ORDERIZE_SAFE_CHARS[idx] as char
                 })
                 .collect();
             SafeString(s)
