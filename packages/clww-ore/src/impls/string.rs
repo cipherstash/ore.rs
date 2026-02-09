@@ -639,6 +639,11 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[test]
+    fn test_orderize_empty() {
+        assert!(orderize_string("").is_empty());
+    }
+
     // Property tests for strings
 
     quickcheck! {
@@ -763,11 +768,6 @@ mod tests {
                 .filter(|c| c.is_ascii_alphanumeric() || *c == ' ')
                 .collect();
             orderize_string(&ascii_only) == ascii_only
-        }
-
-        /// Test that orderize_string produces empty output for empty input
-        fn prop_orderize_empty() -> bool {
-            orderize_string("").is_empty()
         }
 
         /// Test that SafeString instances are unchanged by orderize_string
