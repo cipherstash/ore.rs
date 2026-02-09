@@ -756,7 +756,7 @@ mod tests {
 
         /// Test that ASCII alphanumeric strings pass through unchanged
         fn prop_orderize_ascii_alphanumeric_unchanged(x: SafeString) -> bool {
-            // Filter to only ASCII alphanumeric and space (no punctuation that might decompose)
+            // Filter to only ASCII alphanumeric and space to test this specific subset
             let ascii_only: String = x.0.chars()
                 .filter(|c| c.is_ascii_alphanumeric() || *c == ' ')
                 .collect();
