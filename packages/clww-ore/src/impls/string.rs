@@ -768,8 +768,7 @@ mod tests {
             orderize_string("").is_empty()
         }
 
-        /// Test that orderize_string output length is at most input length
-        /// (decomposition can increase length, but filtering reduces it)
+        /// Test that SafeString instances are unchanged by orderize_string
         fn prop_orderize_safe_string_unchanged(x: SafeString) -> bool {
             // SafeString only contains chars that survive orderize_string
             orderize_string(&x.0) == x.0
