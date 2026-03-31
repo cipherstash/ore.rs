@@ -133,6 +133,7 @@ mod impls;
 mod nibble_iterator;
 
 pub use impls::num::OreCllw8V1;
+pub use impls::ope::{OpeCllw8V1, OpeCllw8VariableV1};
 pub use impls::string::OreCllw8VariableV1;
 
 /// An error occurred during encryption or decryption.
@@ -217,6 +218,61 @@ impl Key {
     {
         input.decrypt(self)
     }
+
+    /// Encrypts a value using CLLW Order-Preserving Encryption.
+    ///
+    /// This is the OPE variant from Section 3.2 of the CLWW paper. The ciphertext bytes
+    /// are identical to the ORE ciphertext, but comparison uses standard lexicographic
+    /// byte ordering instead of the ORE comparison function.
+    ///
+    /// **Correctness**: OPE comparison is correct with probability `1 - 1/256 ~ 99.6%`
+    /// per comparison, vs 100% for ORE. This is the inherent trade-off for being able
+    /// to compare ciphertexts without a custom comparison function.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cllw_ore::Key;
+    ///
+    /// let key = Key::from([0u8; 32]);
+    ///
+    /// let a = key.encrypt_ope(10u32).unwrap();
+    /// let b = key.encrypt_ope(20u32).unwrap();
+    ///
+    /// // Standard comparison works (correct with high probability)
+    /// // assert!(a < b);
+    ///
+    /// // Decryption is always correct
+    /// assert_eq!(key.decrypt_ope(a).unwrap(), 10u32);
+    /// ```
+    pub fn encrypt_ope<T>(&self, input: T) -> Result<<T as CllwOpeEncrypt>::Output, Error>
+    where
+        T: CllwOpeEncrypt,
+    {
+        input.encrypt_ope(self)
+    }
+
+    /// Decrypts an OPE ciphertext back to its original value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cllw_ore::Key;
+    ///
+    /// let key = Key::from([0u8; 32]);
+    /// let plaintext = 12345u64;
+    ///
+    /// let ciphertext = key.encrypt_ope(plaintext).unwrap();
+    /// let decrypted = key.decrypt_ope(ciphertext).unwrap();
+    ///
+    /// assert_eq!(plaintext, decrypted);
+    /// ```
+    pub fn decrypt_ope<T>(&self, input: T) -> Result<<T as CllwOpeDecrypt>::Output, Error>
+    where
+        T: CllwOpeDecrypt,
+    {
+        input.decrypt_ope(self)
+    }
 }
 
 impl From<[u8; 32]> for Key {
@@ -284,6 +340,66 @@ pub trait CllwOreDecrypt: Sized {
 
     /// Decrypts the ciphertext with an optional salt (must match the salt used during encryption).
     fn decrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error>;
+}
+
+/// Trait for types that can be encrypted using CLLW Order-Preserving Encryption.
+///
+/// This is the OPE variant from Section 3.2 of the CLWW paper. The encryption is identical
+/// to ORE, but the resulting ciphertext type uses standard lexicographic comparison instead
+/// of the ORE comparison function.
+///
+/// **Correctness**: OPE comparison is correct with probability `1 - 1/256 ~ 99.6%` per
+/// comparison. See [`CllwOreEncrypt`] for the always-correct ORE variant.
+///
+/// # Examples
+///
+/// ```
+/// use cllw_ore::{Key, CllwOpeEncrypt};
+///
+/// let key = Key::from([0u8; 32]);
+///
+/// let ct = 42u32.encrypt_ope(&key).unwrap();
+/// ```
+pub trait CllwOpeEncrypt: Sized {
+    /// The output type of the encryption operation.
+    type Output;
+
+    /// Encrypts the value without a salt.
+    fn encrypt_ope(self, key: &Key) -> Result<Self::Output, Error> {
+        self.encrypt_ope_with_salt(key, None)
+    }
+
+    /// Encrypts the value with an optional salt for domain separation.
+    fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error>;
+}
+
+/// Trait for types that can be decrypted from CLLW Order-Preserving Encryption.
+///
+/// This trait is implemented for the OPE ciphertext types `OpeCllw8V1<N>` and
+/// `OpeCllw8VariableV1`.
+///
+/// # Examples
+///
+/// ```
+/// use cllw_ore::{Key, CllwOpeDecrypt};
+///
+/// let key = Key::from([0u8; 32]);
+/// let ciphertext = key.encrypt_ope(100u32).unwrap();
+///
+/// let plaintext = ciphertext.decrypt_ope(&key).unwrap();
+/// assert_eq!(plaintext, 100u32);
+/// ```
+pub trait CllwOpeDecrypt: Sized {
+    /// The output type of the decryption operation.
+    type Output;
+
+    /// Decrypts the ciphertext without a salt.
+    fn decrypt_ope(self, key: &Key) -> Result<Self::Output, Error> {
+        self.decrypt_ope_with_salt(key, None)
+    }
+
+    /// Decrypts the ciphertext with an optional salt (must match the salt used during encryption).
+    fn decrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error>;
 }
 
 #[cfg(test)]

@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
 pub(crate) mod num;
+pub(crate) mod ope;
 pub(crate) mod string;
 
 /// Compare 2 CLLW ORE encrypted slices of the same length in constant time
