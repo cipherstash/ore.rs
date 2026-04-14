@@ -17,7 +17,7 @@ aes = { version = "0.8.2", features = ["zeroize"] }
 block-modes = "0.9.1"
 byteorder = "1.4.3"
 hex-literal = "0.4.1"
-rand = "0.8.5"
+rand = "0.9.3"
 rand_chacha = "0.3.1"
 num = "0.4.0"
 hex = "0.4.3"
