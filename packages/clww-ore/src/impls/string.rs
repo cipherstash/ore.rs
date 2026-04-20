@@ -1,6 +1,6 @@
 use crate::{
     biterator::{string_biter, Biterator},
-    CllwOreDecrypt, CllwOreEncrypt, Error, Key,
+    CllwOpeEncrypt, CllwOreDecrypt, CllwOreEncrypt, Error, Key,
 };
 use hex::{FromHex, FromHexError};
 #[cfg(feature = "postgres-types")]
@@ -195,6 +195,98 @@ fn compare_lex(a: &OreCllw8VariableV1, b: &OreCllw8VariableV1) -> Ordering {
     }
 }
 
+// --- Variable-length OPE ---
+
+/// Variable-length CLLW OPE ciphertext for strings and byte slices.
+///
+/// Ciphertexts are compared with standard lexicographic byte ordering.
+/// Encryption uses the CLLW keystream from Section 3.2 of the paper, but
+/// propagates the `+1` addition as a right-to-left carry into a reserved
+/// leading byte, which eliminates the ~1/256 ordering error the paper's
+/// naive OPE construction exhibits.
+///
+/// **Correctness**: OPE comparison is exact (100%) — lex ordering of two
+/// ciphertexts under the same key and salt always matches the plaintext
+/// ordering.
+///
+/// **Encrypt-only**: this type intentionally does not support decryption.
+/// OPE is used for ordered lookups; callers that need round-trip should
+/// pair it with an ORE (`OreCllw8VariableV1`) ciphertext.
+///
+/// The ciphertext length is `8 * plaintext_bytes + 1` (one reserved leading
+/// byte plus one byte per plaintext bit).
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "postgres-types", derive(ToSql))]
+#[cfg_attr(
+    feature = "postgres-types",
+    postgres(name = "ore_cllw_8_ope_variable_v1")
+)]
+pub struct OpeCllw8VariableV1 {
+    bytes: Vec<u8>,
+}
+
+impl AsRef<[u8]> for OpeCllw8VariableV1 {
+    fn as_ref(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
+impl From<Vec<u8>> for OpeCllw8VariableV1 {
+    fn from(bytes: Vec<u8>) -> Self {
+        Self { bytes }
+    }
+}
+
+impl FromHex for OpeCllw8VariableV1 {
+    type Error = FromHexError;
+
+    fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
+        Ok(Self {
+            bytes: hex::decode(hex)?,
+        })
+    }
+}
+
+impl Ord for OpeCllw8VariableV1 {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.bytes.cmp(&other.bytes)
+    }
+}
+
+impl PartialOrd for OpeCllw8VariableV1 {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for OpeCllw8VariableV1 {
+    fn eq(&self, other: &Self) -> bool {
+        self.bytes == other.bytes
+    }
+}
+
+impl Eq for OpeCllw8VariableV1 {}
+
+impl CllwOpeEncrypt for &str {
+    type Output = OpeCllw8VariableV1;
+
+    fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+        let normalized = orderize_string(self);
+        let bytes = encrypt_ope_variable_bits(string_biter(&normalized), key, salt);
+        Ok(OpeCllw8VariableV1 { bytes })
+    }
+}
+
+impl CllwOpeEncrypt for &[u8] {
+    type Output = OpeCllw8VariableV1;
+
+    fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+        let bits = self.iter().flat_map(|&byte| Biterator::new(byte));
+        let bytes = encrypt_ope_variable_bits(bits, key, salt);
+        Ok(OpeCllw8VariableV1 { bytes })
+    }
+}
+
 /// Encrypts a bit stream into an OPE ciphertext whose lex order matches the
 /// plaintext order exactly.
 ///
@@ -207,7 +299,7 @@ fn compare_lex(a: &OreCllw8VariableV1, b: &OreCllw8VariableV1) -> Ordering {
 /// the carry **right-to-left** (toward more-significant lex positions),
 /// reserving a leading byte so the carry never falls off the front. This
 /// eliminates the ~1/256 ordering error at the cost of one extra byte.
-pub(super) fn encrypt_ope_variable_bits<I>(bits: I, key: &Key, salt: Option<&[u8]>) -> Vec<u8>
+fn encrypt_ope_variable_bits<I>(bits: I, key: &Key, salt: Option<&[u8]>) -> Vec<u8>
 where
     I: IntoIterator<Item = u8>,
 {
@@ -239,19 +331,6 @@ where
     out
 }
 
-/// Encrypts a byte slice into an OPE ciphertext. See [`encrypt_ope_variable_bits`].
-pub(super) fn encrypt_ope_variable_bytes(input: &[u8], key: &Key, salt: Option<&[u8]>) -> Vec<u8> {
-    let bits = input.iter().flat_map(|&byte| Biterator::new(byte));
-    encrypt_ope_variable_bits(bits, key, salt)
-}
-
-/// Encrypts a string (after `orderize_string` normalization) into an OPE
-/// ciphertext. See [`encrypt_ope_variable_bits`].
-pub(super) fn encrypt_ope_variable_str(input: &str, key: &Key, salt: Option<&[u8]>) -> Vec<u8> {
-    let normalized = orderize_string(input);
-    encrypt_ope_variable_bits(string_biter(&normalized), key, salt)
-}
-
 /// Normalizes the string use Unicode = NFKC normalization, and then removes any
 /// characters that are not alphanumeric, whitespace, or ASCII punctuation.
 /// This is a "rough" collation that is used to orderize strings for encryption.
@@ -273,7 +352,7 @@ fn orderize_string(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{orderize_string, OreCllw8VariableV1};
+    use super::{orderize_string, OpeCllw8VariableV1, OreCllw8VariableV1};
     use crate::{Error, Key};
     use quickcheck::{quickcheck, Arbitrary, Gen};
     use std::cmp::Ordering;
@@ -797,6 +876,201 @@ mod tests {
             let a = key.encrypt(empty).unwrap();
             let b = key.encrypt(empty).unwrap();
             a == b
+        }
+    }
+
+    // --- Variable-length OPE tests ---
+    //
+    // OPE encryption is exact (100%) here — every assertion uses plain
+    // equality rather than a statistical tolerance.
+
+    #[test]
+    fn test_ope_variable_reserved_byte_and_length() {
+        let key = Key::from([0u8; 32]);
+        // Empty plaintext is a single reserved byte.
+        let empty = key.encrypt_ope("").unwrap();
+        assert_eq!(empty.as_ref().len(), 1);
+        // A single character is 8 bits + 1 reserved byte.
+        let single = key.encrypt_ope("a").unwrap();
+        assert_eq!(single.as_ref().len(), 9);
+        // Byte-slice path: length = 8 * N + 1.
+        let five: &[u8] = b"hello";
+        let ct = key.encrypt_ope(five).unwrap();
+        assert_eq!(ct.as_ref().len(), 8 * five.len() + 1);
+    }
+
+    #[test]
+    fn test_ope_variable_empty_less_than_nonempty() {
+        for k in 0..32u8 {
+            let key = Key::from([k; 32]);
+            let empty = key.encrypt_ope("").unwrap();
+            for s in ["a", "hello", "zebra", "   ", "~"] {
+                let ct = key.encrypt_ope(s).unwrap();
+                assert!(empty < ct, "empty should be less than {s:?} under key {k}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_ope_variable_adjacent_single_bytes() {
+        for seed in [0u8, 1, 17, 99, 200] {
+            let key = Key::from([seed; 32]);
+            for x in 0u8..=254 {
+                let a: &[u8] = &[x];
+                let b: &[u8] = &[x + 1];
+                let ca = key.encrypt_ope(a).unwrap();
+                let cb = key.encrypt_ope(b).unwrap();
+                assert!(
+                    ca < cb,
+                    "seed {seed}, x={x}: expected ct({x}) < ct({})",
+                    x + 1
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_ope_variable_prefix_ordering() {
+        for seed in [0u8, 7, 42] {
+            let key = Key::from([seed; 32]);
+            // Prefix strictly less than its extension.
+            let pairs: &[(&[u8], &[u8])] = &[
+                (b"a", b"ab"),
+                (b"abc", b"abcd"),
+                (b"", b"x"),
+                (b"hello", b"hello!"),
+                (b"\x00", b"\x00\x00"),
+                (b"\xff", b"\xff\x00"),
+            ];
+            for (shorter, longer) in pairs {
+                let cs = key.encrypt_ope(*shorter).unwrap();
+                let cl = key.encrypt_ope(*longer).unwrap();
+                assert!(
+                    cs < cl,
+                    "seed {seed}: expected ct({shorter:?}) < ct({longer:?})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_ope_variable_carry_across_byte_boundary() {
+        // Plaintexts chosen to force a multi-byte carry chain: [0x00, 0xFF]
+        // vs [0x01, 0x00] only differ in a single position (the top bit of
+        // byte 1 / low bits of byte 0), so any carry from the later bits
+        // must walk left across the byte boundary to preserve order.
+        for seed in 0..64u8 {
+            let key = Key::from([seed; 32]);
+            let a: &[u8] = &[0x00, 0xFF];
+            let b: &[u8] = &[0x01, 0x00];
+            let ca = key.encrypt_ope(a).unwrap();
+            let cb = key.encrypt_ope(b).unwrap();
+            assert!(
+                ca < cb,
+                "seed {seed}: ct([0x00,0xFF]) should be < ct([0x01,0x00])"
+            );
+        }
+    }
+
+    #[test]
+    fn test_ope_variable_exhaustive_boundary_pairs() {
+        // Enumerate every 2-byte plaintext built from boundary values
+        // {0x00, 0x01, 0xFE, 0xFF} and every pair of them across several
+        // keys.
+        let boundary: [u8; 4] = [0x00, 0x01, 0xFE, 0xFF];
+        let mut plaintexts: Vec<[u8; 2]> = Vec::new();
+        for &a in &boundary {
+            for &b in &boundary {
+                plaintexts.push([a, b]);
+            }
+        }
+        for seed in [0u8, 1, 13, 127, 255] {
+            let key = Key::from([seed; 32]);
+            let cts: Vec<OpeCllw8VariableV1> = plaintexts
+                .iter()
+                .map(|p| key.encrypt_ope(p.as_slice()).unwrap())
+                .collect();
+            for i in 0..plaintexts.len() {
+                for j in 0..plaintexts.len() {
+                    assert_eq!(
+                        cts[i].cmp(&cts[j]),
+                        plaintexts[i].cmp(&plaintexts[j]),
+                        "seed {seed}: ct({:?}) vs ct({:?})",
+                        plaintexts[i],
+                        plaintexts[j],
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_ope_variable_determinism() {
+        let key = Key::from([3u8; 32]);
+        for input in [b"".as_slice(), b"a", b"hello", b"\x00\xff\x01"] {
+            let a = key.encrypt_ope(input).unwrap();
+            let b = key.encrypt_ope(input).unwrap();
+            assert_eq!(a, b);
+        }
+    }
+
+    #[test]
+    fn test_ope_hex_round_trip_variable() {
+        use hex::FromHex;
+        let key = Key::from([0u8; 32]);
+        let ct = key.encrypt_ope("hello").unwrap();
+        let hex_str = hex::encode(ct.as_ref());
+        let ct2 = OpeCllw8VariableV1::from_hex(&hex_str).unwrap();
+        assert_eq!(ct, ct2);
+    }
+
+    // --- Variable-length OPE property tests ---
+
+    quickcheck! {
+        /// Regression property for the 1/256 wrap-around bug. Under the old
+        /// scheme, a small fraction of keys would report ct(0x00) > ct(0x01)
+        /// because PRF_7 = 0xFF makes the wrapped byte 0x00 compare less than
+        /// the un-wrapped peer's 0xFF. The backward-carry design must give
+        /// the correct order for every key.
+        fn prop_ope_variable_single_bit_difference(key: Key) -> bool {
+            let c1 = key.encrypt_ope([0x00u8].as_slice()).unwrap();
+            let c2 = key.encrypt_ope([0x01u8].as_slice()).unwrap();
+            c1 < c2
+        }
+
+        fn prop_ope_variable_ordering_matches_plaintext(a: Vec<u8>, b: Vec<u8>, key: Key) -> bool {
+            let ca = key.encrypt_ope(a.as_slice()).unwrap();
+            let cb = key.encrypt_ope(b.as_slice()).unwrap();
+            ca.cmp(&cb) == a.cmp(&b)
+        }
+
+        fn prop_ope_variable_length_invariant(a: Vec<u8>, key: Key) -> bool {
+            let ct = key.encrypt_ope(a.as_slice()).unwrap();
+            ct.as_ref().len() == 8 * a.len() + 1
+        }
+
+        fn prop_ope_variable_determinism_bytes(a: Vec<u8>, key: Key) -> bool {
+            let c1 = key.encrypt_ope(a.as_slice()).unwrap();
+            let c2 = key.encrypt_ope(a.as_slice()).unwrap();
+            c1 == c2
+        }
+
+        fn prop_ope_variable_string_ordering(a: SafeString, b: SafeString, key: Key) -> bool {
+            let ca = key.encrypt_ope(a.0.as_str()).unwrap();
+            let cb = key.encrypt_ope(b.0.as_str()).unwrap();
+            // SafeString characters are orderize-invariant, so raw cmp is fine.
+            ca.cmp(&cb) == a.0.cmp(&b.0)
+        }
+
+        fn prop_ope_variable_string_determinism(a: SafeString, key: Key) -> bool {
+            let c1 = key.encrypt_ope(a.0.as_str()).unwrap();
+            let c2 = key.encrypt_ope(a.0.as_str()).unwrap();
+            c1 == c2
+        }
+
+        fn prop_ope_variable_string_length_invariant(a: SafeString, key: Key) -> bool {
+            let ct = key.encrypt_ope(a.0.as_str()).unwrap();
+            ct.as_ref().len() == 8 * a.0.len() + 1
         }
     }
 
