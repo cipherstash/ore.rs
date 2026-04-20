@@ -221,13 +221,20 @@ impl Key {
 
     /// Encrypts a value using CLLW Order-Preserving Encryption.
     ///
-    /// This is the OPE variant from Section 3.2 of the CLWW paper. The ciphertext bytes
-    /// are identical to the ORE ciphertext, but comparison uses standard lexicographic
-    /// byte ordering instead of the ORE comparison function.
+    /// Ciphertexts can be compared with standard lexicographic byte ordering, without a
+    /// custom comparison function.
     ///
-    /// **Correctness**: OPE comparison is correct with probability `1 - 1/256 ~ 99.6%`
-    /// per comparison, vs 100% for ORE. This is the inherent trade-off for being able
-    /// to compare ciphertexts without a custom comparison function.
+    /// **Correctness**:
+    /// - For variable-length inputs (`&str`, `&[u8]`), comparison is **exact** (100%).
+    ///   The encoding reserves a leading byte to absorb a right-to-left carry that
+    ///   eliminates the wrap-around error from the paper's naive OPE.
+    /// - For fixed-size numeric inputs (`u8`/`u16`/`u32`/`u64`/`u128`), comparison is
+    ///   correct with probability `1 - 1/256 ~ 99.6%` per comparison. (This is the
+    ///   unmodified Section 3.2 construction from the CLWW paper.)
+    ///
+    /// **Decryption** is only supported for the fixed-size numeric types. Variable-
+    /// length OPE is encrypt-only; pair it with an ORE ciphertext if you also need
+    /// round-trip.
     ///
     /// # Examples
     ///
@@ -375,8 +382,10 @@ pub trait CllwOpeEncrypt: Sized {
 
 /// Trait for types that can be decrypted from CLLW Order-Preserving Encryption.
 ///
-/// This trait is implemented for the OPE ciphertext types `OpeCllw8V1<N>` and
-/// `OpeCllw8VariableV1`.
+/// This trait is implemented for the fixed-size numeric OPE ciphertext type
+/// `OpeCllw8V1<N>`. Variable-length OPE (`OpeCllw8VariableV1`) is encrypt-only:
+/// its encoding is one-way, and callers that need round-trip should pair it with
+/// an ORE ciphertext.
 ///
 /// # Examples
 ///

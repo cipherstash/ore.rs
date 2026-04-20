@@ -1,6 +1,7 @@
 use crate::{
-    impls::num::OreCllw8V1, impls::string::OreCllw8VariableV1, CllwOpeDecrypt, CllwOpeEncrypt,
-    CllwOreDecrypt, CllwOreEncrypt, Error, Key,
+    impls::num::OreCllw8V1,
+    impls::string::{encrypt_ope_variable_bytes, encrypt_ope_variable_str},
+    CllwOpeDecrypt, CllwOpeEncrypt, CllwOreDecrypt, CllwOreEncrypt, Error, Key,
 };
 use hex::FromHex;
 #[cfg(feature = "postgres-types")]
@@ -138,14 +139,22 @@ impl_cllw_ope_uint!(u128, 128);
 
 /// Variable-length CLLW OPE ciphertext for strings and byte slices.
 ///
-/// This is the Order-Preserving Encryption variant of [`OreCllw8VariableV1`]. The underlying
-/// bytes are identical to the ORE ciphertext, but comparison uses standard lexicographic
-/// byte ordering instead of the ORE comparison function.
+/// Ciphertexts are compared with standard lexicographic byte ordering.
+/// Encryption uses the CLLW keystream from Section 3.2 of the paper, but
+/// propagates the `+1` addition as a right-to-left carry into a reserved
+/// leading byte, which eliminates the ~1/256 ordering error the paper's
+/// naive OPE construction exhibits.
 ///
-/// **Correctness**: OPE comparison is correct with probability `1 - 1/256 ~ 99.6%` per
-/// comparison at the first differing bit position. See Section 3.2 of the CLWW paper.
+/// **Correctness**: OPE comparison is exact (100%) — lex ordering of two
+/// ciphertexts under the same key and salt always matches the plaintext
+/// ordering.
 ///
-/// The ciphertext length is proportional to the input length (8 bytes per input byte).
+/// **Encrypt-only**: this type intentionally does not support decryption.
+/// OPE is used for ordered lookups; callers that need round-trip should
+/// pair it with an ORE (`OreCllw8VariableV1`) ciphertext.
+///
+/// The ciphertext length is `8 * plaintext_bytes + 1` (one reserved leading
+/// byte plus one byte per plaintext bit).
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "postgres-types", derive(ToSql))]
 #[cfg_attr(
@@ -178,28 +187,6 @@ impl hex::FromHex for OpeCllw8VariableV1 {
     }
 }
 
-impl From<OreCllw8VariableV1> for OpeCllw8VariableV1 {
-    fn from(ore: OreCllw8VariableV1) -> Self {
-        Self {
-            bytes: ore.as_ref().to_vec(),
-        }
-    }
-}
-
-impl From<OpeCllw8VariableV1> for OreCllw8VariableV1 {
-    fn from(ope: OpeCllw8VariableV1) -> Self {
-        OreCllw8VariableV1::from(ope.bytes)
-    }
-}
-
-impl OpeCllw8VariableV1 {
-    /// Decrypt the ciphertext to raw bytes.
-    pub fn decrypt_to_bytes(&self, key: &Key, salt: Option<&[u8]>) -> Result<Vec<u8>, Error> {
-        let ore = OreCllw8VariableV1::from(self.bytes.clone());
-        ore.decrypt_to_bytes(key, salt)
-    }
-}
-
 // OPE comparison: standard lexicographic byte comparison with length tiebreaker.
 impl Ord for OpeCllw8VariableV1 {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -224,39 +211,18 @@ impl Eq for OpeCllw8VariableV1 {}
 impl CllwOpeEncrypt for &str {
     type Output = OpeCllw8VariableV1;
 
-    fn encrypt_ope_with_salt(
-        self,
-        key: &Key,
-        salt: Option<&[u8]>,
-    ) -> Result<Self::Output, Error> {
-        let ore: OreCllw8VariableV1 = self.encrypt_with_salt(key, salt)?;
-        Ok(OpeCllw8VariableV1::from(ore))
+    fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+        let bytes = encrypt_ope_variable_str(self, key, salt);
+        Ok(OpeCllw8VariableV1 { bytes })
     }
 }
 
 impl CllwOpeEncrypt for &[u8] {
     type Output = OpeCllw8VariableV1;
 
-    fn encrypt_ope_with_salt(
-        self,
-        key: &Key,
-        salt: Option<&[u8]>,
-    ) -> Result<Self::Output, Error> {
-        let ore: OreCllw8VariableV1 = self.encrypt_with_salt(key, salt)?;
-        Ok(OpeCllw8VariableV1::from(ore))
-    }
-}
-
-impl CllwOpeDecrypt for OpeCllw8VariableV1 {
-    type Output = String;
-
-    fn decrypt_ope_with_salt(
-        self,
-        key: &Key,
-        salt: Option<&[u8]>,
-    ) -> Result<Self::Output, Error> {
-        let ore: OreCllw8VariableV1 = OreCllw8VariableV1::from(self);
-        ore.decrypt_with_salt(key, salt)
+    fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+        let bytes = encrypt_ope_variable_bytes(self, key, salt);
+        Ok(OpeCllw8VariableV1 { bytes })
     }
 }
 
@@ -284,23 +250,6 @@ mod tests {
         assert_eq!(a, b);
     }
 
-    #[test]
-    fn test_ope_string_deterministic() {
-        let key = Key::from([0u8; 32]);
-        let a = key.encrypt_ope("hello").unwrap();
-        let b = key.encrypt_ope("hello").unwrap();
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    fn test_ope_bytes_deterministic() {
-        let key = Key::from([0u8; 32]);
-        let data: &[u8] = &[0xFF, 0x00, 0xAB];
-        let a = key.encrypt_ope(data).unwrap();
-        let b = key.encrypt_ope(data).unwrap();
-        assert_eq!(a, b);
-    }
-
     // --- Conversion round-trip tests (always pass) ---
 
     #[test]
@@ -310,16 +259,6 @@ mod tests {
         let ope = OpeCllw8V1::from(ore);
         let ore_back: OreCllw8V1<32> = OreCllw8V1::from(ope);
         assert_eq!(ore.as_ref(), ore_back.as_ref());
-    }
-
-    #[test]
-    fn test_ore_to_ope_to_ore_round_trip_variable() {
-        let key = Key::from([0u8; 32]);
-        let ore = key.encrypt("hello").unwrap();
-        let ore_bytes = ore.as_ref().to_vec();
-        let ope = OpeCllw8VariableV1::from(ore);
-        let ore_back: OreCllw8VariableV1 = OreCllw8VariableV1::from(ope);
-        assert_eq!(ore_bytes, ore_back.as_ref());
     }
 
     // --- Decrypt round-trip tests (always pass) ---
@@ -369,23 +308,6 @@ mod tests {
         assert_eq!(value, pt);
     }
 
-    #[test]
-    fn test_ope_decrypt_string() {
-        let key = Key::from([0u8; 32]);
-        let ct = key.encrypt_ope("hello world").unwrap();
-        let pt: String = key.decrypt_ope(ct).unwrap();
-        assert_eq!("hello world", pt);
-    }
-
-    #[test]
-    fn test_ope_decrypt_bytes() {
-        let key = Key::from([0u8; 32]);
-        let data: &[u8] = &[0xFF, 0x00, 0xAB, 0xCD];
-        let ct = key.encrypt_ope(data).unwrap();
-        let pt = ct.decrypt_to_bytes(&key, None).unwrap();
-        assert_eq!(data, pt.as_slice());
-    }
-
     // --- Salt tests (always pass) ---
 
     #[test]
@@ -400,12 +322,8 @@ mod tests {
     #[test]
     fn test_ope_different_salts_different_ciphertexts() {
         let key = Key::from([0u8; 32]);
-        let ct1 = 42u32
-            .encrypt_ope_with_salt(&key, Some(b"domain1"))
-            .unwrap();
-        let ct2 = 42u32
-            .encrypt_ope_with_salt(&key, Some(b"domain2"))
-            .unwrap();
+        let ct1 = 42u32.encrypt_ope_with_salt(&key, Some(b"domain1")).unwrap();
+        let ct2 = 42u32.encrypt_ope_with_salt(&key, Some(b"domain2")).unwrap();
         assert_ne!(ct1, ct2);
     }
 
@@ -470,31 +388,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_ope_string_ordering_statistical() {
-        let key = Key::from([55u8; 32]);
-        let strings: Vec<String> = (0..200).map(|i| format!("string{i:04}")).collect();
-        let mut correct = 0usize;
-        let mut total = 0usize;
-
-        for i in 0..strings.len() {
-            for j in (i + 1)..strings.len() {
-                let ct_a = key.encrypt_ope(strings[i].as_str()).unwrap();
-                let ct_b = key.encrypt_ope(strings[j].as_str()).unwrap();
-
-                total += 1;
-                if ct_a.cmp(&ct_b) == strings[i].cmp(&strings[j]) {
-                    correct += 1;
-                }
-            }
-        }
-
-        let rate = correct as f64 / total as f64;
-        assert!(
-            rate >= 0.99,
-            "OPE string ordering correct rate {rate:.4} is below 99% threshold (expected ~99.6%)"
-        );
-    }
 
     // --- OPE matches ORE for equal values ---
 
@@ -600,11 +493,7 @@ mod tests {
         let step = dates.len() / sample_size;
         let sampled: Vec<u32> = dates.iter().step_by(step.max(1)).copied().collect();
         let total_pairs = sampled.len() as u64 * (sampled.len() as u64 - 1) / 2;
-        println!(
-            "Sampled: {} dates ({} pairs)",
-            sampled.len(),
-            total_pairs
-        );
+        println!("Sampled: {} dates ({} pairs)", sampled.len(), total_pairs);
         println!("Keys: {num_keys}\n");
 
         let mut all_error_rates: Vec<f64> = Vec::with_capacity(num_keys);
@@ -647,8 +536,7 @@ mod tests {
         }
 
         // Aggregate statistics
-        let mean_rate =
-            all_error_rates.iter().sum::<f64>() / all_error_rates.len() as f64;
+        let mean_rate = all_error_rates.iter().sum::<f64>() / all_error_rates.len() as f64;
         let global_rate = total_errors_all_keys as f64 / total_pairs_all_keys as f64;
         let max_rate = all_error_rates
             .iter()
@@ -682,64 +570,243 @@ mod tests {
         println!("\nExpected error rate: {:.4}% (1/256)", 100.0 / 256.0);
     }
 
-    /// Top 100 US family names — exhaustive pairwise comparison.
+    // --- Variable-length exact-ordering tests (100%, backward-carry design) ---
+
     #[test]
-    #[ignore = "expensive analysis test — run with --ignored --nocapture"]
-    fn ope_error_rate_top_100_us_names() {
-        let names = [
-            "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis",
-            "Rodriguez", "Martinez", "Hernandez", "Lopez", "Gonzalez", "Wilson", "Anderson",
-            "Thomas", "Taylor", "Moore", "Jackson", "Martin", "Lee", "Perez", "Thompson",
-            "White", "Harris", "Sanchez", "Clark", "Ramirez", "Lewis", "Robinson", "Walker",
-            "Young", "Allen", "King", "Wright", "Scott", "Torres", "Nguyen", "Hill", "Flores",
-            "Green", "Adams", "Nelson", "Baker", "Hall", "Rivera", "Campbell", "Mitchell",
-            "Carter", "Roberts", "Gomez", "Phillips", "Evans", "Turner", "Diaz", "Parker",
-            "Cruz", "Edwards", "Collins", "Reyes", "Stewart", "Morris", "Morales", "Murphy",
-            "Cook", "Rogers", "Gutierrez", "Ortiz", "Morgan", "Cooper", "Peterson", "Bailey",
-            "Reed", "Kelly", "Howard", "Ramos", "Kim", "Cox", "Ward", "Richardson", "Watson",
-            "Brooks", "Chavez", "Wood", "James", "Bennett", "Gray", "Mendoza", "Ruiz",
-            "Hughes", "Price", "Alvarez", "Castillo", "Sanders", "Patel", "Myers", "Long",
-            "Ross", "Foster", "Jimenez", "Powell",
-        ];
+    fn test_ope_variable_reserved_byte_and_length() {
+        let key = Key::from([0u8; 32]);
+        // Empty plaintext is a single reserved byte.
+        let empty = key.encrypt_ope("").unwrap();
+        assert_eq!(empty.as_ref().len(), 1);
+        // A single character is 8 bits + 1 reserved byte.
+        let single = key.encrypt_ope("a").unwrap();
+        assert_eq!(single.as_ref().len(), 9);
+        // Byte-slice path: length = 8 * N + 1.
+        let five: &[u8] = b"hello";
+        let ct = key.encrypt_ope(five).unwrap();
+        assert_eq!(ct.as_ref().len(), 8 * five.len() + 1);
+    }
 
-        let total_pairs = names.len() as u64 * (names.len() as u64 - 1) / 2;
-        let num_keys = 5;
-
-        println!("\n=== OPE Error Rate: Top 100 US Family Names ===");
-        println!("Domain size: {} names", names.len());
-        println!("Total pairs: {total_pairs}\n");
-
-        for key_seed in 0..num_keys {
-            let key = Key::from([key_seed as u8; 32]);
-
-            let ope_cts: Vec<OpeCllw8VariableV1> = names
-                .iter()
-                .map(|&n| key.encrypt_ope(n).unwrap())
-                .collect();
-            let ore_cts: Vec<OreCllw8VariableV1> =
-                names.iter().map(|&n| key.encrypt(n).unwrap()).collect();
-
-            let mut errors = 0u64;
-            let mut total = 0u64;
-
-            for i in 0..names.len() {
-                for j in (i + 1)..names.len() {
-                    let ore_ord = ore_cts[i].cmp(&ore_cts[j]);
-                    let ope_ord = ope_cts[i].cmp(&ope_cts[j]);
-                    total += 1;
-                    if ore_ord != ope_ord {
-                        errors += 1;
-                    }
-                }
+    #[test]
+    fn test_ope_variable_empty_less_than_nonempty() {
+        for k in 0..32u8 {
+            let key = Key::from([k; 32]);
+            let empty = key.encrypt_ope("").unwrap();
+            for s in ["a", "hello", "zebra", "   ", "~"] {
+                let ct = key.encrypt_ope(s).unwrap();
+                assert!(empty < ct, "empty should be less than {s:?} under key {k}");
             }
+        }
+    }
 
-            let error_rate = errors as f64 / total as f64;
-            println!(
-                "Key {key_seed}: {errors}/{total} incorrect ({:.4}%)",
-                error_rate * 100.0
+    #[test]
+    fn test_ope_variable_adjacent_single_bytes() {
+        for seed in [0u8, 1, 17, 99, 200] {
+            let key = Key::from([seed; 32]);
+            for x in 0u8..=254 {
+                let a: &[u8] = &[x];
+                let b: &[u8] = &[x + 1];
+                let ca = key.encrypt_ope(a).unwrap();
+                let cb = key.encrypt_ope(b).unwrap();
+                assert!(
+                    ca < cb,
+                    "seed {seed}, x={x}: expected ct({x}) < ct({})",
+                    x + 1
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_ope_variable_prefix_ordering() {
+        for seed in [0u8, 7, 42] {
+            let key = Key::from([seed; 32]);
+            // Prefix strictly less than its extension.
+            let pairs: &[(&[u8], &[u8])] = &[
+                (b"a", b"ab"),
+                (b"abc", b"abcd"),
+                (b"", b"x"),
+                (b"hello", b"hello!"),
+                (b"\x00", b"\x00\x00"),
+                (b"\xff", b"\xff\x00"),
+            ];
+            for (shorter, longer) in pairs {
+                let cs = key.encrypt_ope(*shorter).unwrap();
+                let cl = key.encrypt_ope(*longer).unwrap();
+                assert!(
+                    cs < cl,
+                    "seed {seed}: expected ct({shorter:?}) < ct({longer:?})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_ope_variable_carry_across_byte_boundary() {
+        // Plaintexts chosen to force a multi-byte carry chain: the PRF-
+        // dependent part is identical for the first byte (both are 0x00),
+        // so the first difference lands in bit 7 of byte 0 vs bit 0 of
+        // byte 1 under MSB-first processing. Any carry from the later bits
+        // must walk left across the byte boundary to preserve order.
+        for seed in 0..64u8 {
+            let key = Key::from([seed; 32]);
+            // [0x00, 0xFF] < [0x01, 0x00] as plaintext byte sequences.
+            let a: &[u8] = &[0x00, 0xFF];
+            let b: &[u8] = &[0x01, 0x00];
+            let ca = key.encrypt_ope(a).unwrap();
+            let cb = key.encrypt_ope(b).unwrap();
+            assert!(
+                ca < cb,
+                "seed {seed}: ct([0x00,0xFF]) should be < ct([0x01,0x00])"
             );
         }
+    }
 
-        println!("\nExpected error rate: {:.4}% (1/256)", 100.0 / 256.0);
+    #[test]
+    fn test_ope_variable_exhaustive_boundary_pairs() {
+        // Enumerate every 2-byte plaintext built from boundary values
+        // {0x00, 0x01, 0xFE, 0xFF} and every pair of them across several
+        // keys. The backward-carry design must give exact ordering for all
+        // of them.
+        let boundary: [u8; 4] = [0x00, 0x01, 0xFE, 0xFF];
+        let mut plaintexts: Vec<[u8; 2]> = Vec::new();
+        for &a in &boundary {
+            for &b in &boundary {
+                plaintexts.push([a, b]);
+            }
+        }
+        for seed in [0u8, 1, 13, 127, 255] {
+            let key = Key::from([seed; 32]);
+            let cts: Vec<OpeCllw8VariableV1> = plaintexts
+                .iter()
+                .map(|p| key.encrypt_ope(p.as_slice()).unwrap())
+                .collect();
+            for i in 0..plaintexts.len() {
+                for j in 0..plaintexts.len() {
+                    assert_eq!(
+                        cts[i].cmp(&cts[j]),
+                        plaintexts[i].cmp(&plaintexts[j]),
+                        "seed {seed}: ct({:?}) vs ct({:?})",
+                        plaintexts[i],
+                        plaintexts[j],
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_ope_variable_determinism() {
+        let key = Key::from([3u8; 32]);
+        for input in [b"".as_slice(), b"a", b"hello", b"\x00\xff\x01"] {
+            let a = key.encrypt_ope(input).unwrap();
+            let b = key.encrypt_ope(input).unwrap();
+            assert_eq!(a, b);
+        }
+    }
+
+    // --- Property tests ---
+
+    use quickcheck::{quickcheck, Arbitrary, Gen};
+
+    #[derive(Debug, Clone)]
+    struct KeyBytes([u8; 32]);
+
+    impl Arbitrary for KeyBytes {
+        fn arbitrary(g: &mut Gen) -> Self {
+            let mut k = [0u8; 32];
+            for b in k.iter_mut() {
+                *b = u8::arbitrary(g);
+            }
+            KeyBytes(k)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct ShortBytes(Vec<u8>);
+
+    impl Arbitrary for ShortBytes {
+        fn arbitrary(g: &mut Gen) -> Self {
+            // Keep plaintexts short so quickcheck stays fast.
+            let len = usize::arbitrary(g) % 12;
+            let v: Vec<u8> = (0..len).map(|_| u8::arbitrary(g)).collect();
+            ShortBytes(v)
+        }
+    }
+
+    /// Characters that survive `orderize_string` unchanged: ASCII alphanumeric,
+    /// space, and ASCII punctuation. Using these means `orderize_string(s) == s`
+    /// for any `SafeString`, so the property tests can compare raw strings
+    /// against ciphertext order without re-running the normaliser.
+    const ORDERIZE_SAFE_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
+
+    #[derive(Debug, Clone)]
+    struct SafeString(String);
+
+    impl Arbitrary for SafeString {
+        fn arbitrary(g: &mut Gen) -> Self {
+            let len = usize::arbitrary(g) % 16;
+            let s: String = (0..len)
+                .map(|_| {
+                    let idx = usize::arbitrary(g) % ORDERIZE_SAFE_CHARS.len();
+                    ORDERIZE_SAFE_CHARS[idx] as char
+                })
+                .collect();
+            SafeString(s)
+        }
+    }
+
+    quickcheck! {
+        /// Regression property for the 1/256 wrap-around bug. Under the old
+        /// scheme, a small fraction of keys would report ct(0x00) > ct(0x01)
+        /// because PRF_7 = 0xFF makes the wrapped byte 0x00 compare less than
+        /// the un-wrapped peer's 0xFF. The backward-carry design must give
+        /// the correct order for every key.
+        fn prop_ope_variable_single_bit_difference(key: KeyBytes) -> bool {
+            let k = Key::from(key.0);
+            let c1 = k.encrypt_ope([0x00u8].as_slice()).unwrap();
+            let c2 = k.encrypt_ope([0x01u8].as_slice()).unwrap();
+            c1 < c2
+        }
+
+        fn prop_ope_variable_ordering_matches_plaintext(a: ShortBytes, b: ShortBytes, key: KeyBytes) -> bool {
+            let k = Key::from(key.0);
+            let ca = k.encrypt_ope(a.0.as_slice()).unwrap();
+            let cb = k.encrypt_ope(b.0.as_slice()).unwrap();
+            ca.cmp(&cb) == a.0.cmp(&b.0)
+        }
+
+        fn prop_ope_variable_length_invariant(a: ShortBytes, key: KeyBytes) -> bool {
+            let k = Key::from(key.0);
+            let ct = k.encrypt_ope(a.0.as_slice()).unwrap();
+            ct.as_ref().len() == 8 * a.0.len() + 1
+        }
+
+        fn prop_ope_variable_determinism_bytes(a: ShortBytes, key: KeyBytes) -> bool {
+            let k = Key::from(key.0);
+            let c1 = k.encrypt_ope(a.0.as_slice()).unwrap();
+            let c2 = k.encrypt_ope(a.0.as_slice()).unwrap();
+            c1 == c2
+        }
+
+        fn prop_ope_variable_string_ordering(a: SafeString, b: SafeString, key: KeyBytes) -> bool {
+            let k = Key::from(key.0);
+            let ca = k.encrypt_ope(a.0.as_str()).unwrap();
+            let cb = k.encrypt_ope(b.0.as_str()).unwrap();
+            ca.cmp(&cb) == a.0.cmp(&b.0)
+        }
+
+        fn prop_ope_variable_string_determinism(a: SafeString, key: KeyBytes) -> bool {
+            let k = Key::from(key.0);
+            let c1 = k.encrypt_ope(a.0.as_str()).unwrap();
+            let c2 = k.encrypt_ope(a.0.as_str()).unwrap();
+            c1 == c2
+        }
+
+        fn prop_ope_variable_string_length_invariant(a: SafeString, key: KeyBytes) -> bool {
+            let k = Key::from(key.0);
+            let ct = k.encrypt_ope(a.0.as_str()).unwrap();
+            ct.as_ref().len() == 8 * a.0.len() + 1
+        }
     }
 }
