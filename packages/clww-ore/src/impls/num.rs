@@ -145,14 +145,21 @@ impl<const N: usize> Eq for OreCllw8V1<N> {}
 /// Fixed-size CLLW OPE ciphertext for unsigned integer types.
 ///
 /// Ciphertexts are compared with standard lexicographic byte ordering.
-/// Encryption uses the CLLW keystream from Section 3.2 of the paper, but
+/// Encryption uses the CLLW keystream from Section 3.2 of the paper and
 /// propagates the `+1` addition as a right-to-left carry into a reserved
-/// leading byte, which eliminates the ~1/256 ordering error the paper's
-/// naive OPE construction exhibits.
+/// leading byte, which dramatically reduces the ~1/256 ordering error
+/// of the paper's naive base-256 OPE interpretation.
 ///
-/// **Correctness**: OPE comparison is exact (100%) — lex ordering of two
-/// ciphertexts under the same key and salt always matches the plaintext
-/// ordering.
+/// **Correctness**: comparison is *not* exact. The residual per-comparison
+/// error rate is approximately `(1/255)² / 2 ≈ 7.7 × 10⁻⁶` for "adjacent"
+/// plaintext pairs (those whose first differing bit lies near the MSB end
+/// of a shared high-order prefix); for well-separated plaintexts the rate
+/// is essentially zero. Empirically ~6.4 × 10⁻⁶ per comparison over random
+/// `u16` adjacent pairs — vs the naive CLLW OPE rate of ~3.9 × 10⁻³.
+/// The residual error is inherent: the CLLW PRF chain is plaintext-
+/// dependent, so low-order PRF divergence between two plaintexts can
+/// occasionally overwhelm the high-order plaintext difference via the
+/// carry pass.
 ///
 /// **Encrypt-only**: this type intentionally does not support decryption.
 /// OPE is used for ordered lookups; callers that need round-trip should
@@ -583,4 +590,51 @@ mod tests {
     ope_quickcheck_type!(u32);
     ope_quickcheck_type!(u64);
     ope_quickcheck_type!(u128);
+
+    // --- Empirical error-rate measurement ---
+    //
+    // The backward-carry encoding does NOT achieve exact ordering: because the
+    // CLWW PRF chain depends on the plaintext bit history, PRF_P and PRF_Q
+    // diverge in low-order bytes once the first plaintext bit differs. That
+    // low-order "noise" can exceed the high-order plaintext difference and
+    // flip the lex comparison.
+    //
+    // Theoretical rate for an adjacent plaintext pair whose first differing
+    // bit is at position k (with m = BITS - k > 1):
+    //   Pr[error] = (1 / 255)^2 / 2 ≈ 7.7e-6, independent of m.
+    // For m = 1 (P, P+1 differing only at the LSB) the rate is 0 because the
+    // PRF never diverges.
+    // Over random u16 adjacent pairs (uniform P), expected rate is
+    //   (1/4 + 1/8 + ... + 1/2^16) * 7.7e-6 ≈ 3.85e-6.
+    //
+    // Run with: cargo test -p cllw-ore -- --ignored ope_empirical --nocapture
+
+    #[test]
+    #[ignore = "expensive empirical error-rate measurement — run with --ignored --nocapture"]
+    fn ope_empirical_error_rate_adjacent_u16() {
+        let num_keys = 200usize;
+        let mut total = 0u64;
+        let mut errors = 0u64;
+
+        for key_seed in 0..num_keys {
+            let mut key_bytes = [0u8; 32];
+            key_bytes[..8].copy_from_slice(&(key_seed as u64).to_le_bytes());
+            let key = Key::from(key_bytes);
+
+            for x in 0u16..u16::MAX {
+                let ct_x = key.encrypt_ope(x).unwrap();
+                let ct_y = key.encrypt_ope(x + 1).unwrap();
+                total += 1;
+                if ct_x.cmp(&ct_y) != Ordering::Less {
+                    errors += 1;
+                }
+            }
+        }
+
+        let rate = errors as f64 / total as f64;
+        println!(
+            "\n=== OPE backward-carry empirical error rate (u16 adjacent pairs) ===\nkeys: {num_keys}\npairs/key: {}\ntotal trials: {total}\nerrors: {errors}\nmeasured rate: {rate:e}\npredicted rate (random adjacent pairs): ~3.85e-6",
+            u16::MAX as u64
+        );
+    }
 }

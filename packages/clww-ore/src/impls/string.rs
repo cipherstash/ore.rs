@@ -201,14 +201,17 @@ fn compare_lex(a: &OreCllw8VariableV1, b: &OreCllw8VariableV1) -> Ordering {
 /// Variable-length CLLW OPE ciphertext for strings and byte slices.
 ///
 /// Ciphertexts are compared with standard lexicographic byte ordering.
-/// Encryption uses the CLLW keystream from Section 3.2 of the paper, but
+/// Encryption uses the CLLW keystream from Section 3.2 of the paper and
 /// propagates the `+1` addition as a right-to-left carry into a reserved
-/// leading byte, which eliminates the ~1/256 ordering error the paper's
-/// naive OPE construction exhibits.
+/// leading byte, which dramatically reduces the ~1/256 ordering error
+/// of the paper's naive base-256 OPE interpretation.
 ///
-/// **Correctness**: OPE comparison is exact (100%) — lex ordering of two
-/// ciphertexts under the same key and salt always matches the plaintext
-/// ordering.
+/// **Correctness**: comparison is *not* exact. The residual per-comparison
+/// error rate is approximately `(1/255)² / 2 ≈ 7.7 × 10⁻⁶` for adjacent
+/// plaintext pairs and essentially zero for well-separated ones. The
+/// residual error is inherent to the CLLW construction (the PRF chain is
+/// plaintext-dependent, so low-order PRF divergence can occasionally flip
+/// the high-order comparison via the carry pass).
 ///
 /// **Encrypt-only**: this type intentionally does not support decryption.
 /// OPE is used for ordered lookups; callers that need round-trip should

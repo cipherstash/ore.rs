@@ -221,8 +221,14 @@ impl Key {
     /// Encrypts a value using CLLW Order-Preserving Encryption.
     ///
     /// Ciphertexts can be compared with standard lexicographic byte ordering, without a
-    /// custom comparison function. Lex ordering matches plaintext ordering **exactly**
-    /// (100%) under the same key and salt for every supported plaintext type.
+    /// custom comparison function. The encoding applies a right-to-left carry pass to
+    /// the CLLW keystream-plus-plaintext sum, which dramatically reduces the ordering
+    /// error relative to the paper's naive base-256 interpretation: the per-comparison
+    /// error rate drops from ~1/256 (~3.9 × 10⁻³) to ~(1/255)² / 2 (~7.7 × 10⁻⁶) for
+    /// the worst-case "adjacent plaintext" pairs, and essentially zero for well-
+    /// separated plaintexts. Lex ordering is *not* strictly exact — the residual
+    /// error is inherent to the CLLW construction (the PRF chain is plaintext-
+    /// dependent, so low-order PRF divergence can occasionally flip the comparison).
     ///
     /// **Encrypt-only**: OPE ciphertexts cannot be decrypted. Pair with an ORE
     /// ciphertext when round-trip is required.
