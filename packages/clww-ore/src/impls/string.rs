@@ -299,7 +299,7 @@ impl CllwOpeEncrypt for &[u8] {
 /// the carry **right-to-left** (toward more-significant lex positions),
 /// reserving a leading byte so the carry never falls off the front. This
 /// eliminates the ~1/256 ordering error at the cost of one extra byte.
-fn encrypt_ope_variable_bits<I>(bits: I, key: &Key, salt: Option<&[u8]>) -> Vec<u8>
+pub(super) fn encrypt_ope_variable_bits<I>(bits: I, key: &Key, salt: Option<&[u8]>) -> Vec<u8>
 where
     I: IntoIterator<Item = u8>,
 {

@@ -221,19 +221,11 @@ impl Key {
     /// Encrypts a value using CLLW Order-Preserving Encryption.
     ///
     /// Ciphertexts can be compared with standard lexicographic byte ordering, without a
-    /// custom comparison function.
+    /// custom comparison function. Lex ordering matches plaintext ordering **exactly**
+    /// (100%) under the same key and salt for every supported plaintext type.
     ///
-    /// **Correctness**:
-    /// - For variable-length inputs (`&str`, `&[u8]`), comparison is **exact** (100%).
-    ///   The encoding reserves a leading byte to absorb a right-to-left carry that
-    ///   eliminates the wrap-around error from the paper's naive OPE.
-    /// - For fixed-size numeric inputs (`u8`/`u16`/`u32`/`u64`/`u128`), comparison is
-    ///   correct with probability `1 - 1/256 ~ 99.6%` per comparison. (This is the
-    ///   unmodified Section 3.2 construction from the CLWW paper.)
-    ///
-    /// **Decryption** is only supported for the fixed-size numeric types. Variable-
-    /// length OPE is encrypt-only; pair it with an ORE ciphertext if you also need
-    /// round-trip.
+    /// **Encrypt-only**: OPE ciphertexts cannot be decrypted. Pair with an ORE
+    /// ciphertext when round-trip is required.
     ///
     /// # Examples
     ///
@@ -244,40 +236,13 @@ impl Key {
     ///
     /// let a = key.encrypt_ope(10u32).unwrap();
     /// let b = key.encrypt_ope(20u32).unwrap();
-    ///
-    /// // Standard comparison works (correct with high probability)
-    /// // assert!(a < b);
-    ///
-    /// // Decryption is always correct
-    /// assert_eq!(key.decrypt_ope(a).unwrap(), 10u32);
+    /// assert!(a < b);
     /// ```
     pub fn encrypt_ope<T>(&self, input: T) -> Result<<T as CllwOpeEncrypt>::Output, Error>
     where
         T: CllwOpeEncrypt,
     {
         input.encrypt_ope(self)
-    }
-
-    /// Decrypts an OPE ciphertext back to its original value.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use cllw_ore::Key;
-    ///
-    /// let key = Key::from([0u8; 32]);
-    /// let plaintext = 12345u64;
-    ///
-    /// let ciphertext = key.encrypt_ope(plaintext).unwrap();
-    /// let decrypted = key.decrypt_ope(ciphertext).unwrap();
-    ///
-    /// assert_eq!(plaintext, decrypted);
-    /// ```
-    pub fn decrypt_ope<T>(&self, input: T) -> Result<<T as CllwOpeDecrypt>::Output, Error>
-    where
-        T: CllwOpeDecrypt,
-    {
-        input.decrypt_ope(self)
     }
 }
 
@@ -377,37 +342,6 @@ pub trait CllwOpeEncrypt: Sized {
 
     /// Encrypts the value with an optional salt for domain separation.
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error>;
-}
-
-/// Trait for types that can be decrypted from CLLW Order-Preserving Encryption.
-///
-/// This trait is implemented for the fixed-size numeric OPE ciphertext type
-/// `OpeCllw8V1<N>`. Variable-length OPE (`OpeCllw8VariableV1`) is encrypt-only:
-/// its encoding is one-way, and callers that need round-trip should pair it with
-/// an ORE ciphertext.
-///
-/// # Examples
-///
-/// ```
-/// use cllw_ore::{Key, CllwOpeDecrypt};
-///
-/// let key = Key::from([0u8; 32]);
-/// let ciphertext = key.encrypt_ope(100u32).unwrap();
-///
-/// let plaintext = ciphertext.decrypt_ope(&key).unwrap();
-/// assert_eq!(plaintext, 100u32);
-/// ```
-pub trait CllwOpeDecrypt: Sized {
-    /// The output type of the decryption operation.
-    type Output;
-
-    /// Decrypts the ciphertext without a salt.
-    fn decrypt_ope(self, key: &Key) -> Result<Self::Output, Error> {
-        self.decrypt_ope_with_salt(key, None)
-    }
-
-    /// Decrypts the ciphertext with an optional salt (must match the salt used during encryption).
-    fn decrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error>;
 }
 
 #[cfg(test)]

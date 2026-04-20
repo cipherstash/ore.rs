@@ -1,7 +1,4 @@
-use crate::{
-    biterator::Biterator, CllwOpeDecrypt, CllwOpeEncrypt, CllwOreDecrypt, CllwOreEncrypt, Error,
-    Key,
-};
+use crate::{biterator::Biterator, CllwOpeEncrypt, CllwOreDecrypt, CllwOreEncrypt, Error, Key};
 use hex::FromHex;
 #[cfg(feature = "postgres-types")]
 use postgres_types::ToSql;
@@ -147,22 +144,28 @@ impl<const N: usize> Eq for OreCllw8V1<N> {}
 
 /// Fixed-size CLLW OPE ciphertext for unsigned integer types.
 ///
-/// This is the Order-Preserving Encryption variant of [`OreCllw8V1`]. The underlying bytes
-/// are identical to the ORE ciphertext, but comparison uses standard lexicographic byte
-/// ordering instead of the ORE comparison function. This means ciphertexts can be compared
-/// using normal numeric/byte comparison without a custom comparison function.
+/// Ciphertexts are compared with standard lexicographic byte ordering.
+/// Encryption uses the CLLW keystream from Section 3.2 of the paper, but
+/// propagates the `+1` addition as a right-to-left carry into a reserved
+/// leading byte, which eliminates the ~1/256 ordering error the paper's
+/// naive OPE construction exhibits.
 ///
-/// **Correctness**: OPE comparison is correct with probability `1 - 1/256 ~ 99.6%` per
-/// comparison. The error occurs when the PRF output at the first differing bit position
-/// wraps around modulo 256. See Section 3.2 of the CLWW paper for details.
+/// **Correctness**: OPE comparison is exact (100%) — lex ordering of two
+/// ciphertexts under the same key and salt always matches the plaintext
+/// ordering.
 ///
-/// The size `N` corresponds to the number of bits in the plaintext (one byte per bit).
+/// **Encrypt-only**: this type intentionally does not support decryption.
+/// OPE is used for ordered lookups; callers that need round-trip should
+/// pair it with an ORE (`OreCllw8V1`) ciphertext.
 ///
-/// - `OpeCllw8V1<8>` encrypts `u8` (8 bytes)
-/// - `OpeCllw8V1<16>` encrypts `u16` (16 bytes)
-/// - `OpeCllw8V1<32>` encrypts `u32` (32 bytes)
-/// - `OpeCllw8V1<64>` encrypts `u64` (64 bytes)
-/// - `OpeCllw8V1<128>` encrypts `u128` (128 bytes)
+/// The size `N` is the ciphertext byte length: one byte per plaintext bit
+/// plus one reserved leading byte that absorbs the carry.
+///
+/// - `OpeCllw8V1<9>` encrypts `u8` (8 bits → 9 bytes)
+/// - `OpeCllw8V1<17>` encrypts `u16` (16 bits → 17 bytes)
+/// - `OpeCllw8V1<33>` encrypts `u32` (32 bits → 33 bytes)
+/// - `OpeCllw8V1<65>` encrypts `u64` (64 bits → 65 bytes)
+/// - `OpeCllw8V1<129>` encrypts `u128` (128 bits → 129 bytes)
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "postgres-types", derive(ToSql))]
 #[cfg_attr(feature = "postgres-types", postgres(name = "ore_cllw_8_ope_v1"))]
@@ -200,20 +203,7 @@ impl<const N: usize> TryFrom<&[u8]> for OpeCllw8V1<N> {
     }
 }
 
-impl<const N: usize> From<OreCllw8V1<N>> for OpeCllw8V1<N> {
-    fn from(ore: OreCllw8V1<N>) -> Self {
-        Self { bytes: ore.bytes }
-    }
-}
-
-impl<const N: usize> From<OpeCllw8V1<N>> for OreCllw8V1<N> {
-    fn from(ope: OpeCllw8V1<N>) -> Self {
-        Self { bytes: ope.bytes }
-    }
-}
-
 // OPE comparison: standard lexicographic byte comparison.
-// This is the base-256 numeric interpretation from Section 3.2 of the CLWW paper.
 impl<const N: usize> Ord for OpeCllw8V1<N> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.bytes.cmp(&other.bytes)
@@ -234,43 +224,35 @@ impl<const N: usize> PartialEq for OpeCllw8V1<N> {
 
 impl<const N: usize> Eq for OpeCllw8V1<N> {}
 
-/// Macro to implement CllwOpeEncrypt and CllwOpeDecrypt for unsigned integer types.
-/// Delegates to the ORE encryption and converts the result.
+/// Macro to implement [`CllwOpeEncrypt`] for unsigned integer types using the
+/// backward-carry encoding. `$ct_size` is the ciphertext byte length —
+/// `plaintext_bits + 1` to account for the reserved leading byte.
 macro_rules! impl_cllw_ope_uint {
-    ($uint_type:ty, $array_size:expr) => {
+    ($uint_type:ty, $ct_size:expr) => {
         impl CllwOpeEncrypt for $uint_type {
-            type Output = OpeCllw8V1<$array_size>;
+            type Output = OpeCllw8V1<$ct_size>;
 
             fn encrypt_ope_with_salt(
                 self,
                 key: &Key,
                 salt: Option<&[u8]>,
             ) -> Result<Self::Output, Error> {
-                let ore: OreCllw8V1<$array_size> = self.encrypt_with_salt(key, salt)?;
-                Ok(OpeCllw8V1::from(ore))
-            }
-        }
-
-        impl CllwOpeDecrypt for OpeCllw8V1<$array_size> {
-            type Output = $uint_type;
-
-            fn decrypt_ope_with_salt(
-                self,
-                key: &Key,
-                salt: Option<&[u8]>,
-            ) -> Result<Self::Output, Error> {
-                let ore: OreCllw8V1<$array_size> = OreCllw8V1::from(self);
-                ore.decrypt_with_salt(key, salt)
+                let bits = Biterator::new(self);
+                let vec = super::string::encrypt_ope_variable_bits(bits, key, salt);
+                debug_assert_eq!(vec.len(), $ct_size);
+                let mut bytes = [0u8; $ct_size];
+                bytes.copy_from_slice(&vec);
+                Ok(OpeCllw8V1 { bytes })
             }
         }
     };
 }
 
-impl_cllw_ope_uint!(u8, 8);
-impl_cllw_ope_uint!(u16, 16);
-impl_cllw_ope_uint!(u32, 32);
-impl_cllw_ope_uint!(u64, 64);
-impl_cllw_ope_uint!(u128, 128);
+impl_cllw_ope_uint!(u8, 9);
+impl_cllw_ope_uint!(u16, 17);
+impl_cllw_ope_uint!(u32, 33);
+impl_cllw_ope_uint!(u64, 65);
+impl_cllw_ope_uint!(u128, 129);
 
 #[cfg(test)]
 mod tests {
@@ -527,86 +509,9 @@ mod tests {
     }
 
     // --- OPE (numeric) tests ---
-
-    #[test]
-    fn test_ope_u32_deterministic() {
-        let key = Key::from([0u8; 32]);
-        let a = key.encrypt_ope(42u32).unwrap();
-        let b = key.encrypt_ope(42u32).unwrap();
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    fn test_ope_u64_deterministic() {
-        let key = Key::from([1u8; 32]);
-        let a = key.encrypt_ope(12345u64).unwrap();
-        let b = key.encrypt_ope(12345u64).unwrap();
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    fn test_ore_to_ope_to_ore_round_trip_u32() {
-        let key = Key::from([0u8; 32]);
-        let ore = key.encrypt(42u32).unwrap();
-        let ope = OpeCllw8V1::from(ore);
-        let ore_back: OreCllw8V1<32> = OreCllw8V1::from(ope);
-        assert_eq!(ore.as_ref(), ore_back.as_ref());
-    }
-
-    #[test]
-    fn test_ope_decrypt_u8() {
-        let key = Key::from([0u8; 32]);
-        let value: u8 = 200;
-        let ct = key.encrypt_ope(value).unwrap();
-        let pt: u8 = key.decrypt_ope(ct).unwrap();
-        assert_eq!(value, pt);
-    }
-
-    #[test]
-    fn test_ope_decrypt_u16() {
-        let key = Key::from([0u8; 32]);
-        let value: u16 = 12345;
-        let ct = key.encrypt_ope(value).unwrap();
-        let pt: u16 = key.decrypt_ope(ct).unwrap();
-        assert_eq!(value, pt);
-    }
-
-    #[test]
-    fn test_ope_decrypt_u32() {
-        let key = Key::from([0u8; 32]);
-        let value: u32 = 999999;
-        let ct = key.encrypt_ope(value).unwrap();
-        let pt: u32 = key.decrypt_ope(ct).unwrap();
-        assert_eq!(value, pt);
-    }
-
-    #[test]
-    fn test_ope_decrypt_u64() {
-        let key = Key::from([0u8; 32]);
-        let value: u64 = 1_000_000_000;
-        let ct = key.encrypt_ope(value).unwrap();
-        let pt: u64 = key.decrypt_ope(ct).unwrap();
-        assert_eq!(value, pt);
-    }
-
-    #[test]
-    fn test_ope_decrypt_u128() {
-        let key = Key::from([0u8; 32]);
-        let value: u128 = u128::MAX / 2;
-        let ct = key.encrypt_ope(value).unwrap();
-        let pt: u128 = key.decrypt_ope(ct).unwrap();
-        assert_eq!(value, pt);
-    }
-
-    #[test]
-    fn test_ope_salt_decrypt_round_trip() {
-        use crate::{CllwOpeDecrypt, CllwOpeEncrypt};
-        let key = Key::from([0u8; 32]);
-        let salt = b"my-domain";
-        let ct = 42u32.encrypt_ope_with_salt(&key, Some(salt)).unwrap();
-        let pt = ct.decrypt_ope_with_salt(&key, Some(salt)).unwrap();
-        assert_eq!(42u32, pt);
-    }
+    //
+    // OPE encryption is exact (100%) under the backward-carry encoding — every
+    // assertion uses plain equality rather than a statistical tolerance.
 
     #[test]
     fn test_ope_different_salts_different_ciphertexts() {
@@ -617,74 +522,12 @@ mod tests {
         assert_ne!(ct1, ct2);
     }
 
-    // Statistical ordering: numeric OPE retains the paper's ~1/256 per-comparison
-    // error. These tests sample many pairs and assert the success rate stays
-    // near the expected 99.6%.
-
-    #[test]
-    fn test_ope_u32_ordering_statistical() {
-        let key = Key::from([42u8; 32]);
-        let n = 10_000;
-        let mut correct = 0usize;
-        for i in 0..n {
-            let x = (i * 7 + 13) as u32;
-            let y = (i * 11 + 29) as u32;
-            if x == y {
-                continue;
-            }
-            let ct_x = key.encrypt_ope(x).unwrap();
-            let ct_y = key.encrypt_ope(y).unwrap();
-            if ct_x.cmp(&ct_y) == x.cmp(&y) {
-                correct += 1;
-            }
-        }
-        let rate = correct as f64 / n as f64;
-        assert!(
-            rate >= 0.99,
-            "OPE ordering correct rate {rate:.4} is below 99% threshold (expected ~99.6%)"
-        );
-    }
-
-    #[test]
-    fn test_ope_u64_ordering_statistical() {
-        let key = Key::from([77u8; 32]);
-        let n = 10_000;
-        let mut correct = 0usize;
-        for i in 0..n {
-            let x = (i as u64) * 997 + 1;
-            let y = (i as u64) * 991 + 3;
-            if x == y {
-                continue;
-            }
-            let ct_x = key.encrypt_ope(x).unwrap();
-            let ct_y = key.encrypt_ope(y).unwrap();
-            if ct_x.cmp(&ct_y) == x.cmp(&y) {
-                correct += 1;
-            }
-        }
-        let rate = correct as f64 / n as f64;
-        assert!(
-            rate >= 0.99,
-            "OPE ordering correct rate {rate:.4} is below 99% threshold (expected ~99.6%)"
-        );
-    }
-
-    #[test]
-    fn test_ope_equal_values_always_equal() {
-        let key = Key::from([0u8; 32]);
-        for x in [0u32, 1, 42, 1000, u32::MAX / 2, u32::MAX] {
-            let ct1 = key.encrypt_ope(x).unwrap();
-            let ct2 = key.encrypt_ope(x).unwrap();
-            assert_eq!(ct1.cmp(&ct2), Ordering::Equal, "failed for x={x}");
-        }
-    }
-
     #[test]
     fn test_ope_hex_round_trip_fixed() {
         let key = Key::from([0u8; 32]);
         let ct = key.encrypt_ope(42u32).unwrap();
         let hex_str = hex::encode(ct.as_ref());
-        let ct2 = OpeCllw8V1::<32>::from_hex(&hex_str).unwrap();
+        let ct2 = OpeCllw8V1::<33>::from_hex(&hex_str).unwrap();
         assert_eq!(ct, ct2);
     }
 
@@ -693,144 +536,76 @@ mod tests {
         let key = Key::from([0u8; 32]);
         let ct = key.encrypt_ope(42u32).unwrap();
         let bytes = ct.as_ref();
-        let ct2 = OpeCllw8V1::<32>::try_from(bytes).unwrap();
+        let ct2 = OpeCllw8V1::<33>::try_from(bytes).unwrap();
         assert_eq!(ct, ct2);
     }
 
     #[test]
     fn test_ope_try_from_wrong_length_fails() {
         let bytes = [0u8; 16];
-        let result = OpeCllw8V1::<32>::try_from(bytes.as_slice());
+        let result = OpeCllw8V1::<33>::try_from(bytes.as_slice());
         assert!(result.is_err());
     }
 
-    // --- Domain-specific error rate analysis ---
-    //
-    // Measures the numeric-OPE error rate for realistic plaintext domains with
-    // many keys. The fixed-size numeric construction keeps the paper's
-    // ~1/256 ≈ 0.39% per-comparison error.
-    //
-    // Run with: cargo test -p cllw-ore -- --ignored ope_error_rate --nocapture
-
-    /// Days from 1940-01-01 to 2010-12-31, encoded as days-since-1940-01-01.
-    /// Encrypt all dates, compare every pair with both ORE (ground truth) and OPE.
     #[test]
-    #[ignore = "expensive analysis test — run with --ignored --nocapture"]
-    fn ope_error_rate_birthdates_1940_2010() {
-        fn days_in_month(year: u32, month: u32) -> u32 {
-            match month {
-                1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-                4 | 6 | 9 | 11 => 30,
-                2 => {
-                    if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 {
-                        29
-                    } else {
-                        28
-                    }
-                }
-                _ => unreachable!(),
+    fn test_ope_numeric_boundary_ordering() {
+        // Boundary pairs that used to trigger the 1/256 wrap-around bug, plus
+        // MAX/MIN, and adjacent values. All must preserve order exactly.
+        for seed in [0u8, 1, 17, 42, 99, 200, 255] {
+            let key = Key::from([seed; 32]);
+            let pairs_u32: &[(u32, u32)] = &[
+                (0, 1),
+                (0, u32::MAX),
+                (u32::MAX - 1, u32::MAX),
+                (1 << 31, (1 << 31) + 1),
+                (0x7FFF_FFFF, 0x8000_0000),
+            ];
+            for &(x, y) in pairs_u32 {
+                let cx = key.encrypt_ope(x).unwrap();
+                let cy = key.encrypt_ope(y).unwrap();
+                assert_eq!(cx.cmp(&cy), x.cmp(&y), "seed {seed}: u32 {x} vs {y}");
             }
         }
-
-        // Generate all dates as days-since-1940-01-01
-        let mut dates: Vec<u32> = Vec::new();
-        let mut day_count: u32 = 0;
-        for year in 1940..=2010 {
-            for month in 1..=12 {
-                for _day in 1..=days_in_month(year, month) {
-                    dates.push(day_count);
-                    day_count += 1;
-                }
-            }
-        }
-
-        let num_keys = 1000;
-        println!("\n=== OPE Error Rate: Birthdates 1940-2010 ===");
-        println!("Domain size: {} dates", dates.len());
-        println!(
-            "Total pairs: {}",
-            dates.len() as u64 * (dates.len() as u64 - 1) / 2
-        );
-
-        // Sample to keep runtime reasonable: take every Nth date
-        let sample_size = 2000;
-        let step = dates.len() / sample_size;
-        let sampled: Vec<u32> = dates.iter().step_by(step.max(1)).copied().collect();
-        let total_pairs = sampled.len() as u64 * (sampled.len() as u64 - 1) / 2;
-        println!("Sampled: {} dates ({} pairs)", sampled.len(), total_pairs);
-        println!("Keys: {num_keys}\n");
-
-        let mut all_error_rates: Vec<f64> = Vec::with_capacity(num_keys);
-        let mut total_errors_all_keys = 0u64;
-        let mut total_pairs_all_keys = 0u64;
-
-        for key_seed in 0..num_keys {
-            // Use a varied key — spread the seed across the key bytes
-            let mut key_bytes = [0u8; 32];
-            let seed_bytes = (key_seed as u64).to_le_bytes();
-            key_bytes[..8].copy_from_slice(&seed_bytes);
-            let key = Key::from(key_bytes);
-
-            // Encrypt all sampled dates
-            let ope_cts: Vec<OpeCllw8V1<32>> = sampled
-                .iter()
-                .map(|&d| key.encrypt_ope(d).unwrap())
-                .collect();
-            let ore_cts: Vec<OreCllw8V1<32>> =
-                sampled.iter().map(|&d| key.encrypt(d).unwrap()).collect();
-
-            let mut errors = 0u64;
-            let mut total = 0u64;
-
-            for i in 0..sampled.len() {
-                for j in (i + 1)..sampled.len() {
-                    let ore_ord = ore_cts[i].cmp(&ore_cts[j]);
-                    let ope_ord = ope_cts[i].cmp(&ope_cts[j]);
-                    total += 1;
-                    if ore_ord != ope_ord {
-                        errors += 1;
-                    }
-                }
-            }
-
-            let error_rate = errors as f64 / total as f64;
-            all_error_rates.push(error_rate);
-            total_errors_all_keys += errors;
-            total_pairs_all_keys += total;
-        }
-
-        // Aggregate statistics
-        let mean_rate = all_error_rates.iter().sum::<f64>() / all_error_rates.len() as f64;
-        let global_rate = total_errors_all_keys as f64 / total_pairs_all_keys as f64;
-        let max_rate = all_error_rates
-            .iter()
-            .cloned()
-            .fold(f64::NEG_INFINITY, f64::max);
-        let min_rate = all_error_rates
-            .iter()
-            .cloned()
-            .fold(f64::INFINITY, f64::min);
-        let keys_with_zero = all_error_rates.iter().filter(|&&r| r == 0.0).count();
-        let variance = all_error_rates
-            .iter()
-            .map(|r| (r - mean_rate).powi(2))
-            .sum::<f64>()
-            / all_error_rates.len() as f64;
-        let stddev = variance.sqrt();
-
-        println!("--- Results across {num_keys} keys ---");
-        println!(
-            "Global error rate: {total_errors_all_keys}/{total_pairs_all_keys} ({:.4}%)",
-            global_rate * 100.0
-        );
-        println!("Mean per-key rate: {:.4}%", mean_rate * 100.0);
-        println!("Std dev:           {:.4}%", stddev * 100.0);
-        println!("Min per-key rate:  {:.4}%", min_rate * 100.0);
-        println!("Max per-key rate:  {:.4}%", max_rate * 100.0);
-        println!(
-            "Keys with 0 errors: {keys_with_zero}/{num_keys} ({:.1}%)",
-            keys_with_zero as f64 / num_keys as f64 * 100.0
-        );
-        println!("\nExpected error rate: {:.4}% (1/256)", 100.0 / 256.0);
     }
+
+    /// Generate a full suite of OPE numeric property tests per-type.
+    macro_rules! ope_quickcheck_type {
+        ($ty:ident, $ct_size:expr) => {
+            paste! {
+                quickcheck! {
+                    /// OPE encryption is deterministic.
+                    fn [<prop_ope_eq_ $ty>](key: Key, x: $ty) -> bool {
+                        let a = key.encrypt_ope(x).unwrap();
+                        let b = key.encrypt_ope(x).unwrap();
+                        a == b
+                    }
+
+                    /// OPE lex ordering matches plaintext ordering exactly.
+                    fn [<prop_ope_cmp_ $ty>](key: Key, x: $ty, y: $ty) -> bool {
+                        let a = key.encrypt_ope(x).unwrap();
+                        let b = key.encrypt_ope(y).unwrap();
+                        a.cmp(&b) == x.cmp(&y)
+                    }
+
+                    /// Regression property for the 1/256 wrap-around bug.
+                    fn [<prop_ope_zero_less_than_one_ $ty>](key: Key) -> bool {
+                        let c0 = key.encrypt_ope(0 as $ty).unwrap();
+                        let c1 = key.encrypt_ope(1 as $ty).unwrap();
+                        c0 < c1
+                    }
+
+                    /// Output length is exactly plaintext_bits + 1.
+                    fn [<prop_ope_length_ $ty>](key: Key, x: $ty) -> bool {
+                        let ct = key.encrypt_ope(x).unwrap();
+                        ct.as_ref().len() == $ct_size
+                    }
+                }
+            }
+        };
+    }
+
+    ope_quickcheck_type!(u16, 17);
+    ope_quickcheck_type!(u32, 33);
+    ope_quickcheck_type!(u64, 65);
+    ope_quickcheck_type!(u128, 129);
 }
