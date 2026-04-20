@@ -1,5 +1,6 @@
 use crate::{
     biterator::{string_biter, Biterator},
+    impls::encrypt_ope_bits,
     CllwOpeEncrypt, CllwOreDecrypt, CllwOreEncrypt, Error, Key,
 };
 use hex::{FromHex, FromHexError};
@@ -215,7 +216,7 @@ fn compare_lex(a: &OreCllw8VariableV1, b: &OreCllw8VariableV1) -> Ordering {
 ///
 /// The ciphertext length is `8 * plaintext_bytes + 1` (one reserved leading
 /// byte plus one byte per plaintext bit).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "postgres-types", derive(ToSql))]
 #[cfg_attr(
     feature = "postgres-types",
@@ -231,12 +232,6 @@ impl AsRef<[u8]> for OpeCllw8VariableV1 {
     }
 }
 
-impl From<Vec<u8>> for OpeCllw8VariableV1 {
-    fn from(bytes: Vec<u8>) -> Self {
-        Self { bytes }
-    }
-}
-
 impl FromHex for OpeCllw8VariableV1 {
     type Error = FromHexError;
 
@@ -247,32 +242,13 @@ impl FromHex for OpeCllw8VariableV1 {
     }
 }
 
-impl Ord for OpeCllw8VariableV1 {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.bytes.cmp(&other.bytes)
-    }
-}
-
-impl PartialOrd for OpeCllw8VariableV1 {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl PartialEq for OpeCllw8VariableV1 {
-    fn eq(&self, other: &Self) -> bool {
-        self.bytes == other.bytes
-    }
-}
-
-impl Eq for OpeCllw8VariableV1 {}
-
 impl CllwOpeEncrypt for &str {
     type Output = OpeCllw8VariableV1;
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         let normalized = orderize_string(self);
-        let bytes = encrypt_ope_variable_bits(string_biter(&normalized), key, salt);
+        let n = normalized.len() * 8;
+        let bytes = encrypt_ope_bits(string_biter(&normalized), n, key, salt);
         Ok(OpeCllw8VariableV1 { bytes })
     }
 }
@@ -281,54 +257,11 @@ impl CllwOpeEncrypt for &[u8] {
     type Output = OpeCllw8VariableV1;
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+        let n = self.len() * 8;
         let bits = self.iter().flat_map(|&byte| Biterator::new(byte));
-        let bytes = encrypt_ope_variable_bits(bits, key, salt);
+        let bytes = encrypt_ope_bits(bits, n, key, salt);
         Ok(OpeCllw8VariableV1 { bytes })
     }
-}
-
-/// Encrypts a bit stream into an OPE ciphertext whose lex order matches the
-/// plaintext order exactly.
-///
-/// The output is `bits.len() + 1` bytes: a reserved leading byte absorbs any
-/// carry that propagates past the MSB, followed by one byte per plaintext bit.
-///
-/// The CLLW ORE encryption computes `c_i = (PRF_i + bit_i) mod 256` per bit.
-/// When `PRF_i = 0xFF` and `bit_i = 1`, the byte wraps to `0x00`, making lex
-/// comparison disagree with the true order. Here we do the wrap but propagate
-/// the carry **right-to-left** (toward more-significant lex positions),
-/// reserving a leading byte so the carry never falls off the front. This
-/// eliminates the ~1/256 ordering error at the cost of one extra byte.
-pub(super) fn encrypt_ope_variable_bits<I>(bits: I, key: &Key, salt: Option<&[u8]>) -> Vec<u8>
-where
-    I: IntoIterator<Item = u8>,
-{
-    let mut hasher = blake3::Hasher::new_keyed(&key.0);
-    if let Some(salt) = salt {
-        let _ = hasher.update(salt);
-    }
-
-    let mut out: Vec<u8> = vec![0u8];
-    let mut plain_bits: Vec<u8> = Vec::new();
-    for bit in bits {
-        let mut buf: [u8; 16] = [0; 16];
-        hasher.finalize_xof().fill(&mut buf);
-        let prf = (u128::from_be_bytes(buf) & 0xFF) as u8;
-        out.push(prf);
-        plain_bits.push(bit);
-        let _ = hasher.update(&[bit]);
-    }
-
-    let n = plain_bits.len();
-    let mut carry: u16 = 0;
-    for i in (0..n).rev() {
-        let sum = out[i + 1] as u16 + plain_bits[i] as u16 + carry;
-        out[i + 1] = (sum & 0xFF) as u8;
-        carry = sum >> 8;
-    }
-    out[0] = carry as u8;
-
-    out
 }
 
 /// Normalizes the string use Unicode = NFKC normalization, and then removes any

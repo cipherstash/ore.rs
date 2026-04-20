@@ -19,7 +19,7 @@ use subtle::ConstantTimeEq;
 #[cfg_attr(feature = "postgres-types", derive(ToSql))]
 #[cfg_attr(feature = "postgres-types", postgres(name = "ore_cllw_8_v1"))]
 pub struct OreCllw8V1<const N: usize> {
-    pub(super) bytes: [u8; N],
+    bytes: [u8; N],
 }
 
 impl<const N: usize> AsRef<[u8]> for OreCllw8V1<N> {
@@ -166,7 +166,7 @@ impl<const N: usize> Eq for OreCllw8V1<N> {}
 /// - `OpeCllw8V1<33>` encrypts `u32` (32 bits → 33 bytes)
 /// - `OpeCllw8V1<65>` encrypts `u64` (64 bits → 65 bytes)
 /// - `OpeCllw8V1<129>` encrypts `u128` (128 bits → 129 bytes)
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "postgres-types", derive(ToSql))]
 #[cfg_attr(feature = "postgres-types", postgres(name = "ore_cllw_8_ope_v1"))]
 pub struct OpeCllw8V1<const N: usize> {
@@ -203,44 +203,22 @@ impl<const N: usize> TryFrom<&[u8]> for OpeCllw8V1<N> {
     }
 }
 
-// OPE comparison: standard lexicographic byte comparison.
-impl<const N: usize> Ord for OpeCllw8V1<N> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.bytes.cmp(&other.bytes)
-    }
-}
-
-impl<const N: usize> PartialOrd for OpeCllw8V1<N> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl<const N: usize> PartialEq for OpeCllw8V1<N> {
-    fn eq(&self, other: &Self) -> bool {
-        self.bytes == other.bytes
-    }
-}
-
-impl<const N: usize> Eq for OpeCllw8V1<N> {}
-
-/// Macro to implement [`CllwOpeEncrypt`] for unsigned integer types using the
-/// backward-carry encoding. `$ct_size` is the ciphertext byte length —
-/// `plaintext_bits + 1` to account for the reserved leading byte.
+/// Implements [`CllwOpeEncrypt`] for unsigned integer types using the shared
+/// backward-carry encoding. The output size is `<$ty>::BITS + 1`, covering
+/// one byte per plaintext bit plus the reserved leading byte.
 macro_rules! impl_cllw_ope_uint {
-    ($uint_type:ty, $ct_size:expr) => {
+    ($uint_type:ty) => {
         impl CllwOpeEncrypt for $uint_type {
-            type Output = OpeCllw8V1<$ct_size>;
+            type Output = OpeCllw8V1<{ <$uint_type>::BITS as usize + 1 }>;
 
             fn encrypt_ope_with_salt(
                 self,
                 key: &Key,
                 salt: Option<&[u8]>,
             ) -> Result<Self::Output, Error> {
-                let bits = Biterator::new(self);
-                let vec = super::string::encrypt_ope_variable_bits(bits, key, salt);
-                debug_assert_eq!(vec.len(), $ct_size);
-                let mut bytes = [0u8; $ct_size];
+                let n = <$uint_type>::BITS as usize;
+                let vec = super::encrypt_ope_bits(Biterator::new(self), n, key, salt);
+                let mut bytes = [0u8; { <$uint_type>::BITS as usize + 1 }];
                 bytes.copy_from_slice(&vec);
                 Ok(OpeCllw8V1 { bytes })
             }
@@ -248,11 +226,11 @@ macro_rules! impl_cllw_ope_uint {
     };
 }
 
-impl_cllw_ope_uint!(u8, 9);
-impl_cllw_ope_uint!(u16, 17);
-impl_cllw_ope_uint!(u32, 33);
-impl_cllw_ope_uint!(u64, 65);
-impl_cllw_ope_uint!(u128, 129);
+impl_cllw_ope_uint!(u8);
+impl_cllw_ope_uint!(u16);
+impl_cllw_ope_uint!(u32);
+impl_cllw_ope_uint!(u64);
+impl_cllw_ope_uint!(u128);
 
 #[cfg(test)]
 mod tests {
@@ -568,44 +546,41 @@ mod tests {
         }
     }
 
-    /// Generate a full suite of OPE numeric property tests per-type.
+    /// Per-type OPE property suite: determinism, exact ordering, length, and
+    /// a regression check for the pre-fix 1/256 wrap-around bug.
     macro_rules! ope_quickcheck_type {
-        ($ty:ident, $ct_size:expr) => {
+        ($ty:ident) => {
             paste! {
                 quickcheck! {
-                    /// OPE encryption is deterministic.
                     fn [<prop_ope_eq_ $ty>](key: Key, x: $ty) -> bool {
                         let a = key.encrypt_ope(x).unwrap();
                         let b = key.encrypt_ope(x).unwrap();
                         a == b
                     }
 
-                    /// OPE lex ordering matches plaintext ordering exactly.
                     fn [<prop_ope_cmp_ $ty>](key: Key, x: $ty, y: $ty) -> bool {
                         let a = key.encrypt_ope(x).unwrap();
                         let b = key.encrypt_ope(y).unwrap();
                         a.cmp(&b) == x.cmp(&y)
                     }
 
-                    /// Regression property for the 1/256 wrap-around bug.
                     fn [<prop_ope_zero_less_than_one_ $ty>](key: Key) -> bool {
                         let c0 = key.encrypt_ope(0 as $ty).unwrap();
                         let c1 = key.encrypt_ope(1 as $ty).unwrap();
                         c0 < c1
                     }
 
-                    /// Output length is exactly plaintext_bits + 1.
                     fn [<prop_ope_length_ $ty>](key: Key, x: $ty) -> bool {
                         let ct = key.encrypt_ope(x).unwrap();
-                        ct.as_ref().len() == $ct_size
+                        ct.as_ref().len() == <$ty>::BITS as usize + 1
                     }
                 }
             }
         };
     }
 
-    ope_quickcheck_type!(u16, 17);
-    ope_quickcheck_type!(u32, 33);
-    ope_quickcheck_type!(u64, 65);
-    ope_quickcheck_type!(u128, 129);
+    ope_quickcheck_type!(u16);
+    ope_quickcheck_type!(u32);
+    ope_quickcheck_type!(u64);
+    ope_quickcheck_type!(u128);
 }
