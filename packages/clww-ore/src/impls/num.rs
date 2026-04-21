@@ -611,6 +611,7 @@ mod tests {
 
     #[test]
     #[ignore = "expensive empirical error-rate measurement — run with --ignored --nocapture"]
+    #[allow(clippy::print_stdout)]
     fn ope_empirical_error_rate_adjacent_u16() {
         let num_keys = 200usize;
         let mut total = 0u64;
