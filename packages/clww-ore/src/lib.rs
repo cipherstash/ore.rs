@@ -220,22 +220,17 @@ impl Key {
 
     /// Encrypts a value using CLLW Order-Preserving Encryption.
     ///
-    /// Ciphertexts can be compared with standard lexicographic byte ordering, without a
-    /// custom comparison function. The encoding applies a right-to-left carry pass to
-    /// the CLLW keystream-plus-plaintext sum, which dramatically reduces the ordering
-    /// error relative to the paper's naive base-256 interpretation: the per-comparison
-    /// error rate drops from ~1/256 (~3.9 × 10⁻³) to ~(1/255)² / 2 (~7.7 × 10⁻⁶) for
-    /// the worst-case "adjacent plaintext" pairs, and essentially zero for well-
-    /// separated plaintexts. Lex ordering is *not* strictly exact — the residual
-    /// error is inherent to the CLLW construction (the PRF chain is plaintext-
-    /// dependent, so low-order PRF divergence can occasionally flip the comparison).
+    /// Ciphertexts can be compared with standard lexicographic byte ordering, without
+    /// a custom comparison function. Encryption applies the CLLW keystream, places the
+    /// plaintext bit at the top bit of its byte (a `+128` contribution rather than
+    /// `+1`), and propagates the resulting sum as a right-to-left carry into a
+    /// reserved leading byte.
     ///
-    /// "Adjacent" here means plaintexts that differ by 1 (e.g. `10u32` vs `11u32`, or
-    /// `"abc"` vs `"abd"`); "well-separated" means plaintexts whose first differing
-    /// bit sits well inside a shared high-order prefix (e.g. `100u32` vs `200u32`, or
-    /// `"alpha"` vs `"zulu"`). The worst-case rate above applies only to adjacent
-    /// pairs — ordering between well-separated plaintexts is essentially always
-    /// correct.
+    /// Ordering is **exact**: lex compare on the ciphertext always matches the
+    /// plaintext order. At the first differing byte the `+128` signal dominates any
+    /// backward-carry noise (±1 per byte), so there's no PRF outcome that can flip
+    /// the comparison. See `packages/cllw-ore/docs/backward-carry-ope.md` for the
+    /// derivation and the naive-OPE / `+1`-variant history.
     ///
     /// **Encrypt-only**: OPE ciphertexts cannot be decrypted. If round-trip is
     /// required, pair the OPE ciphertext with a standard authenticated symmetric
@@ -334,11 +329,8 @@ pub trait CllwOreDecrypt: Sized {
 /// compared with standard lexicographic byte ordering instead of the ORE comparison
 /// function.
 ///
-/// **Correctness**: comparison is *not* exact, but is vastly more accurate than the
-/// paper's naive base-256 interpretation — ~7.7 × 10⁻⁶ per-comparison error rate on
-/// worst-case adjacent pairs (vs ~3.9 × 10⁻³ for the naive scheme), and essentially
-/// zero for well-separated plaintexts. See [`Key::encrypt_ope`] for the full
-/// characterisation. Use [`CllwOreEncrypt`] for the always-correct ORE variant.
+/// **Correctness**: comparison is **exact** — lex compare always agrees with
+/// plaintext order. See [`Key::encrypt_ope`] for the full characterisation.
 ///
 /// # Examples
 ///

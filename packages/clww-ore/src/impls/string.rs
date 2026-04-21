@@ -201,17 +201,16 @@ fn compare_lex(a: &OreCllw8VariableV1, b: &OreCllw8VariableV1) -> Ordering {
 /// Variable-length CLLW OPE ciphertext for strings and byte slices.
 ///
 /// Ciphertexts are compared with standard lexicographic byte ordering.
-/// Encryption uses the CLLW keystream from Section 3.2 of the paper and
-/// propagates the `+1` addition as a right-to-left carry into a reserved
-/// leading byte, which dramatically reduces the ~1/256 ordering error
-/// of the paper's naive base-256 OPE interpretation.
+/// Encryption uses the CLLW keystream from Section 3.2 of the paper; the
+/// plaintext bit contribution is placed at the top bit of its byte (adding
+/// `128` rather than `1`) and the resulting sum is propagated as a
+/// right-to-left carry into a reserved leading byte.
 ///
-/// **Correctness**: comparison is *not* exact. The residual per-comparison
-/// error rate is approximately `(1/255)² / 2 ≈ 7.7 × 10⁻⁶` for adjacent
-/// plaintext pairs and essentially zero for well-separated ones. The
-/// residual error is inherent to the CLLW construction (the PRF chain is
-/// plaintext-dependent, so low-order PRF divergence can occasionally flip
-/// the high-order comparison via the carry pass).
+/// **Correctness**: comparison is **exact** — lex compare always agrees
+/// with the plaintext byte-lex order. The `+128` signal at the first
+/// differing byte exceeds any backward-carry noise (±1 per byte), so no
+/// PRF choice can flip the comparison. See
+/// `packages/cllw-ore/docs/backward-carry-ope.md` for the derivation.
 ///
 /// **Encrypt-only**: this type intentionally does not support decryption.
 /// OPE is used for ordered lookups; if round-trip is required, pair the OPE
@@ -818,25 +817,19 @@ mod tests {
 
     // --- Variable-length OPE property tests ---
     //
-    // The backward-carry encoding does not achieve exact ordering (see
-    // `OpeCllw8VariableV1` rustdoc and the empirical test in `impls/num.rs`);
-    // the property tests below pass by overwhelming probability on random
-    // inputs. The ordering props in particular cover the full input space
-    // that the reviewer-flagged targeted tests used to exercise with fixed
-    // key seeds.
+    // The MSB-bit backward-carry encoding gives exact ordering (see
+    // `OpeCllw8VariableV1` rustdoc and the numeric exactness test in
+    // `impls/num.rs`); the property tests below exercise that guarantee on
+    // random `Vec<u8>` and `SafeString` inputs.
 
     quickcheck! {
-        /// Regression for the naive CLLW-OPE wrap-around bug. Under the old
-        /// scheme ~1/256 of keys reported `ct([0x00]) > ct([0x01])` because
-        /// `PRF_7 = 0xFF` made the wrapped byte `0x00` compare less than the
-        /// un-wrapped peer's `0xFF`. For this specific single-bit-difference
-        /// pair the backward-carry design is exactly correct for every key:
-        /// bits 0..6 are identical in both plaintexts so the PRF chain cannot
-        /// diverge, and the carry pass rewrites the wrap-prone bytes
-        /// deterministically. The broader scheme still has a small residual
-        /// error rate on pairs whose first differing bit is followed by
-        /// additional plaintext bits — this pair does not exercise that
-        /// regime.
+        /// Regression for the original naive-OPE wrap-around bug: under the
+        /// paper's byte-compare reading of CLLW, ~1/256 of keys would report
+        /// `ct([0x00]) > ct([0x01])` because `PRF_7 = 0xFF` made the wrapped
+        /// byte `0x00` compare less than its peer's `0xFF`. With MSB-bit
+        /// placement plus backward carry the scheme is exact for every key
+        /// and every pair; this test just pins the single-bit case as the
+        /// canonical sanity check.
         fn prop_ope_variable_single_bit_difference(key: Key) -> bool {
             let c1 = key.encrypt_ope([0x00u8].as_slice()).unwrap();
             let c2 = key.encrypt_ope([0x01u8].as_slice()).unwrap();

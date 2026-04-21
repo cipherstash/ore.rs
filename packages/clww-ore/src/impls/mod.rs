@@ -12,12 +12,18 @@ pub(crate) mod string;
 /// that propagates past the MSB, followed by one byte per plaintext bit
 /// (MSB-first).
 ///
-/// The CLLW ORE encryption computes `c_i = (PRF_i + bit_i) mod 256` per bit.
-/// When `PRF_i = 0xFF` and `bit_i = 1`, the byte wraps to `0x00`, making lex
-/// comparison disagree with the true order. Here we do the wrap but propagate
-/// the carry **right-to-left** (toward more-significant lex positions),
-/// reserving a leading byte so the carry never falls off the front. This
-/// eliminates the ~1/256 ordering error at the cost of one extra byte.
+/// Encryption computes the CLLW keystream `PRF_0 … PRF_{n-1}` and then forms
+/// `C = P + 128·B` as a big-endian `(n+1)`-byte integer, where `P` is the PRF
+/// stream and `B` is the plaintext bits laid out one-per-byte. The `·128`
+/// places the plaintext's single-bit contribution at the top bit of its
+/// byte, giving the signal a 128× edge over the maximum backward-carry
+/// noise (±1 per byte). This makes lex comparison of the ciphertext
+/// **exact** — it always agrees with the true plaintext order.
+///
+/// Without the backward carry we'd lose the wrap on `PRF_i + 128 ≥ 256`
+/// (≈ half of PRF values); the carry propagates that `+1` one byte
+/// leftward where the signal re-emerges at the next shared-PRF byte and
+/// lex compare resolves cleanly.
 ///
 /// `n` is the number of plaintext bits, which must equal the number of items
 /// yielded by `bits` (debug-checked).
@@ -45,7 +51,9 @@ where
 
     let mut carry: u16 = 0;
     for (byte, &bit) in out[1..].iter_mut().rev().zip(plain_bits.iter().rev()) {
-        let sum = *byte as u16 + bit as u16 + carry;
+        // Place the plaintext bit at the MSB of the byte (weight 128) so the
+        // signal dominates any carry-propagated noise at this position.
+        let sum = *byte as u16 + ((bit as u16) << 7) + carry;
         *byte = sum as u8;
         carry = sum >> 8;
     }

@@ -145,21 +145,16 @@ impl<const N: usize> Eq for OreCllw8V1<N> {}
 /// Fixed-size CLLW OPE ciphertext for unsigned integer types.
 ///
 /// Ciphertexts are compared with standard lexicographic byte ordering.
-/// Encryption uses the CLLW keystream from Section 3.2 of the paper and
-/// propagates the `+1` addition as a right-to-left carry into a reserved
-/// leading byte, which dramatically reduces the ~1/256 ordering error
-/// of the paper's naive base-256 OPE interpretation.
+/// Encryption uses the CLLW keystream from Section 3.2 of the paper; the
+/// plaintext bit contribution is placed at the top bit of its byte (adding
+/// `128` rather than `1`) and the resulting sum is propagated as a
+/// right-to-left carry into a reserved leading byte.
 ///
-/// **Correctness**: comparison is *not* exact. The residual per-comparison
-/// error rate is approximately `(1/255)² / 2 ≈ 7.7 × 10⁻⁶` for "adjacent"
-/// plaintext pairs (those whose first differing bit lies near the MSB end
-/// of a shared high-order prefix); for well-separated plaintexts the rate
-/// is essentially zero. Empirically ~6.4 × 10⁻⁶ per comparison over random
-/// `u16` adjacent pairs — vs the naive CLLW OPE rate of ~3.9 × 10⁻³.
-/// The residual error is inherent: the CLLW PRF chain is plaintext-
-/// dependent, so low-order PRF divergence between two plaintexts can
-/// occasionally overwhelm the high-order plaintext difference via the
-/// carry pass.
+/// **Correctness**: comparison is **exact** — lex compare always agrees
+/// with the plaintext integer order. The `+128` signal at the first
+/// differing byte exceeds any backward-carry noise (±1 per byte), so no
+/// PRF choice can flip the comparison. See
+/// `packages/cllw-ore/docs/backward-carry-ope.md` for the derivation.
 ///
 /// **Encrypt-only**: this type intentionally does not support decryption.
 /// OPE is used for ordered lookups; if round-trip is required, pair the OPE
@@ -496,11 +491,9 @@ mod tests {
 
     // --- OPE (numeric) tests ---
     //
-    // The backward-carry encoding does not achieve exact ordering — see the
-    // `OpeCllw8V1` rustdoc and the empirical test below for the residual error
-    // rate. The property tests here pass by overwhelming probability on random
-    // inputs; specific regressions (e.g. the old 1/256 wrap-around bug) are
-    // covered via targeted prop cases inside the `ope_quickcheck_type!` macro.
+    // The MSB-bit backward-carry encoding gives exact ordering; property tests
+    // below exercise that guarantee, and `ope_exactness_adjacent_u16` verifies
+    // it exhaustively on every adjacent `u16` pair under a set of keys.
 
     #[test]
     fn test_ope_try_from_wrong_length_fails() {
@@ -567,29 +560,22 @@ mod tests {
     ope_quickcheck_type!(u64);
     ope_quickcheck_type!(u128);
 
-    // --- Empirical error-rate measurement ---
+    // --- Empirical exactness check ---
     //
-    // The backward-carry encoding does NOT achieve exact ordering: because the
-    // CLWW PRF chain depends on the plaintext bit history, PRF_P and PRF_Q
-    // diverge in low-order bytes once the first plaintext bit differs. That
-    // low-order "noise" can exceed the high-order plaintext difference and
-    // flip the lex comparison.
+    // The backward-carry encoding with MSB-bit placement (bit contributes
+    // `+128` at its byte, not `+1`) gives exact OPE: lex comparison of the
+    // ciphertext always agrees with the plaintext integer order. See
+    // `packages/cllw-ore/docs/backward-carry-ope.md` for the derivation.
     //
-    // Theoretical rate for an adjacent plaintext pair whose first differing
-    // bit is at position k (with m = BITS - k > 1):
-    //   Pr[error] = (1 / 255)^2 / 2 ≈ 7.7e-6, independent of m.
-    // For m = 1 (P, P+1 differing only at the LSB) the rate is 0 because the
-    // PRF never diverges.
-    // Over random u16 adjacent pairs (uniform P), expected rate is
-    //   (1/4 + 1/8 + ... + 1/2^16) * 7.7e-6 ≈ 3.85e-6.
-    //
-    // Run with: cargo test -p cllw-ore -- --ignored ope_empirical --nocapture
+    // This test exhaustively verifies the property on every adjacent u16 pair
+    // under a set of keys — the worst case for the older `+1` variant, which
+    // had a residual ~7.7e-6 per-pair error rate. It's `#[ignore]`-gated
+    // because it's expensive (~2 min at 20 keys).
 
     #[test]
-    #[ignore = "expensive empirical error-rate measurement — run with --ignored --nocapture"]
-    #[allow(clippy::print_stdout)]
-    fn ope_empirical_error_rate_adjacent_u16() {
-        let num_keys = 200usize;
+    #[ignore = "exhaustive exactness check — slow; run with `cargo test -- --ignored`"]
+    fn ope_exactness_adjacent_u16() {
+        let num_keys = 20usize;
         let mut total = 0u64;
         let mut errors = 0u64;
 
@@ -608,10 +594,9 @@ mod tests {
             }
         }
 
-        let rate = errors as f64 / total as f64;
-        println!(
-            "\n=== OPE backward-carry empirical error rate (u16 adjacent pairs) ===\nkeys: {num_keys}\npairs/key: {}\ntotal trials: {total}\nerrors: {errors}\nmeasured rate: {rate:e}\npredicted rate (random adjacent pairs): ~3.85e-6",
-            u16::MAX as u64
+        assert_eq!(
+            errors, 0,
+            "exact OPE violated: {errors} ordering errors out of {total} adjacent pairs",
         );
     }
 }
