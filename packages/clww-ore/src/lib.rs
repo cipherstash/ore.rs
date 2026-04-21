@@ -230,8 +230,16 @@ impl Key {
     /// error is inherent to the CLLW construction (the PRF chain is plaintext-
     /// dependent, so low-order PRF divergence can occasionally flip the comparison).
     ///
-    /// **Encrypt-only**: OPE ciphertexts cannot be decrypted. Pair with an ORE
-    /// ciphertext when round-trip is required.
+    /// "Adjacent" here means plaintexts that differ by 1 (e.g. `10u32` vs `11u32`, or
+    /// `"abc"` vs `"abd"`); "well-separated" means plaintexts whose first differing
+    /// bit sits well inside a shared high-order prefix (e.g. `100u32` vs `200u32`, or
+    /// `"alpha"` vs `"zulu"`). The worst-case rate above applies only to adjacent
+    /// pairs — ordering between well-separated plaintexts is essentially always
+    /// correct.
+    ///
+    /// **Encrypt-only**: OPE ciphertexts cannot be decrypted. If round-trip is
+    /// required, pair the OPE ciphertext with a standard authenticated symmetric
+    /// cipher such as AES-GCM encrypting the same plaintext.
     ///
     /// # Examples
     ///
@@ -321,12 +329,16 @@ pub trait CllwOreDecrypt: Sized {
 
 /// Trait for types that can be encrypted using CLLW Order-Preserving Encryption.
 ///
-/// This is the OPE variant from Section 3.2 of the CLWW paper. The encryption is identical
-/// to ORE, but the resulting ciphertext type uses standard lexicographic comparison instead
-/// of the ORE comparison function.
+/// This is the OPE variant from Section 3.2 of the CLWW paper, reworked with a
+/// right-to-left carry pass on top of the CLLW keystream so that ciphertexts can be
+/// compared with standard lexicographic byte ordering instead of the ORE comparison
+/// function.
 ///
-/// **Correctness**: OPE comparison is correct with probability `1 - 1/256 ~ 99.6%` per
-/// comparison. See [`CllwOreEncrypt`] for the always-correct ORE variant.
+/// **Correctness**: comparison is *not* exact, but is vastly more accurate than the
+/// paper's naive base-256 interpretation — ~7.7 × 10⁻⁶ per-comparison error rate on
+/// worst-case adjacent pairs (vs ~3.9 × 10⁻³ for the naive scheme), and essentially
+/// zero for well-separated plaintexts. See [`Key::encrypt_ope`] for the full
+/// characterisation. Use [`CllwOreEncrypt`] for the always-correct ORE variant.
 ///
 /// # Examples
 ///
