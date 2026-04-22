@@ -12,9 +12,9 @@ use unicode_normalization::char::decompose_canonical;
 
 const BITS_PER_BYTE: usize = 8;
 
-/// Variable-length CLLW ORE ciphertext for strings and byte slices.
+/// Variable-length CLWW ORE ciphertext for strings and byte slices.
 ///
-/// This type represents an encrypted value using the CLLW Order-Revealing Encryption scheme
+/// This type represents an encrypted value using the CLWW Order-Revealing Encryption scheme
 /// for variable-length data types like `&str` and `&[u8]`.
 ///
 /// The ciphertext length is proportional to the input length (8 bytes per input byte).
@@ -198,10 +198,10 @@ fn compare_lex(a: &OreCllw8VariableV1, b: &OreCllw8VariableV1) -> Ordering {
 
 // --- Variable-length OPE ---
 
-/// Variable-length CLLW OPE ciphertext for strings and byte slices.
+/// Variable-length CLWW OPE ciphertext for strings and byte slices.
 ///
 /// Ciphertexts are compared with standard lexicographic byte ordering.
-/// Encryption uses the CLLW keystream from Section 3.2 of the paper; the
+/// Encryption uses the CLWW keystream from Section 3.2 of the paper; the
 /// plaintext bit contribution is placed at the top bit of its byte (adding
 /// `128` rather than `1`) and the resulting sum is propagated as a
 /// right-to-left carry into a reserved leading byte.
@@ -824,7 +824,7 @@ mod tests {
 
     quickcheck! {
         /// Regression for the original naive-OPE wrap-around bug: under the
-        /// paper's byte-compare reading of CLLW, ~1/256 of keys would report
+        /// paper's byte-compare reading of CLWW, ~1/256 of keys would report
         /// `ct([0x00]) > ct([0x01])` because `PRF_7 = 0xFF` made the wrapped
         /// byte `0x00` compare less than its peer's `0xFF`. With MSB-bit
         /// placement plus backward carry the scheme is exact for every key

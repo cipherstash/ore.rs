@@ -143,7 +143,7 @@ pub use impls::string::{OpeCllw8VariableV1, OreCllw8VariableV1};
 #[error("Operation failed")]
 pub struct Error;
 
-/// A 256-bit encryption key for CLLW Order-Revealing Encryption.
+/// A 256-bit encryption key for CLWW Order-Revealing Encryption.
 ///
 /// The key is used to encrypt and decrypt values while preserving their ordering.
 /// All encryption operations are deterministic for a given key.
@@ -167,7 +167,7 @@ pub struct Error;
 pub struct Key([u8; 32]);
 
 impl Key {
-    /// Encrypts a value using CLLW Order-Revealing Encryption.
+    /// Encrypts a value using CLWW Order-Revealing Encryption.
     ///
     /// The encryption is deterministic and preserves the ordering of values.
     /// Supported types: `u16`, `u32`, `u64`, `u128`, `&str`, `&[u8]`
@@ -218,10 +218,10 @@ impl Key {
         input.decrypt(self)
     }
 
-    /// Encrypts a value using CLLW Order-Preserving Encryption.
+    /// Encrypts a value using CLWW Order-Preserving Encryption.
     ///
     /// Ciphertexts can be compared with standard lexicographic byte ordering, without
-    /// a custom comparison function. Encryption applies the CLLW keystream, places the
+    /// a custom comparison function. Encryption applies the CLWW keystream, places the
     /// plaintext bit at the top bit of its byte (a `+128` contribution rather than
     /// `+1`), and propagates the resulting sum as a right-to-left carry into a
     /// reserved leading byte.
@@ -261,7 +261,7 @@ impl From<[u8; 32]> for Key {
     }
 }
 
-/// Trait for types that can be encrypted using CLLW Order-Revealing Encryption.
+/// Trait for types that can be encrypted using CLWW Order-Revealing Encryption.
 ///
 /// This trait is implemented for unsigned integer types (`u16`, `u32`, `u64`, `u128`),
 /// strings (`&str`), and byte slices (`&[u8]`).
@@ -293,7 +293,7 @@ pub trait CllwOreEncrypt: Sized {
     fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error>;
 }
 
-/// Trait for types that can be decrypted from CLLW Order-Revealing Encryption.
+/// Trait for types that can be decrypted from CLWW Order-Revealing Encryption.
 ///
 /// This trait is implemented for the ciphertext types `OreCllw8V1<N>` and `OreCllw8VariableV1`.
 ///
@@ -322,10 +322,10 @@ pub trait CllwOreDecrypt: Sized {
     fn decrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error>;
 }
 
-/// Trait for types that can be encrypted using CLLW Order-Preserving Encryption.
+/// Trait for types that can be encrypted using CLWW Order-Preserving Encryption.
 ///
 /// This is the OPE variant from Section 3.2 of the CLWW paper, reworked with a
-/// right-to-left carry pass on top of the CLLW keystream so that ciphertexts can be
+/// right-to-left carry pass on top of the CLWW keystream so that ciphertexts can be
 /// compared with standard lexicographic byte ordering instead of the ORE comparison
 /// function.
 ///

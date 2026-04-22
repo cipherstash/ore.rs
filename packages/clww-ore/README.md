@@ -1,4 +1,4 @@
-# CLLW ORE
+# CLWW ORE
 
 [![Crates.io Version](https://img.shields.io/crates/v/cllw-ore?style=for-the-badge)](https://crates.io/crates/cllw-ore)
 [![docs.rs](https://img.shields.io/docsrs/cllw-ore?style=for-the-badge)](https://docs.rs/cllw-ore/)
@@ -9,7 +9,7 @@
 ## Fast, efficient Order-Revealing Encryption
 
 This crate implements the Order Revealing Encryption scheme developed by Chenette, Lewi, Weis and Wu
-at Stanford in 2015 (hence "CLLW").
+at Stanford in 2015 (hence "CLWW").
 
 It is faster and more space efficient than the "Block" ORE scheme developed by Lewi and Wu a year later
 however has weaker security properties.
@@ -20,5 +20,5 @@ See [ore.rs](https://ore.rs) for more information.
 
 ## CipherStash
 
-CLLW ORE is brought to you by the team at [CipherStash](https://cipherstash.com).
+CLWW ORE is brought to you by the team at [CipherStash](https://cipherstash.com).
 

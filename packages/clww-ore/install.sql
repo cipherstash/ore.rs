@@ -1,14 +1,14 @@
 ---
---- ORE CLLW types, functions, and operators
+--- ORE CLWW types, functions, and operators
 ---
 
--- Represents a ciphertext encrypted with the CLLW ORE scheme for a fixed output size
+-- Represents a ciphertext encrypted with the CLWW ORE scheme for a fixed output size
 -- Each output block is 8-bits
 CREATE TYPE ore_cllw_8_v1 AS (
   bytes bytea
 );
 
--- Represents a ciphertext encrypted with the CLLW ORE scheme for a variable output size
+-- Represents a ciphertext encrypted with the CLWW ORE scheme for a variable output size
 -- Each output block is 8-bits
 CREATE TYPE ore_cllw_8_variable_v1 AS (
   bytes bytea

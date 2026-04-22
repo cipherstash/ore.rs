@@ -1,12 +1,12 @@
-# Exact OPE from CLLW ORE via Backward Carry + MSB-Bit Placement
+# Exact OPE from CLWW ORE via Backward Carry + MSB-Bit Placement
 
-*An engineering note on the order-preserving variant of CLLW ORE.*
+*An engineering note on the order-preserving variant of CLWW ORE.*
 
 ---
 
 ## TL;DR
 
-The CLLW order-revealing encryption scheme has a natural "order-preserving"
+The CLWW order-revealing encryption scheme has a natural "order-preserving"
 (OPE) interpretation described in Section 3.2 of the original paper: take
 the ORE ciphertext bytes and compare them lexicographically. It almost
 works, but wraps around `mod 256` — so roughly 1 in 256 comparisons
@@ -20,7 +20,7 @@ This note walks through two successive fixes that compose:
    leading byte. Drops the per-comparison error rate from ~1/256 to
    ~7.7 × 10⁻⁶ worst case — a ~500× improvement — but still not exact.
 
-2. **MSB-bit placement of the plaintext signal** (§7). Instead of adding
+2. **MSB-bit placement of the plaintext signal** (§6). Instead of adding
    `+1` to each byte when the plaintext bit is 1, add `+128` — placing the
    signal at the MSB of the byte. This makes the signal 128× larger than
    any noise the backward carry can propagate, killing the residual error
@@ -28,7 +28,7 @@ This note walks through two successive fixes that compose:
 
 Cost vs the naive paper scheme: one extra ciphertext byte (the reserved
 leading byte) and a single additional linear pass during encryption. Same
-number of PRF evaluations. Same leakage profile as CLLW ORE.
+number of PRF evaluations. Same leakage profile as CLWW ORE.
 
 ---
 
@@ -36,7 +36,7 @@ number of PRF evaluations. Same leakage profile as CLLW ORE.
 
 **Order-revealing encryption (ORE)** produces ciphertexts that can be
 compared with a custom function `CMP(c₁, c₂)` that reveals the plaintext
-ordering without revealing the plaintexts themselves. CLLW's comparator is
+ordering without revealing the plaintexts themselves. CLWW's comparator is
 a byte scan with a `mod 256` check (details below); it's fast and
 constant-time, but it's also a non-standard comparison, which means you
 can't just put ORE ciphertexts into a database index and expect `ORDER BY`
@@ -52,14 +52,14 @@ over.
 The tradeoff: OPE is generally harder to build securely than ORE (it
 reveals strictly *at most* as much information as ORE, but typically a bit
 more than the comparator-based variant, because the adversary gets exact
-byte order for free). For the CLLW family the difference is small, which
-is why reinterpreting CLLW ORE as OPE is attractive.
+byte order for free). For the CLWW family the difference is small, which
+is why reinterpreting CLWW ORE as OPE is attractive.
 
 ---
 
-## 2. How CLLW ORE works
+## 2. How CLWW ORE works
 
-CLLW is a bit-by-bit construction. For an n-bit plaintext `p = b₀ b₁ … bₙ₋₁`
+CLWW is a bit-by-bit construction. For an n-bit plaintext `p = b₀ b₁ … bₙ₋₁`
 (MSB-first), the encryptor walks the bits left-to-right feeding them into
 a keyed hasher. At each step it pulls out one pseudorandom byte and adds
 the current bit:
@@ -107,18 +107,18 @@ comparator correctly stops at the first differing byte.
 
 ### Leakage
 
-CLLW ORE's ciphertext reveals the **first differing bit position** (i.e. a
+CLWW ORE's ciphertext reveals the **first differing bit position** (i.e. a
 common prefix length), and nothing else beyond ordering. This is a
 standard IND-OCPA-style leakage — weaker than full plaintext but
 non-trivial, especially on low-entropy data like integers in a narrow
-range. For production use cases with richer threat models we pair CLLW
+range. For production use cases with richer threat models we pair CLWW
 with additional primitives; see the package README.
 
 ---
 
 ## 3. The paper's OPE interpretation — and the 1/256 bug
 
-Section 3.2 of the CLLW paper observes that if you just treat the ORE
+Section 3.2 of the CLWW paper observes that if you just treat the ORE
 ciphertext as a byte string and sort it, you almost get an OPE. Informally:
 at the first differing byte, `c_Y = c_X + 1` — so lexicographic compare
 puts the larger plaintext's ciphertext last. "Almost" is doing a lot of
@@ -171,7 +171,7 @@ leading byte that guarantees there's always room to absorb the overflow.
 
 ### Intuition
 
-The CLLW keystream gives us an n-byte pseudorandom number `P`:
+The CLWW keystream gives us an n-byte pseudorandom number `P`:
 
 ```text
 P = PRF₀ · 256ⁿ⁻¹ + PRF₁ · 256ⁿ⁻² + … + PRFₙ₋₁ · 256⁰
@@ -377,7 +377,7 @@ landing in the reserved byte is 0 or 1. Arithmetically,
 `P + B ≤ 256ⁿ · (256/255) < 2 · 256ⁿ`, so the (n+1)-byte integer always
 has a reserved byte of 0 or 1, never more.
 
-(This also holds for the MSB-bit variant in §7: `P + 128·B ≤ 1.5 · 256ⁿ`,
+(This also holds for the MSB-bit variant in §6: `P + 128·B ≤ 1.5 · 256ⁿ`,
 still < `2 · 256ⁿ`. The reserved byte is `0` or `1` either way.)
 
 ---
@@ -543,14 +543,14 @@ stronger pseudorandomness guarantee for each ciphertext byte, at the cost
 of proportionally larger ciphertexts.
 
 We ship β = 8 because it gives exact ordering at the smallest storage
-cost, and the CLLW security properties are already what the CLLW paper
+cost, and the CLWW security properties are already what the CLWW paper
 analyses at this block size.
 
 ---
 
 ## 9. Security properties
 
-### 9.1 Leakage relative to CLLW ORE
+### 9.1 Leakage relative to CLWW ORE
 
 The OPE ciphertext is a deterministic function of the same PRF chain and
 plaintext bits as the ORE ciphertext — both the backward carry and the
@@ -562,15 +562,15 @@ direction, the OPE ciphertext reveals nothing the ORE ciphertext doesn't.
 
 ### 9.2 IND-OCPA
 
-The scheme is deterministic and maintains CLLW's PRF-chain structure, so
-it inherits CLLW's IND-OCPA (indistinguishability under ordered
+The scheme is deterministic and maintains CLWW's PRF-chain structure, so
+it inherits CLWW's IND-OCPA (indistinguishability under ordered
 chosen-plaintext attack) guarantee — conditioned on the PRF being a
 secure PRF. No new security proof is required; the carry pass and the
 MSB-bit placement are public, plaintext-independent functions of the ORE
 output (modulo the plaintext bits, which the adversary gets to know under
 OCPA anyway).
 
-The standard CLLW caveats still apply: low-entropy plaintexts (small
+The standard CLWW caveats still apply: low-entropy plaintexts (small
 integer ranges, sparse buckets, etc.) leak meaningfully via the
 first-differing-bit-position signal. Don't use this as your only
 encryption layer for such data — pair it with a properly-keyed
@@ -620,7 +620,7 @@ bit per ciphertext).
 
 ## 11. References
 
-- **CLLW.** Nathan Chenette, Kevin Lewi, Stephen A. Weis, David J. Wu.
+- **CLWW.** Nathan Chenette, Kevin Lewi, Stephen A. Weis, David J. Wu.
   *Practical Order-Revealing Encryption with Limited Leakage.* FSE 2016.
   The OPE interpretation lives in Section 3.2.
 - **Lewi–Wu Block ORE.** Kevin Lewi, David J. Wu. *Order-Revealing

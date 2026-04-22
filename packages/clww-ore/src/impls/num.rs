@@ -5,9 +5,9 @@ use postgres_types::ToSql;
 use std::cmp::Ordering;
 use subtle::ConstantTimeEq;
 
-/// Fixed-size CLLW ORE ciphertext for unsigned integer types.
+/// Fixed-size CLWW ORE ciphertext for unsigned integer types.
 ///
-/// This type represents an encrypted value using the CLLW Order-Revealing Encryption scheme.
+/// This type represents an encrypted value using the CLWW Order-Revealing Encryption scheme.
 /// The size `N` corresponds to the number of bits in the plaintext (one byte per bit).
 ///
 /// - `OreCllw8V1<8>` encrypts `u8` (8 bytes)
@@ -142,10 +142,10 @@ impl<const N: usize> Eq for OreCllw8V1<N> {}
 
 // --- Fixed-size numeric OPE ---
 
-/// Fixed-size CLLW OPE ciphertext for unsigned integer types.
+/// Fixed-size CLWW OPE ciphertext for unsigned integer types.
 ///
 /// Ciphertexts are compared with standard lexicographic byte ordering.
-/// Encryption uses the CLLW keystream from Section 3.2 of the paper; the
+/// Encryption uses the CLWW keystream from Section 3.2 of the paper; the
 /// plaintext bit contribution is placed at the top bit of its byte (adding
 /// `128` rather than `1`) and the resulting sum is propagated as a
 /// right-to-left carry into a reserved leading byte.

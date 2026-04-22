@@ -12,7 +12,7 @@ pub(crate) mod string;
 /// that propagates past the MSB, followed by one byte per plaintext bit
 /// (MSB-first).
 ///
-/// Encryption computes the CLLW keystream `PRF_0 … PRF_{n-1}` and then forms
+/// Encryption computes the CLWW keystream `PRF_0 … PRF_{n-1}` and then forms
 /// `C = P + 128·B` as a big-endian `(n+1)`-byte integer, where `P` is the PRF
 /// stream and `B` is the plaintext bits laid out one-per-byte. The `·128`
 /// places the plaintext's single-bit contribution at the top bit of its
@@ -63,7 +63,7 @@ where
     out
 }
 
-/// Compare 2 CLLW ORE encrypted slices of the same length in constant time
+/// Compare 2 CLWW ORE encrypted slices of the same length in constant time
 fn compare_slice(a: &[u8], b: &[u8]) -> Ordering {
     assert_eq!(a.len(), b.len());
 
