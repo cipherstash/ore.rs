@@ -12,10 +12,15 @@ license-file = "LICENCE"
 criterion = "0.5.1"
 quickcheck = "1.0.3"
 
+[features]
+# Adds ORE support for `chrono::NaiveDate` and `chrono::DateTime<Utc>`.
+chrono = ["dep:chrono"]
+
 [dependencies]
 aes = { version = "0.8.2", features = ["zeroize"] }
 block-modes = "0.9.1"
 byteorder = "1.4.3"
+chrono = { version = "0.4.42", default-features = false, optional = true }
 hex-literal = "0.4.1"
 rand = "0.8.5"
 rand_chacha = "0.3.1"
