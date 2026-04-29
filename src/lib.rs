@@ -134,6 +134,8 @@
 //! # assert!(ct == a);
 //! ```
 
+#[cfg(feature = "chrono")]
+mod chrono;
 mod ciphertext;
 mod convert;
 mod encrypt;
