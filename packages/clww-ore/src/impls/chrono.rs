@@ -149,13 +149,6 @@ mod tests {
         assert_eq!(sorted_via_ct, sorted_plain);
     }
 
-    #[test]
-    fn naive_date_equal_inputs_produce_equal_ciphertexts() {
-        let a = encrypt_date(ymd(2026, 4, 29));
-        let b = encrypt_date(ymd(2026, 4, 29));
-        assert_eq!(a, b);
-    }
-
     #[derive(Debug, Clone)]
     struct ArbDate(NaiveDate);
 
@@ -169,10 +162,9 @@ mod tests {
     }
 
     quickcheck! {
-        fn prop_date_determinism(x: ArbDate) -> bool {
-            let key = key();
-            let a = key.encrypt_ope(x.0).unwrap();
-            let b = key.encrypt_ope(x.0).unwrap();
+        fn prop_date_equal_inputs_produce_equal_ciphertexts(x: ArbDate) -> bool {
+            let a = encrypt_date(x.0);
+            let b = encrypt_date(x.0);
             a == b
         }
 
