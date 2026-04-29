@@ -235,6 +235,17 @@ impl_cllw_ope_uint!(u32);
 impl_cllw_ope_uint!(u64);
 impl_cllw_ope_uint!(u128);
 
+#[cfg(feature = "chrono")]
+impl<const N: usize> OpeCllw8V1<N> {
+    /// Construct a ciphertext from raw bytes produced by
+    /// [`super::encrypt_ope_bits`]. Crate-internal — used by feature
+    /// modules (e.g. `chrono`) that build their own canonical byte form
+    /// and need a fixed-width ciphertext sized to the plaintext.
+    pub(crate) fn from_bytes(bytes: [u8; N]) -> Self {
+        Self { bytes }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

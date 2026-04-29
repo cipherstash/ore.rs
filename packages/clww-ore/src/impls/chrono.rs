@@ -1,46 +1,38 @@
 //! OPE encryption for `chrono::NaiveDate` and `chrono::DateTime<Utc>`, gated
 //! behind the `chrono` feature.
 //!
-//! Both encoders convert their input to a fixed-width canonical byte
-//! sequence whose lex order matches the natural chronological order on the
-//! plaintext type, then feed those bytes through the shared variable-length
-//! OPE primitive ([`crate::impls::encrypt_ope_bits`]). The resulting
-//! ciphertext is an [`OpeCllw8VariableV1`].
+//! Both impls delegate to the fixed-size CLWW OPE primitives in
+//! [`super::num`] so the ciphertext type is sized to the plaintext's
+//! natural width.
 //!
-//! ## NaiveDate (4 canonical bytes → 33 ciphertext bytes)
+//! ## NaiveDate → `OpeCllw8V1<33>` (33 bytes)
 //!
 //! `NaiveDate::num_days_from_ce()` gives an `i32` whose ordering matches
 //! chronological order (and whose equality matches `NaiveDate` equality).
-//! The encoder maps `i32 → u32` by flipping the sign bit, then writes the
-//! result big-endian. Negative-day (BCE) values map below positive-day (CE)
-//! values; lex compare on the four bytes matches `NaiveDate::cmp`.
+//! The encoder maps `i32 → u32` by flipping the sign bit and delegates to
+//! the existing `u32` OPE impl. Negative-day (BCE) values map below
+//! positive-day (CE) values; lex compare on the resulting ciphertext
+//! matches `NaiveDate::cmp`.
 //!
-//! ## DateTime<Utc> (12 canonical bytes → 97 ciphertext bytes)
+//! ## DateTime<Utc> → `OpeCllw8V1<97>` (97 bytes)
 //!
 //! `DateTime<Utc>` is canonicalised as `(timestamp_seconds, subsec_nanos)`:
 //! 8 bytes for the seconds (sign-bit-flipped i64, big-endian) followed by
-//! 4 bytes for the subsecond nanoseconds (u32, big-endian). Chrono's
+//! 4 bytes for the subsecond nanoseconds (u32, big-endian). Those 12 bytes
+//! are fed through the shared [`super::encrypt_ope_bits`] primitive and
+//! the resulting 97 bytes are wrapped in `OpeCllw8V1<97>`. Chrono's
 //! `timestamp_subsec_nanos` returns values in `0..2_000_000_000` (the
-//! upper half of that range encodes leap-second moments), so subsecond lex
-//! order also matches chronological order. Equality is preserved because
-//! two `DateTime<Utc>` values that compare equal yield the same
+//! upper half encodes leap-second moments), so subsecond lex order also
+//! matches chronological order. Equality is preserved because two
+//! `DateTime<Utc>` values that compare equal yield the same
 //! `(timestamp, subsec_nanos)` pair.
 
 use crate::biterator::Biterator;
 use crate::impls::encrypt_ope_bits;
-use crate::impls::variable::OpeCllw8VariableV1;
-use crate::{CllwOpeEncrypt, Error, Key};
+use crate::{CllwOpeEncrypt, Error, Key, OpeCllw8V1};
 use ::chrono::{DateTime, Datelike, NaiveDate, Utc};
 
-/// Canonical bytes for a `NaiveDate`. See module docs.
-pub(crate) fn naive_date_canonical_bytes(d: &NaiveDate) -> [u8; 4] {
-    let days = d.num_days_from_ce();
-    // Sign-flip i32 → u32 monotonically (i32::MIN → 0, 0 → 0x8000_0000, i32::MAX → u32::MAX).
-    let biased = (days as u32) ^ (1u32 << 31);
-    biased.to_be_bytes()
-}
-
-/// Canonical bytes for a `DateTime<Utc>`. See module docs.
+/// Canonical 12-byte form of a `DateTime<Utc>`. See module docs.
 pub(crate) fn datetime_utc_canonical_bytes(dt: &DateTime<Utc>) -> [u8; 12] {
     let secs = dt.timestamp();
     let nanos = dt.timestamp_subsec_nanos();
@@ -52,26 +44,26 @@ pub(crate) fn datetime_utc_canonical_bytes(dt: &DateTime<Utc>) -> [u8; 12] {
 }
 
 impl CllwOpeEncrypt for NaiveDate {
-    type Output = OpeCllw8VariableV1;
+    type Output = OpeCllw8V1<33>;
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
-        let canonical = naive_date_canonical_bytes(&self);
-        let n = canonical.len() * 8;
-        let bits = canonical.into_iter().flat_map(Biterator::new);
-        let bytes = encrypt_ope_bits(bits, n, key, salt);
-        Ok(OpeCllw8VariableV1::from_bytes(bytes))
+        // Sign-flip i32 → u32 monotonically (i32::MIN → 0, 0 → 0x8000_0000,
+        // i32::MAX → u32::MAX), then defer to the existing u32 OPE impl.
+        let biased = (self.num_days_from_ce() as u32) ^ (1u32 << 31);
+        biased.encrypt_ope_with_salt(key, salt)
     }
 }
 
 impl CllwOpeEncrypt for DateTime<Utc> {
-    type Output = OpeCllw8VariableV1;
+    type Output = OpeCllw8V1<97>;
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         let canonical = datetime_utc_canonical_bytes(&self);
-        let n = canonical.len() * 8;
         let bits = canonical.into_iter().flat_map(Biterator::new);
-        let bytes = encrypt_ope_bits(bits, n, key, salt);
-        Ok(OpeCllw8VariableV1::from_bytes(bytes))
+        let vec = encrypt_ope_bits(bits, canonical.len() * 8, key, salt);
+        let mut bytes = [0u8; 97];
+        bytes.copy_from_slice(&vec);
+        Ok(OpeCllw8V1::from_bytes(bytes))
     }
 }
 
@@ -95,15 +87,16 @@ mod tests {
         NaiveDate::from_ymd_opt(year, month, day).unwrap()
     }
 
-    fn encrypt_date(d: NaiveDate) -> OpeCllw8VariableV1 {
+    fn encrypt_date(d: NaiveDate) -> OpeCllw8V1<33> {
         key().encrypt_ope(d).unwrap()
     }
 
     #[test]
-    fn naive_date_epoch_canonical_bytes() {
-        // Year 1 day 1 has num_days_from_ce = 1, biased = 0x80000001.
-        let d = ymd(1, 1, 1);
-        assert_eq!(naive_date_canonical_bytes(&d), [0x80, 0x00, 0x00, 0x01]);
+    fn naive_date_year_one_biases_to_known_u32() {
+        // Year 1 day 1 has num_days_from_ce = 1 ⇒ sign-flipped u32 = 0x8000_0001.
+        let days = ymd(1, 1, 1).num_days_from_ce();
+        let biased = (days as u32) ^ (1u32 << 31);
+        assert_eq!(biased.to_be_bytes(), [0x80, 0x00, 0x00, 0x01]);
     }
 
     #[test]
@@ -199,7 +192,7 @@ mod tests {
 
         fn prop_date_length_invariant(x: ArbDate) -> bool {
             let ct = key().encrypt_ope(x.0).unwrap();
-            ct.as_ref().len() == 4 * 8 + 1
+            ct.as_ref().len() == 33
         }
 
         fn prop_date_length_independent_of_key(x: ArbDate) -> bool {
@@ -211,7 +204,7 @@ mod tests {
         fn prop_date_hex_round_trip(x: ArbDate) -> bool {
             let ct = key().encrypt_ope(x.0).unwrap();
             let hex_str = hex::encode(ct.as_ref());
-            let ct2 = OpeCllw8VariableV1::from_hex(&hex_str).unwrap();
+            let ct2 = OpeCllw8V1::<33>::from_hex(&hex_str).unwrap();
             ct == ct2
         }
 
@@ -239,7 +232,7 @@ mod tests {
         Utc.timestamp_opt(secs, nanos).single().unwrap()
     }
 
-    fn encrypt_dt(d: DateTime<Utc>) -> OpeCllw8VariableV1 {
+    fn encrypt_dt(d: DateTime<Utc>) -> OpeCllw8V1<97> {
         key().encrypt_ope(d).unwrap()
     }
 
@@ -370,7 +363,7 @@ mod tests {
 
         fn prop_datetime_length_invariant(x: ArbDateTime) -> bool {
             let ct = key().encrypt_ope(x.0).unwrap();
-            ct.as_ref().len() == 12 * 8 + 1
+            ct.as_ref().len() == 97
         }
 
         fn prop_datetime_length_independent_of_key(x: ArbDateTime) -> bool {
@@ -382,7 +375,7 @@ mod tests {
         fn prop_datetime_hex_round_trip(x: ArbDateTime) -> bool {
             let ct = key().encrypt_ope(x.0).unwrap();
             let hex_str = hex::encode(ct.as_ref());
-            let ct2 = OpeCllw8VariableV1::from_hex(&hex_str).unwrap();
+            let ct2 = OpeCllw8V1::<97>::from_hex(&hex_str).unwrap();
             ct == ct2
         }
 
