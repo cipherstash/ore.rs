@@ -2,6 +2,8 @@ use crate::Key;
 use std::cmp::Ordering;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
+#[cfg(feature = "decimal")]
+pub(crate) mod decimal;
 pub(crate) mod num;
 pub(crate) mod string;
 

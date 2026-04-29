@@ -229,6 +229,18 @@ pub struct OpeCllw8VariableV1 {
     bytes: Vec<u8>,
 }
 
+#[cfg(feature = "decimal")]
+impl OpeCllw8VariableV1 {
+    /// Construct a ciphertext from raw bytes produced by `encrypt_ope_bits`.
+    ///
+    /// Crate-internal: callers in feature-gated modules (e.g. `decimal`)
+    /// build their own canonical byte form, run it through the shared OPE
+    /// primitive, and wrap the resulting bytes here.
+    pub(crate) fn from_bytes(bytes: Vec<u8>) -> Self {
+        Self { bytes }
+    }
+}
+
 impl AsRef<[u8]> for OpeCllw8VariableV1 {
     fn as_ref(&self) -> &[u8] {
         &self.bytes
