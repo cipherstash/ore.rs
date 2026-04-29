@@ -1,107 +1,15 @@
-use crate::{
-    biterator::{string_biter, Biterator},
-    impls::encrypt_ope_bits,
-    CllwOpeEncrypt, CllwOreDecrypt, CllwOreEncrypt, Error, Key,
-};
-use hex::{FromHex, FromHexError};
-#[cfg(feature = "postgres-types")]
-use postgres_types::ToSql;
-use std::cmp::Ordering;
-use subtle::ConstantTimeEq;
+//! `CllwOreEncrypt` / `CllwOpeEncrypt` impls for `&str` and `&[u8]` plus
+//! the `orderize_string` collation step.
+//!
+//! The variable-length ciphertext types ([`OreCllw8VariableV1`] /
+//! [`OpeCllw8VariableV1`]) and their construction/decryption machinery
+//! live in [`super::variable`].
+
+use crate::biterator::{string_biter, Biterator};
+use crate::impls::encrypt_ope_bits;
+use crate::impls::variable::{OpeCllw8VariableV1, OreCllw8VariableV1};
+use crate::{CllwOpeEncrypt, CllwOreEncrypt, Error, Key};
 use unicode_normalization::char::decompose_canonical;
-
-const BITS_PER_BYTE: usize = 8;
-
-/// Variable-length CLWW ORE ciphertext for strings and byte slices.
-///
-/// This type represents an encrypted value using the CLWW Order-Revealing Encryption scheme
-/// for variable-length data types like `&str` and `&[u8]`.
-///
-/// The ciphertext length is proportional to the input length (8 bytes per input byte).
-#[derive(Debug, Clone)]
-#[cfg_attr(feature = "postgres-types", derive(ToSql))]
-#[cfg_attr(feature = "postgres-types", postgres(name = "ore_cllw_8_variable_v1"))]
-pub struct OreCllw8VariableV1 {
-    bytes: Vec<u8>,
-}
-
-impl AsRef<[u8]> for OreCllw8VariableV1 {
-    fn as_ref(&self) -> &[u8] {
-        &self.bytes
-    }
-}
-
-impl FromHex for OreCllw8VariableV1 {
-    type Error = FromHexError;
-
-    fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
-        Ok(Self {
-            bytes: hex::decode(hex)?,
-        })
-    }
-}
-
-/// FIXME: this impl should not exist - there are infinitely many Vec lengths that will not contain a valid term.
-/// Fallibility is a must. Switch to TryFrom.
-impl From<Vec<u8>> for OreCllw8VariableV1 {
-    fn from(bytes: Vec<u8>) -> Self {
-        Self { bytes }
-    }
-}
-
-impl OreCllw8VariableV1 {
-    /// Decrypt the ciphertext to raw bytes
-    pub fn decrypt_to_bytes(&self, key: &Key, salt: Option<&[u8]>) -> Result<Vec<u8>, Error> {
-        // Validate that ciphertext length is a multiple of 8
-        // Each plaintext byte requires exactly 8 ciphertext bytes (one per bit)
-        // Use Unspecified error to avoid oracle attacks that could exploit specific error messages
-        if !self.bytes.len().is_multiple_of(BITS_PER_BYTE) {
-            return Err(Error);
-        }
-
-        let mut hasher = blake3::Hasher::new_keyed(&key.0);
-        if let Some(salt) = salt {
-            let _ = hasher.update(salt);
-        }
-
-        let mut result_bytes = Vec::with_capacity(self.bytes.len() / BITS_PER_BYTE);
-        let mut current_byte: u8 = 0;
-
-        for (i, &ciphertext_byte) in self.bytes.iter().enumerate() {
-            let mut buf: [u8; 16] = [0; 16];
-            hasher.finalize_xof().fill(&mut buf);
-            let prf_block = u128::from_be_bytes(buf) & 0xFF;
-            // Recover the bit by subtracting ciphertext from PRF block
-            let bit = ciphertext_byte.wrapping_sub(prf_block as u8) & 0x01;
-            let _ = hasher.update(&[bit]);
-
-            // Build up the byte MSB-first (8 bits per byte)
-            // Use constant-time operation to avoid timing side-channel
-            let bit_position = i % BITS_PER_BYTE;
-            current_byte |= bit << (7 - bit_position);
-
-            // Push the byte when we've collected 8 bits (every 8th iteration)
-            // Check using modulo which is constant-time for the bit position
-            if bit_position == 7 {
-                result_bytes.push(current_byte);
-                current_byte = 0;
-            }
-        }
-
-        Ok(result_bytes)
-    }
-}
-
-impl CllwOreDecrypt for OreCllw8VariableV1 {
-    type Output = String;
-
-    fn decrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
-        let result_bytes = self.decrypt_to_bytes(key, salt)?;
-        // Convert bytes back to string
-        // Use Unspecified error to avoid oracle attacks that could exploit specific error messages
-        String::from_utf8(result_bytes).map_err(|_| Error)
-    }
-}
 
 impl CllwOreEncrypt for &[u8] {
     type Output = OreCllw8VariableV1;
@@ -126,7 +34,7 @@ impl CllwOreEncrypt for &[u8] {
             },
         );
 
-        Ok(OreCllw8VariableV1 { bytes })
+        Ok(OreCllw8VariableV1::from(bytes))
     }
 }
 
@@ -149,111 +57,7 @@ impl CllwOreEncrypt for &str {
             out
         });
 
-        Ok(OreCllw8VariableV1 { bytes })
-    }
-}
-
-impl Ord for OreCllw8VariableV1 {
-    fn cmp(&self, other: &Self) -> Ordering {
-        compare_lex(self, other)
-    }
-}
-
-impl PartialOrd for OreCllw8VariableV1 {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl PartialEq for OreCllw8VariableV1 {
-    fn eq(&self, other: &Self) -> bool {
-        self.bytes.ct_eq(&other.bytes).into()
-    }
-}
-
-impl Eq for OreCllw8VariableV1 {}
-
-/// Compare two outputs lexicographically in constant time.
-/// This is useful for strings where the length of the output is not necessarily the same.
-/// A shorter string is considered less than a longer string if it is a prefix of the longer string.
-fn compare_lex(a: &OreCllw8VariableV1, b: &OreCllw8VariableV1) -> Ordering {
-    let a_len = a.bytes.len();
-    let b_len = b.bytes.len();
-    let slice_len = a_len.min(b_len);
-
-    // Handle empty slices
-    if slice_len == 0 {
-        return a_len.cmp(&b_len);
-    }
-
-    // Compare the common prefix
-    let prefix_ordering = super::compare_slice(&a.bytes[..slice_len], &b.bytes[..slice_len]);
-
-    // If prefix is equal, compare by length; otherwise return prefix comparison
-    match prefix_ordering {
-        Ordering::Equal => a_len.cmp(&b_len),
-        other => other,
-    }
-}
-
-// --- Variable-length OPE ---
-
-/// Variable-length CLWW OPE ciphertext for strings and byte slices.
-///
-/// Ciphertexts are compared with standard lexicographic byte ordering.
-/// Encryption uses the CLWW keystream from Section 3.2 of the paper; the
-/// plaintext bit contribution is placed at the top bit of its byte (adding
-/// `128` rather than `1`) and the resulting sum is propagated as a
-/// right-to-left carry into a reserved leading byte.
-///
-/// **Correctness**: comparison is **exact** — lex compare always agrees
-/// with the plaintext byte-lex order. The `+128` signal at the first
-/// differing byte exceeds any backward-carry noise (±1 per byte), so no
-/// PRF choice can flip the comparison. See
-/// `packages/cllw-ore/docs/backward-carry-ope.md` for the derivation.
-///
-/// **Encrypt-only**: this type intentionally does not support decryption.
-/// OPE is used for ordered lookups; if round-trip is required, pair the OPE
-/// ciphertext with an authenticated symmetric cipher (e.g. AES-GCM) over the
-/// same plaintext.
-///
-/// The ciphertext length is `8 * plaintext_bytes + 1` (one reserved leading
-/// byte plus one byte per plaintext bit).
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-#[cfg_attr(feature = "postgres-types", derive(ToSql))]
-#[cfg_attr(
-    feature = "postgres-types",
-    postgres(name = "ore_cllw_8_ope_variable_v1")
-)]
-pub struct OpeCllw8VariableV1 {
-    bytes: Vec<u8>,
-}
-
-#[cfg(any(feature = "decimal", feature = "chrono"))]
-impl OpeCllw8VariableV1 {
-    /// Construct a ciphertext from raw bytes produced by `encrypt_ope_bits`.
-    ///
-    /// Crate-internal: callers in feature-gated modules (e.g. `decimal`,
-    /// `chrono`) build their own canonical byte form, run it through the
-    /// shared OPE primitive, and wrap the resulting bytes here.
-    pub(crate) fn from_bytes(bytes: Vec<u8>) -> Self {
-        Self { bytes }
-    }
-}
-
-impl AsRef<[u8]> for OpeCllw8VariableV1 {
-    fn as_ref(&self) -> &[u8] {
-        &self.bytes
-    }
-}
-
-impl FromHex for OpeCllw8VariableV1 {
-    type Error = FromHexError;
-
-    fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
-        Ok(Self {
-            bytes: hex::decode(hex)?,
-        })
+        Ok(OreCllw8VariableV1::from(bytes))
     }
 }
 
@@ -264,7 +68,7 @@ impl CllwOpeEncrypt for &str {
         let normalized = orderize_string(self);
         let n = normalized.len() * 8;
         let bytes = encrypt_ope_bits(string_biter(&normalized), n, key, salt);
-        Ok(OpeCllw8VariableV1 { bytes })
+        Ok(OpeCllw8VariableV1::from_bytes(bytes))
     }
 }
 
@@ -275,7 +79,7 @@ impl CllwOpeEncrypt for &[u8] {
         let n = self.len() * 8;
         let bits = self.iter().flat_map(|&byte| Biterator::new(byte));
         let bytes = encrypt_ope_bits(bits, n, key, salt);
-        Ok(OpeCllw8VariableV1 { bytes })
+        Ok(OpeCllw8VariableV1::from_bytes(bytes))
     }
 }
 
@@ -300,7 +104,8 @@ fn orderize_string(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{orderize_string, OpeCllw8VariableV1, OreCllw8VariableV1};
+    use super::orderize_string;
+    use crate::impls::variable::{OpeCllw8VariableV1, OreCllw8VariableV1};
     use crate::{Error, Key};
     use quickcheck::{quickcheck, Arbitrary, Gen};
     use std::cmp::Ordering;

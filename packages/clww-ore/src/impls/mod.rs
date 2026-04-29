@@ -8,6 +8,7 @@ pub(crate) mod chrono;
 pub(crate) mod decimal;
 pub(crate) mod num;
 pub(crate) mod string;
+pub(crate) mod variable;
 
 /// Encrypts a bit stream into an OPE ciphertext whose lex order matches the
 /// plaintext order exactly.

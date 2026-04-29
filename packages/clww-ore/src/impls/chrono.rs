@@ -28,7 +28,7 @@
 
 use crate::biterator::Biterator;
 use crate::impls::encrypt_ope_bits;
-use crate::impls::string::OpeCllw8VariableV1;
+use crate::impls::variable::OpeCllw8VariableV1;
 use crate::{CllwOpeEncrypt, Error, Key};
 use ::chrono::{DateTime, Datelike, NaiveDate, Utc};
 
