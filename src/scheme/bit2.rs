@@ -466,6 +466,21 @@ mod tests {
         assert!(a == b);
     }
 
+    // Regression: IEEE-754 says -0.0 == +0.0, so their ciphertexts must
+    // compare equal. Previously, sign-bit handling in
+    // `ToOrderedInteger::map_to` produced different `u64` plaintexts for
+    // the two zeros (0x7FFF... vs 0x8000...), so a quickcheck draw of
+    // `(-0.0, 0.0)` would flake. Pin the contract deterministically.
+    #[test]
+    fn signed_zeros_compare_equal() {
+        let ore = init_ore();
+        let pos_zero = 0.0_f64.encrypt(&ore).unwrap();
+        let neg_zero = (-0.0_f64).encrypt(&ore).unwrap();
+
+        assert_eq!(0.0_f64.partial_cmp(&-0.0_f64), Some(Ordering::Equal));
+        assert!(pos_zero == neg_zero);
+    }
+
     #[test]
     fn comparisons_in_first_block() {
         let ore = init_ore();

@@ -35,7 +35,9 @@ trait FromOrderedInteger<T> {
 
 impl ToOrderedInteger<u64> for f64 {
     fn map_to(&self) -> u64 {
-        let num: u64 = self.to_bits();
+        // Canonicalise -0.0 to +0.0 so equal-comparing floats produce equal
+        // ciphertexts (IEEE-754: -0.0 == +0.0).
+        let num: u64 = if *self == 0.0 { 0 } else { self.to_bits() };
         let signed: i64 = -(unsafe { mem::transmute(num >> 63) });
         let mut mask: u64 = unsafe { mem::transmute(signed) };
         mask |= 0x8000000000000000;
