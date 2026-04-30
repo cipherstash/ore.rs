@@ -1,0 +1,14 @@
+[workspace]
+changelog_config = "cliff.toml"
+git_tag_enable = true
+git_release_enable = true
+publish = true
+semver_check = false
+
+# Each crate is versioned independently.
+
+[[package]]
+name = "ore-rs"
+
+[[package]]
+name = "orderable-bytes"

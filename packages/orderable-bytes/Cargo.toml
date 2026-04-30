@@ -6,6 +6,7 @@ edition = "2021"
 homepage = "https://cipherstash.com"
 description = "Canonical, order-preserving fixed-length byte encodings for plaintext types — feed into ORE or OPE schemes that compare encrypted values lexicographically"
 license-file = "../../LICENCE"
+readme = "README.md"
 
 [features]
 # Encoder for `rust_decimal::Decimal`.
