@@ -109,7 +109,15 @@ pub(crate) fn pre_encode(d: &Decimal) -> [u8; PRE_ENCODED_LEN] {
     // normalised first or not. Skipping the call removes the leak.
     let raw_mantissa = d.mantissa();
     let scale = d.scale() as i32;
-    let abs_mantissa = raw_mantissa.unsigned_abs();
+    // Branchless absolute value via the standard two's-complement identity
+    // `abs(x) = (x ^ s) - s` where `s` is the arithmetic right-shift of the
+    // sign bit (`-1` if `x` is negative, `0` otherwise). For positives this
+    // collapses to `x - 0 = x`; for negatives to `~x + 1 = -x`. Equivalent
+    // in value to `i128::unsigned_abs`, which compiles to a CMOV on tier-1
+    // ISAs but is not language-guaranteed constant-time. The explicit form
+    // here removes the dependency on optimiser behaviour.
+    let sign_extension = raw_mantissa >> 127;
+    let abs_mantissa = ((raw_mantissa ^ sign_extension).wrapping_sub(sign_extension)) as u128;
     let (significand, trailing) = strip_trailing_zeros(abs_mantissa);
     let digits = digit_count(significand);
 
