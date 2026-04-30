@@ -142,18 +142,27 @@ pub(crate) fn pre_encode(d: &Decimal) -> [u8; PRE_ENCODED_LEN] {
     );
     let mant_field = &mant_be[16 - MANTISSA_BYTES..];
 
-    let is_negative = raw_mantissa < 0;
-    if is_negative {
-        // sign = 0; invert biased_exp (within 7 bits) and the mantissa field
-        // so larger magnitude → smaller bytes.
-        out[0] = (!biased_exp) & EXP_MASK;
-        for (i, &b) in mant_field.iter().enumerate() {
-            out[1 + i] = !b;
-        }
-    } else {
-        // sign = 1; biased_exp and mantissa go through unchanged.
-        out[0] = SIGN_BIT | biased_exp;
-        out[1..].copy_from_slice(mant_field);
+    // Sign-class handling is folded into a single branchless mask so the
+    // function executes the same instructions regardless of the input's
+    // sign. `neg_mask` is `0xFF` for negatives and `0x00` for positives
+    // (and zero, which lives in the positive sign-class), formed from the
+    // arithmetic shift of the sign bit and a u8 truncation.
+    //
+    // - byte 0: positives want `SIGN_BIT | biased_exp`; negatives want
+    //   `(!biased_exp) & EXP_MASK`. Expressed as one expression:
+    //     (SIGN_BIT & !neg_mask)        — keep sign bit only when positive
+    //   | (biased_exp ^ (neg_mask & EXP_MASK))
+    //                                   — XOR the 7 exp bits with `neg_mask`,
+    //                                     which is a no-op for positives and
+    //                                     a 7-bit complement for negatives.
+    //
+    // - mantissa bytes: positives want the bytes unchanged; negatives want
+    //   the bitwise complement. `b ^ neg_mask` does both: XOR with `0x00`
+    //   is a no-op, XOR with `0xFF` is bitwise NOT.
+    let neg_mask = (raw_mantissa >> 127) as u8;
+    out[0] = (SIGN_BIT & !neg_mask) | (biased_exp ^ (neg_mask & EXP_MASK));
+    for (i, &b) in mant_field.iter().enumerate() {
+        out[1 + i] = b ^ neg_mask;
     }
     out
 }
