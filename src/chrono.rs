@@ -115,10 +115,7 @@ mod tests {
             ymd(10000, 1, 1),
             NaiveDate::MAX,
         ];
-        let cts: Vec<_> = ascending
-            .iter()
-            .map(|d| d.encrypt(&ore).unwrap())
-            .collect();
+        let cts: Vec<_> = ascending.iter().map(|d| d.encrypt(&ore).unwrap()).collect();
         for window in cts.windows(2) {
             assert!(window[0] < window[1]);
         }
@@ -220,10 +217,7 @@ mod tests {
             dt(1_000_000_000_000, 0),
             DateTime::<Utc>::MAX_UTC,
         ];
-        let cts: Vec<_> = ascending
-            .iter()
-            .map(|d| d.encrypt(&ore).unwrap())
-            .collect();
+        let cts: Vec<_> = ascending.iter().map(|d| d.encrypt(&ore).unwrap()).collect();
         for window in cts.windows(2) {
             assert!(window[0] < window[1]);
         }

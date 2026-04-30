@@ -11,10 +11,15 @@ license-file = "LICENCE"
 [dev-dependencies]
 criterion = "0.5.1"
 quickcheck = "1.0.3"
+# Test-only: macros for constructing `Decimal` literals in unit tests.
+rust_decimal_macros = "1.28"
 
 [features]
 # Adds ORE support for `chrono::NaiveDate` and `chrono::DateTime<Utc>`.
 chrono = ["dep:chrono"]
+# Adds ORE support for `rust_decimal::Decimal` via a fixed-length 14-byte
+# order-preserving pre-encoding fed into the existing fixed-N ORE machinery.
+decimal = ["dep:rust_decimal"]
 
 [dependencies]
 aes = { version = "0.8.2", features = ["zeroize"] }
@@ -24,6 +29,7 @@ chrono = { version = "0.4.42", default-features = false, optional = true }
 hex-literal = "0.4.1"
 rand = "0.8.5"
 rand_chacha = "0.3.1"
+rust_decimal = { version = "1.28", default-features = false, optional = true }
 num = "0.4.0"
 hex = "0.4.3"
 subtle-ng = "2.5.0"

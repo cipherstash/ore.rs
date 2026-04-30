@@ -138,6 +138,8 @@
 mod chrono;
 mod ciphertext;
 mod convert;
+#[cfg(feature = "decimal")]
+mod decimal;
 mod encrypt;
 mod primitives;
 pub mod scheme;
