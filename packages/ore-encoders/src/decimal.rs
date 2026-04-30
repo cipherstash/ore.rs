@@ -228,27 +228,67 @@ pub fn pre_encode(d: &Decimal) -> [u8; PRE_ENCODED_LEN] {
     out
 }
 
+/// `5⁻¹ mod 2¹²⁸`. Verified: `5 * INV5 ≡ 1 (mod 2¹²⁸)`. Used to substitute
+/// the hardware `udiv` instruction (which has data-dependent latency on
+/// several real ISAs, including older ARM cores) with an unconditional
+/// multiply.
+const INV5: u128 = 0xCCCC_CCCC_CCCC_CCCC_CCCC_CCCC_CCCC_CCCD;
+
+/// Largest `u128` divisible by 5, equivalently `floor((2¹²⁸ − 1) / 5)`.
+/// Used as the threshold for the constant-time "is divisible by 5" test:
+/// because multiplication by [`INV5`] is a bijection on `u128` that maps
+/// `{0, 5, 10, …, 2¹²⁸ − 5}` onto `[0, MAX_DIV_5]`, `x.wrapping_mul(INV5) ≤
+/// MAX_DIV_5` iff `5 | x`.
+const MAX_DIV_5: u128 = u128::MAX / 5;
+
 /// Repeatedly divide by ten while the trailing digit is zero. Returns the
 /// stripped value and how many trailing zero digits were removed.
 ///
 /// Runs in constant time with respect to the input. The loop count is fixed
 /// at `PADDED_DIGITS` iterations (covering the maximum possible trailing-
-/// zero count for a u96-bounded `Decimal` mantissa, which is 28), and each
+/// zero count for a u96-bounded `Decimal` mantissa, which is 28), each
 /// iteration uses bitmask conditional selection rather than a data-
-/// dependent branch — so the function's timing does not leak the trailing-
-/// zero count of the secret mantissa.
+/// dependent branch, and we explicitly avoid hardware integer division
+/// because `udiv` latency is data-dependent on several real ISAs (notably
+/// older ARM cores; modern x86 is constant-time but the next compiler
+/// revision could regress lowering).
+///
+/// Two tricks make this division-free:
+///
+/// - **Inverse-multiply division.** When `10 | current`, `current / 10` can
+///   be computed as `(current >> 1).wrapping_mul(INV5)`. Halving is exact
+///   for even values, then the multiply-by-`5⁻¹ (mod 2¹²⁸)` recovers the
+///   quotient. When `10 ∤ current` the result is garbage — discarded by
+///   the masked select below.
+///
+/// - **Divisibility-by-10 test.** `10 | x ⟺ (2 | x) ∧ (5 | x)`. The
+///   `2 | x` test is the LSB of `x`. The `5 | x` test exploits the same
+///   inverse-multiply identity: multiplication by `INV5` is a bijection on
+///   `u128`, and the multiples of 5 land precisely in `[0, MAX_DIV_5]`. So
+///   `x.wrapping_mul(INV5) ≤ MAX_DIV_5 ⟺ 5 | x`. The comparison is
+///   lowered to `overflowing_sub` (SBB + carry on x86, equivalent on ARM),
+///   which is data-independent on every reasonable target.
 fn strip_trailing_zeros(m: u128) -> (u128, i32) {
     let mut current = m;
     let mut count: i32 = 0;
     for _ in 0..PADDED_DIGITS {
-        let div = current / 10;
-        let rem = current - div * 10;
-        // For a u128 `x`, `(x | x.wrapping_neg()) >> 127` is the 1-bit mask
-        // `1` iff `x != 0`.
+        // Inverse-multiply division by 10. Valid only when 10 | current;
+        // garbage otherwise, but masked out by `do_strip` below.
+        let div = (current >> 1).wrapping_mul(INV5);
+
+        // CT divisibility-by-10. `5 | current` iff `current * INV5 ≤
+        // MAX_DIV_5`; the comparison is implemented via `overflowing_sub`
+        // so it lowers to a borrow-out of a subtract instead of a branch.
+        let q5 = current.wrapping_mul(INV5);
+        let (_, borrow) = MAX_DIV_5.overflowing_sub(q5);
+        let div_by_5 = (borrow as u128) ^ 1; // 1 iff 5 | current
+        let div_by_2 = (current & 1) ^ 1; // 1 iff 2 | current
+        let div_by_10 = div_by_5 & div_by_2;
+
+        // Standard `(x | -x) >> 127` nonzero-mask: 1 iff current != 0.
         let cur_nz = (current | current.wrapping_neg()) >> 127;
-        let rem_nz = (rem | rem.wrapping_neg()) >> 127;
-        // strip iff current != 0 AND rem == 0
-        let do_strip = cur_nz & (rem_nz ^ 1);
+
+        let do_strip = cur_nz & div_by_10;
         let mask = 0u128.wrapping_sub(do_strip);
         current = (div & mask) | (current & !mask);
         count = count.wrapping_add(do_strip as i32);
@@ -258,19 +298,25 @@ fn strip_trailing_zeros(m: u128) -> (u128, i32) {
 
 /// Number of decimal digits in `m`. Returns `0` for `m == 0`.
 ///
-/// Runs in constant time with respect to the input: a fixed
-/// `PADDED_DIGITS` iterations with branchless tally, so timing does not
-/// leak the digit count of the secret mantissa.
+/// Runs in constant time with respect to the input. Like
+/// [`strip_trailing_zeros`] this avoids hardware division entirely, but
+/// the inverse-multiply trick doesn't transfer here — we'd need true
+/// `floor(current / 10)` for arbitrary `current`, not just when divisible.
+/// Instead the digit count is recast as the number of `i ∈ [0, PADDED_DIGITS)`
+/// for which `m ≥ 10^i`. Each comparison is computed via `overflowing_sub`
+/// (which lowers to SBB + carry on x86 and is data-independent on every
+/// reasonable target), and the running power of ten is stepped via
+/// `wrapping_mul(10)` — multiplication by a small constant is constant-
+/// time on every target this code is likely to run on.
 fn digit_count(m: u128) -> u32 {
-    let mut current = m;
     let mut n: u32 = 0;
+    let mut pow: u128 = 1; // 10^i, walking 10^0 .. 10^(PADDED_DIGITS − 1)
     for _ in 0..PADDED_DIGITS {
-        // Increment `n` iff `current != 0` — same nonzero-mask idiom as
-        // `strip_trailing_zeros`. `current / 10` is run unconditionally;
-        // once `current` reaches zero it stays zero and stops contributing.
-        let cur_nz = (current | current.wrapping_neg()) >> 127;
-        n = n.wrapping_add(cur_nz as u32);
-        current /= 10;
+        // borrow = 1 iff m < pow; we want n += (m >= pow) = !borrow.
+        let (_, borrow) = m.overflowing_sub(pow);
+        n = n.wrapping_add((borrow as u32) ^ 1);
+        // Final iteration's value is computed but unused; wrapping is fine.
+        pow = pow.wrapping_mul(10);
     }
     n
 }
