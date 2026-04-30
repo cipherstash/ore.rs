@@ -1,0 +1,18 @@
+[package]
+name = "ore-encoders"
+version = "0.1.0"
+authors = ["CipherStash <engineering@cipherstash.com>"]
+edition = "2021"
+homepage = "https://cipherstash.com"
+description = "Canonical order-preserving pre-encoders for plaintext types fed into the ore-rs ORE machinery"
+license-file = "../../LICENCE"
+
+[features]
+# Pre-encoder for `rust_decimal::Decimal`.
+decimal = ["dep:rust_decimal"]
+
+[dependencies]
+rust_decimal = { version = "1.28", default-features = false, optional = true }
+
+[dev-dependencies]
+rust_decimal_macros = "1.28"

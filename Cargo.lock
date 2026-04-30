@@ -452,6 +452,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 
 [[package]]
+name = "ore-encoders"
+version = "0.1.0"
+dependencies = [
+ "rust_decimal",
+ "rust_decimal_macros",
+]
+
+[[package]]
 name = "ore-rs"
 version = "0.8.0"
 dependencies = [
@@ -464,6 +472,7 @@ dependencies = [
  "hex-literal",
  "lazy_static",
  "num",
+ "ore-encoders",
  "quickcheck",
  "rand",
  "rand_chacha",
