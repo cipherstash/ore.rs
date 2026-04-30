@@ -91,14 +91,14 @@ const EXP_MASK: u8 = 0x7F;
 pub(crate) fn pre_encode(d: &Decimal) -> [u8; PRE_ENCODED_LEN] {
     let mut out = [0u8; PRE_ENCODED_LEN];
 
-    if d.is_zero() {
-        // Canonical zero: positive sign-class, biased_exp = 0, mantissa = 0.
-        // No non-zero positive uses biased_exp = 0 (range is [36, 92]), so
-        // zero is unambiguously distinct from every non-zero plaintext.
-        out[0] = SIGN_BIT;
-        return out;
-    }
-
+    // The pipeline runs unconditionally — no early return for zero inputs.
+    // A `d.is_zero()` short-circuit at the top would distinguish zero from
+    // non-zero plaintexts via timing. Instead we feed zero through the same
+    // sequence of operations as every other value (the helpers tolerate
+    // `m == 0` and produce `(significand=0, digits=0, trailing=0)`) and
+    // canonicalise the resulting byte 0 to the zero plaintext at the end
+    // via a branchless mask.
+    //
     // We deliberately don't call `Decimal::normalize()` here. `normalize`
     // strips trailing zeros from the mantissa via a `while scale > 0` loop
     // whose iteration count depends on the secret value's trailing-zero
@@ -123,10 +123,19 @@ pub(crate) fn pre_encode(d: &Decimal) -> [u8; PRE_ENCODED_LEN] {
 
     // value = ±significand × 10^trailing × 10^(-scale)
     // leading_exp = decimal exponent of the leading significant digit.
+    //
+    // For non-zero `Decimal`s `leading_exp` lies in `[-28, 28]`. The
+    // pipeline also runs for zero inputs (significand = 0, digits = 0,
+    // trailing = 0), where the formula collapses to `-1 - scale` and
+    // `leading_exp` lands in `[-29, -1]`; this produces a perfectly valid
+    // — though arbitrary — non-zero positive plaintext that we'll
+    // overwrite at the end with the canonical zero. The widened range
+    // `[-29, 28]` covers both branches without leaking the zero/non-zero
+    // distinction in debug builds either.
     let leading_exp = digits as i32 - 1 + trailing - scale;
     debug_assert!(
-        (-28..=28).contains(&leading_exp),
-        "leading_exp {} out of bounds for Decimal — mantissa or scale corrupted",
+        (-29..=28).contains(&leading_exp),
+        "leading_exp {} out of bounds — mantissa or scale corrupted",
         leading_exp,
     );
     let biased_exp = (leading_exp + EXP_BIAS) as u8;
@@ -189,6 +198,27 @@ pub(crate) fn pre_encode(d: &Decimal) -> [u8; PRE_ENCODED_LEN] {
     for (i, &b) in mant_field.iter().enumerate() {
         out[1 + i] = b ^ neg_mask;
     }
+
+    // Final canonicalisation for the zero plaintext, applied branchlessly
+    // so the function's timing doesn't reveal whether the input was zero.
+    //
+    // The non-zero pipeline ran end-to-end on the zero input too. With
+    // `significand = 0` the padded mantissa is also `0`, so `out[1..]` is
+    // already the all-zero canonical zero tail; we only need to fix up
+    // `out[0]`, which currently holds some valid-looking positive
+    // `SIGN_BIT | biased_exp` byte.
+    //
+    // Build a full-byte mask `zero_mask` that is `0xFF` when `abs_mantissa
+    // == 0` and `0x00` otherwise:
+    //   - `(x | -x) >> 127` is `1` if `x != 0`, `0` if `x == 0` (standard
+    //     u128 nonzero-detection idiom).
+    //   - XOR with `1` flips it to "is zero".
+    //   - Subtract from `0u8` to broadcast the bit across all 8 bits.
+    // Then merge: keep `out[0]` for non-zero, replace with `SIGN_BIT` for
+    // zero.
+    let mant_nonzero_bit = ((abs_mantissa | abs_mantissa.wrapping_neg()) >> 127) as u8;
+    let zero_mask = 0u8.wrapping_sub(mant_nonzero_bit ^ 1);
+    out[0] = (out[0] & !zero_mask) | (SIGN_BIT & zero_mask);
     out
 }
 
@@ -220,13 +250,12 @@ fn strip_trailing_zeros(m: u128) -> (u128, i32) {
     (current, count)
 }
 
-/// Number of decimal digits in `m`. `m` must be non-zero.
+/// Number of decimal digits in `m`. Returns `0` for `m == 0`.
 ///
 /// Runs in constant time with respect to the input: a fixed
 /// `PADDED_DIGITS` iterations with branchless tally, so timing does not
 /// leak the digit count of the secret mantissa.
 fn digit_count(m: u128) -> u32 {
-    debug_assert!(m > 0);
     let mut current = m;
     let mut n: u32 = 0;
     for _ in 0..PADDED_DIGITS {
