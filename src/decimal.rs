@@ -99,9 +99,16 @@ pub(crate) fn pre_encode(d: &Decimal) -> [u8; PRE_ENCODED_LEN] {
         return out;
     }
 
-    let normalized = d.normalize();
-    let raw_mantissa = normalized.mantissa();
-    let scale = normalized.scale() as i32;
+    // We deliberately don't call `Decimal::normalize()` here. `normalize`
+    // strips trailing zeros from the mantissa via a `while scale > 0` loop
+    // whose iteration count depends on the secret value's trailing-zero
+    // count — a timing side channel. Our own `strip_trailing_zeros` already
+    // strips *all* trailing zeros (a strict superset of what `normalize`
+    // would remove, since it doesn't stop at scale=0), so the leading-digit
+    // exponent we compute below is identical whether the input has been
+    // normalised first or not. Skipping the call removes the leak.
+    let raw_mantissa = d.mantissa();
+    let scale = d.scale() as i32;
     let abs_mantissa = raw_mantissa.unsigned_abs();
     let (significand, trailing) = strip_trailing_zeros(abs_mantissa);
     let digits = digit_count(significand);
@@ -145,25 +152,48 @@ pub(crate) fn pre_encode(d: &Decimal) -> [u8; PRE_ENCODED_LEN] {
 
 /// Repeatedly divide by ten while the trailing digit is zero. Returns the
 /// stripped value and how many trailing zero digits were removed.
-fn strip_trailing_zeros(mut m: u128) -> (u128, i32) {
-    if m == 0 {
-        return (0, 0);
+///
+/// Runs in constant time with respect to the input. The loop count is fixed
+/// at `PADDED_DIGITS` iterations (covering the maximum possible trailing-
+/// zero count for a u96-bounded `Decimal` mantissa, which is 28), and each
+/// iteration uses bitmask conditional selection rather than a data-
+/// dependent branch — so the function's timing does not leak the trailing-
+/// zero count of the secret mantissa.
+fn strip_trailing_zeros(m: u128) -> (u128, i32) {
+    let mut current = m;
+    let mut count: i32 = 0;
+    for _ in 0..PADDED_DIGITS {
+        let div = current / 10;
+        let rem = current - div * 10;
+        // For a u128 `x`, `(x | x.wrapping_neg()) >> 127` is the 1-bit mask
+        // `1` iff `x != 0`.
+        let cur_nz = (current | current.wrapping_neg()) >> 127;
+        let rem_nz = (rem | rem.wrapping_neg()) >> 127;
+        // strip iff current != 0 AND rem == 0
+        let do_strip = cur_nz & (rem_nz ^ 1);
+        let mask = 0u128.wrapping_sub(do_strip);
+        current = (div & mask) | (current & !mask);
+        count = count.wrapping_add(do_strip as i32);
     }
-    let mut t = 0;
-    while m % 10 == 0 {
-        m /= 10;
-        t += 1;
-    }
-    (m, t)
+    (current, count)
 }
 
 /// Number of decimal digits in `m`. `m` must be non-zero.
-fn digit_count(mut m: u128) -> u32 {
+///
+/// Runs in constant time with respect to the input: a fixed
+/// `PADDED_DIGITS` iterations with branchless tally, so timing does not
+/// leak the digit count of the secret mantissa.
+fn digit_count(m: u128) -> u32 {
     debug_assert!(m > 0);
-    let mut n = 0;
-    while m > 0 {
-        n += 1;
-        m /= 10;
+    let mut current = m;
+    let mut n: u32 = 0;
+    for _ in 0..PADDED_DIGITS {
+        // Increment `n` iff `current != 0` — same nonzero-mask idiom as
+        // `strip_trailing_zeros`. `current / 10` is run unconditionally;
+        // once `current` reaches zero it stays zero and stops contributing.
+        let cur_nz = (current | current.wrapping_neg()) >> 127;
+        n = n.wrapping_add(cur_nz as u32);
+        current /= 10;
     }
     n
 }
