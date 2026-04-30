@@ -1,3 +1,4 @@
+#![deny(missing_docs)]
 //! Canonical order-preserving pre-encoders for plaintext types fed into the
 //! `ore-rs` BlockORE machinery.
 //!

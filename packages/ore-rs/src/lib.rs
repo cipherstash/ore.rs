@@ -134,6 +134,8 @@
 //! # assert!(ct == a);
 //! ```
 
+#![deny(missing_docs)]
+
 #[cfg(feature = "chrono")]
 mod chrono;
 mod ciphertext;
@@ -149,32 +151,67 @@ use primitives::PrpError;
 use std::cmp::Ordering;
 use thiserror::Error;
 
+/// Fixed-size byte array used as the input to the BlockORE encryption
+/// routines. `N` is the number of plaintext bytes (one byte per ORE block).
+/// The fixed-N encryption path caps `N` at 15 due to the AES-as-PRF input
+/// packing in [`scheme::bit2`].
 pub type PlainText<const N: usize> = [u8; N];
 
+/// Errors returned by [`OreCipher`] initialisation and encryption.
 #[derive(Debug, Error)]
 pub enum OreError {
+    /// Cipher initialisation failed (e.g., key material rejected by an
+    /// underlying primitive).
     #[error("Failed to initialize cipher")]
     InitFailed,
+    /// A pseudo-random permutation primitive returned an error.
     #[error(transparent)]
     PrpError(#[from] PrpError),
+    /// The OS or seeded RNG failed to produce random bytes (used for the
+    /// per-ciphertext nonce).
     #[error("Randomness Error")]
     RandError(#[from] rand::Error),
 }
 
+/// A BlockORE cipher: a key-bound object that can encrypt fixed-N plaintexts
+/// to ciphertexts whose byte-wise comparison matches the plaintext order.
+///
+/// Implementations associate concrete block types for the Left and Right
+/// halves of a ciphertext (see [`Left`], [`Right`], [`CipherText`]) and
+/// expose [`init`](Self::init) for key setup, [`encrypt_left`](Self::encrypt_left)
+/// for query-side ciphertexts, [`encrypt`](Self::encrypt) for indexable
+/// ciphertexts, and [`compare_raw_slices`](Self::compare_raw_slices) for
+/// comparing serialised ciphertext bytes without round-tripping through
+/// typed values.
 pub trait OreCipher: Sized {
+    /// Block type for the Left half of a ciphertext (per-block PRF tag plus
+    /// permuted plaintext byte).
     type LeftBlockType: CipherTextBlock;
+    /// Block type for the Right half of a ciphertext (per-block masked
+    /// truth-table row).
     type RightBlockType: CipherTextBlock;
 
+    /// Initialise the cipher from two 16-byte keys: `k1` for the
+    /// per-block-tag PRF and `k2` for the per-block PRP seed PRF.
     fn init(k1: &[u8; 16], k2: &[u8; 16]) -> Result<Self, OreError>;
 
+    /// Encrypt `input` and return only the Left half of the ciphertext.
+    /// Useful for query plaintexts compared against stored ciphertexts —
+    /// the Left alone is enough to drive the comparator.
     fn encrypt_left<const N: usize>(&self, input: &PlainText<N>)
         -> Result<Left<Self, N>, OreError>;
 
+    /// Encrypt `input` and return the full Left+Right ciphertext suitable
+    /// for storage and subsequent comparison against any other ciphertext.
     fn encrypt<const N: usize>(
         &self,
         input: &PlainText<N>,
     ) -> Result<CipherText<Self, N>, OreError>;
 
+    /// Compare two serialised ciphertexts (as produced by
+    /// [`OreOutput::to_bytes`]) byte-for-byte without deserialising. Returns
+    /// `None` if the slice lengths disagree (i.e., they encode ciphertexts
+    /// over different `N`).
     fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering>;
 }
 

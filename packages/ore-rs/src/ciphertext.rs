@@ -14,43 +14,65 @@ pub trait OreOutput: Sized {
     /// Try to deserialize from a slice
     fn from_slice(data: &[u8]) -> Result<Self, ParseError>;
 
+    /// Deserialise from a byte slice.
     #[deprecated(since = "0.8.0", note = "please use `from_slice` instead")]
     fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
         Self::from_slice(data)
     }
 }
 
+/// The Left half of a fixed-N BlockORE ciphertext: the per-block PRF₁ tags
+/// `f` and the per-block PRP outputs `xt`. Sufficient on its own to act as
+/// the "query" side of the comparator.
 #[derive(Debug, Copy, Clone)]
 pub struct Left<S: OreCipher, const N: usize> {
-    /* Array of Left blocks of size N */
+    /// Per-block PRF₁ tag binding `(prefix ‖ xt[i] ‖ block_index)`.
     pub f: [S::LeftBlockType; N],
 
-    /* Transformed input array of size N (x̃ = π(F (k_2 , x|i−1 ), x_i )) */
+    /// Per-block PRP output `xt[i] = π_i(x[i])`.
     pub xt: [u8; N],
 }
 
+/// The Right half of a fixed-N BlockORE ciphertext: a per-ciphertext nonce
+/// and per-block masked truth-table rows. Combined with a Left from another
+/// ciphertext this drives the comparator.
 #[derive(Debug, Copy, Clone)]
 pub struct Right<S: OreCipher, const N: usize> {
+    /// 16-byte random nonce, shared across all blocks of this ciphertext.
     pub nonce: [u8; NONCE_SIZE],
+    /// Per-block masked truth tables.
     pub data: [S::RightBlockType; N],
 }
 
+/// A complete fixed-N BlockORE ciphertext: Left + Right.
 #[derive(Debug, Copy, Clone)]
 pub struct CipherText<S: OreCipher, const N: usize> {
+    /// Left half (PRF tags + permuted plaintext bytes).
     pub left: Left<S, N>,
+    /// Right half (nonce + masked truth tables).
     pub right: Right<S, N>,
 }
 
+/// Trait implemented by per-block ciphertext components (Left and Right
+/// blocks). Provides a fixed serialised size and byte conversions used by
+/// [`OreOutput`].
 pub trait CipherTextBlock: Default + Copy + std::fmt::Debug {
+    /// Serialised size of one block in bytes.
     const BLOCK_SIZE: usize;
 
+    /// Serialise this block to bytes.
     fn to_bytes(self) -> Vec<u8>;
 
+    /// Deserialise a block from a byte slice. Returns [`ParseError`] if the
+    /// slice is malformed or the wrong length.
     fn from_bytes(data: &[u8]) -> Result<Self, ParseError>;
 
+    /// Reset this block to its default value in place.
     fn default_in_place(&mut self);
 }
 
+/// Error returned when a serialised ciphertext can't be parsed (wrong
+/// length, malformed block, etc.).
 #[derive(Debug, Error)]
 #[error("Unable to parse ORE Ciphertext")]
 pub struct ParseError;

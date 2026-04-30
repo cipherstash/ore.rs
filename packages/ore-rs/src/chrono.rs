@@ -12,7 +12,7 @@
 //! Sign-flipping `i32 → u32` (XOR with `1u32 << 31`) preserves order while
 //! making the value unsigned, which is what BlockORE consumes.
 //!
-//! ## DateTime<Utc> → 12-byte plaintext
+//! ## `DateTime<Utc>` → 12-byte plaintext
 //!
 //! Canonical encoding: a sign-flipped `i64` timestamp (8 bytes BE) followed
 //! by `u32` subsecond nanoseconds (4 bytes BE). Chrono's
