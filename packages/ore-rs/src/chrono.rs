@@ -1,65 +1,43 @@
 //! ORE encryption for `chrono::NaiveDate` and `chrono::DateTime<Utc>`,
 //! gated behind the `chrono` feature.
 //!
-//! Both impls produce a canonical fixed-width big-endian byte encoding whose
-//! lex order matches chronological order, then delegate to the existing ORE
-//! primitive via the [`OreEncrypt`] trait.
-//!
-//! ## NaiveDate → 4-byte plaintext
-//!
-//! `NaiveDate::num_days_from_ce()` returns an `i32` whose ordering matches
-//! chronological order (and whose equality matches `NaiveDate` equality).
-//! Sign-flipping `i32 → u32` (XOR with `1u32 << 31`) preserves order while
-//! making the value unsigned, which is what BlockORE consumes.
-//!
-//! ## `DateTime<Utc>` → 12-byte plaintext
-//!
-//! Canonical encoding: a sign-flipped `i64` timestamp (8 bytes BE) followed
-//! by `u32` subsecond nanoseconds (4 bytes BE). Chrono's
-//! `timestamp_subsec_nanos` returns values in `0..2_000_000_000` (the upper
-//! half encodes leap-second moments) which fits in `u32` and preserves
-//! chronological order.
+//! Wraps the canonical fixed-length pre-encoders from
+//! [`ore_encoders::chrono`] in [`OreEncrypt`] impls, feeding the plaintext
+//! bytes through the existing fixed-N ORE machinery (`N = 4` for
+//! `NaiveDate`, `N = 12` for `DateTime<Utc>`). See the
+//! `ore_encoders::chrono` module docs for encoding details and ordering
+//! properties.
 
 use crate::ciphertext::*;
 use crate::{OreCipher, OreEncrypt, OreError};
-use ::chrono::{DateTime, Datelike, NaiveDate, Utc};
+use ::chrono::{DateTime, NaiveDate, Utc};
 
-/// Canonical 12-byte form of a `DateTime<Utc>`. See module docs.
-fn datetime_utc_canonical_bytes(dt: &DateTime<Utc>) -> [u8; 12] {
-    let secs = dt.timestamp();
-    let nanos = dt.timestamp_subsec_nanos();
-    let secs_biased = (secs as u64) ^ (1u64 << 63);
-    let mut out = [0u8; 12];
-    out[..8].copy_from_slice(&secs_biased.to_be_bytes());
-    out[8..].copy_from_slice(&nanos.to_be_bytes());
-    out
-}
+const NAIVE_DATE_LEN: usize = ore_encoders::chrono::naive_date::PRE_ENCODED_LEN;
+const DATETIME_UTC_LEN: usize = ore_encoders::chrono::datetime_utc::PRE_ENCODED_LEN;
 
 impl<T: OreCipher> OreEncrypt<T> for NaiveDate {
-    type LeftOutput = Left<T, 4>;
-    type FullOutput = CipherText<T, 4>;
+    type LeftOutput = Left<T, NAIVE_DATE_LEN>;
+    type FullOutput = CipherText<T, NAIVE_DATE_LEN>;
 
     fn encrypt_left(&self, cipher: &T) -> Result<Self::LeftOutput, OreError> {
-        let biased = (self.num_days_from_ce() as u32) ^ (1u32 << 31);
-        cipher.encrypt_left(&biased.to_be_bytes())
+        cipher.encrypt_left(&ore_encoders::chrono::naive_date::pre_encode(self))
     }
 
     fn encrypt(&self, cipher: &T) -> Result<Self::FullOutput, OreError> {
-        let biased = (self.num_days_from_ce() as u32) ^ (1u32 << 31);
-        cipher.encrypt(&biased.to_be_bytes())
+        cipher.encrypt(&ore_encoders::chrono::naive_date::pre_encode(self))
     }
 }
 
 impl<T: OreCipher> OreEncrypt<T> for DateTime<Utc> {
-    type LeftOutput = Left<T, 12>;
-    type FullOutput = CipherText<T, 12>;
+    type LeftOutput = Left<T, DATETIME_UTC_LEN>;
+    type FullOutput = CipherText<T, DATETIME_UTC_LEN>;
 
     fn encrypt_left(&self, cipher: &T) -> Result<Self::LeftOutput, OreError> {
-        cipher.encrypt_left(&datetime_utc_canonical_bytes(self))
+        cipher.encrypt_left(&ore_encoders::chrono::datetime_utc::pre_encode(self))
     }
 
     fn encrypt(&self, cipher: &T) -> Result<Self::FullOutput, OreError> {
-        cipher.encrypt(&datetime_utc_canonical_bytes(self))
+        cipher.encrypt(&ore_encoders::chrono::datetime_utc::pre_encode(self))
     }
 }
 
@@ -83,14 +61,6 @@ mod tests {
 
     fn ymd(year: i32, month: u32, day: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(year, month, day).unwrap()
-    }
-
-    #[test]
-    fn naive_date_year_one_biases_to_known_u32() {
-        // Year 1 day 1 has num_days_from_ce = 1 ⇒ sign-flipped u32 = 0x8000_0001.
-        let days = ymd(1, 1, 1).num_days_from_ce();
-        let biased = (days as u32) ^ (1u32 << 31);
-        assert_eq!(biased.to_be_bytes(), [0x80, 0x00, 0x00, 0x01]);
     }
 
     #[test]
@@ -151,6 +121,7 @@ mod tests {
 
     impl Arbitrary for ArbDate {
         fn arbitrary(g: &mut Gen) -> Self {
+            use ::chrono::Datelike;
             let valid_min = NaiveDate::MIN.num_days_from_ce();
             let valid_max = NaiveDate::MAX.num_days_from_ce();
             let days = i32::arbitrary(g).clamp(valid_min, valid_max);
@@ -173,16 +144,6 @@ mod tests {
 
     fn dt(secs: i64, nanos: u32) -> DateTime<Utc> {
         Utc.timestamp_opt(secs, nanos).single().unwrap()
-    }
-
-    #[test]
-    fn datetime_utc_unix_epoch_canonical_bytes() {
-        // 1970-01-01T00:00:00Z: timestamp = 0, subsec = 0. Sign-flip on 0 i64
-        // gives 0x8000_0000_0000_0000.
-        assert_eq!(
-            datetime_utc_canonical_bytes(&dt(0, 0)),
-            [0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-        );
     }
 
     #[test]

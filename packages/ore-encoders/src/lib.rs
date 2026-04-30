@@ -12,5 +12,7 @@
 //! Encoders are gated behind per-type feature flags so callers only pay for
 //! the dependencies they actually use.
 
+#[cfg(feature = "chrono")]
+pub mod chrono;
 #[cfg(feature = "decimal")]
 pub mod decimal;

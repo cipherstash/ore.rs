@@ -17,7 +17,8 @@ rust_decimal_macros = "1.28"
 
 [features]
 # Adds ORE support for `chrono::NaiveDate` and `chrono::DateTime<Utc>`.
-chrono = ["dep:chrono"]
+# The pre-encoders live in the sibling `ore-encoders` crate.
+chrono = ["dep:chrono", "ore-encoders/chrono"]
 # Adds ORE support for `rust_decimal::Decimal` via a fixed-length 14-byte
 # order-preserving pre-encoding fed into the existing fixed-N ORE machinery.
 # The pre-encoder lives in the sibling `ore-encoders` crate.
