@@ -1,28 +1,28 @@
 //! ORE encryption for `rust_decimal::Decimal`, gated behind the `decimal`
 //! feature.
 //!
-//! Wraps the canonical fixed-length pre-encoder from
-//! [`ore_encoders::decimal`] in an [`OreEncrypt`] impl, feeding the 14-byte
-//! plaintext through the existing fixed-N ORE machinery (`N = 14`). See the
-//! `ore_encoders::decimal` module docs for the encoding details, ordering
-//! properties, and constant-time guarantees.
+//! Wraps the canonical fixed-length byte encoding from
+//! [`orderable_bytes::decimal`] in an [`OreEncrypt`] impl, feeding the
+//! 14-byte plaintext through the existing fixed-N ORE machinery
+//! (`N = 14`). See the `orderable_bytes::decimal` module docs for the
+//! encoding details, ordering properties, and constant-time guarantees.
 
 use crate::ciphertext::{CipherText, Left};
 use crate::encrypt::OreEncrypt;
 use crate::{OreCipher, OreError};
-use ore_encoders::decimal::{pre_encode, PRE_ENCODED_LEN};
+use orderable_bytes::decimal::{to_orderable_bytes, ENCODED_LEN};
 use rust_decimal::Decimal;
 
 impl<T: OreCipher> OreEncrypt<T> for Decimal {
-    type LeftOutput = Left<T, PRE_ENCODED_LEN>;
-    type FullOutput = CipherText<T, PRE_ENCODED_LEN>;
+    type LeftOutput = Left<T, ENCODED_LEN>;
+    type FullOutput = CipherText<T, ENCODED_LEN>;
 
     fn encrypt_left(&self, cipher: &T) -> Result<Self::LeftOutput, OreError> {
-        cipher.encrypt_left(&pre_encode(self))
+        cipher.encrypt_left(&to_orderable_bytes(self))
     }
 
     fn encrypt(&self, cipher: &T) -> Result<Self::FullOutput, OreError> {
-        cipher.encrypt(&pre_encode(self))
+        cipher.encrypt(&to_orderable_bytes(self))
     }
 }
 
@@ -42,10 +42,7 @@ mod tests {
         OreCipher::init(&k1, &k2).unwrap()
     }
 
-    fn encrypt(
-        ore: &OreAes128ChaCha20,
-        d: Decimal,
-    ) -> CipherText<OreAes128ChaCha20, PRE_ENCODED_LEN> {
+    fn encrypt(ore: &OreAes128ChaCha20, d: Decimal) -> CipherText<OreAes128ChaCha20, ENCODED_LEN> {
         d.encrypt(ore).unwrap()
     }
 
@@ -149,7 +146,7 @@ mod tests {
         let ore = cipher();
         let ct = encrypt(&ore, dec!(123.456));
         let bytes = ct.to_bytes();
-        let parsed = CipherText::<OreAes128ChaCha20, PRE_ENCODED_LEN>::from_slice(&bytes).unwrap();
+        let parsed = CipherText::<OreAes128ChaCha20, ENCODED_LEN>::from_slice(&bytes).unwrap();
         assert_eq!(ct.cmp(&parsed), Ordering::Equal);
     }
 

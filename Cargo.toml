@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "packages/ore-rs",
-    "packages/ore-encoders",
+    "packages/orderable-bytes",
 ]
 
 [patch.crates-io]

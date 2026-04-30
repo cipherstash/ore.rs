@@ -1,16 +1,16 @@
 [package]
-name = "ore-encoders"
+name = "orderable-bytes"
 version = "0.1.0"
 authors = ["CipherStash <engineering@cipherstash.com>"]
 edition = "2021"
 homepage = "https://cipherstash.com"
-description = "Canonical order-preserving pre-encoders for plaintext types fed into the ore-rs ORE machinery"
+description = "Canonical, order-preserving fixed-length byte encodings for plaintext types — feed into ORE or OPE schemes that compare encrypted values lexicographically"
 license-file = "../../LICENCE"
 
 [features]
-# Pre-encoder for `rust_decimal::Decimal`.
+# Encoder for `rust_decimal::Decimal`.
 decimal = ["dep:rust_decimal"]
-# Pre-encoders for `chrono::NaiveDate` and `chrono::DateTime<Utc>`.
+# Encoders for `chrono::NaiveDate` and `chrono::DateTime<Utc>`.
 chrono = ["dep:chrono"]
 
 [dependencies]

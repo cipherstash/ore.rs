@@ -13,10 +13,10 @@ Goal: maintain feature parity between ORE and OPE, so any application can pick a
 ## Decision
 
 1. Add a `decimal` feature gating `Decimal` support. The feature pulls `rust_decimal`.
-2. Pre-encode each `Decimal` to a fixed 14-byte plaintext in *signed scientific form* (sign + biased leading-digit exponent + 29-digit-padded significand) and feed it to the existing fixed-N ORE machinery with `N = 14`.
-3. Implement the encoder in `src/decimal.rs`.
+2. Encode each `Decimal` to a fixed 14-byte canonical byte form in *signed scientific form* (sign + biased leading-digit exponent + 29-digit-padded significand) and feed it to the existing fixed-N ORE machinery with `N = 14`.
+3. Implement the encoder in the `orderable-bytes` crate (`orderable_bytes::decimal::to_orderable_bytes`); `ore-rs` calls into it from the `OreEncrypt for Decimal` impl.
 
-## Pre-encoding layout
+## Encoding layout
 
 Each non-zero `Decimal` is re-expressed as:
 
@@ -65,7 +65,8 @@ impl<T: OreCipher> OreEncrypt<T> for Decimal {
     fn encrypt(&self, cipher: &T) -> Result<Self::FullOutput, OreError>;
 }
 
-pub(crate) fn pre_encode(d: &Decimal) -> [u8; 14] { ... }
+// the encoder lives in the sibling `orderable-bytes` crate:
+pub fn to_orderable_bytes(d: &Decimal) -> [u8; 14] { ... }
 ```
 
 `OreCipher` and the existing `OreEncrypt` trait are untouched. The fixed-N ciphertext format, comparator, and serialization are unchanged.
@@ -76,8 +77,8 @@ The `bit2` ORE construction uses AES-128 directly as its PRF and packs `(prefix 
 
 ## Test strategy
 
-- Worked-example pre-encode tests: zero canonicalisation, signed-zero collision, equivalent-form collision, sign-byte and exponent-byte structure for a few worked positives and negatives, mantissa-byte inversion for negatives.
-- Pre-encode byte-order test: `pre_encode` itself sorts consistently with `Decimal::cmp` across a dramatic-magnitude sweep including `Decimal::MIN` and `Decimal::MAX`.
+- Worked-example encoding tests: zero canonicalisation, signed-zero collision, equivalent-form collision, sign-byte and exponent-byte structure for a few worked positives and negatives, mantissa-byte inversion for negatives.
+- Byte-order test: `to_orderable_bytes` itself sorts consistently with `Decimal::cmp` across a dramatic-magnitude sweep including `Decimal::MIN` and `Decimal::MAX`.
 - Ciphertext-level order tests:
   - Order across dramatic magnitudes.
   - Sign-class ordering at extremes (`MIN < -1 < 0 < 1 < MAX`).

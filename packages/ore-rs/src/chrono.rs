@@ -1,30 +1,34 @@
 //! ORE encryption for `chrono::NaiveDate` and `chrono::DateTime<Utc>`,
 //! gated behind the `chrono` feature.
 //!
-//! Wraps the canonical fixed-length pre-encoders from
-//! [`ore_encoders::chrono`] in [`OreEncrypt`] impls, feeding the plaintext
-//! bytes through the existing fixed-N ORE machinery (`N = 4` for
+//! Wraps the canonical fixed-length byte encodings from
+//! [`orderable_bytes::chrono`] in [`OreEncrypt`] impls, feeding the
+//! plaintext bytes through the existing fixed-N ORE machinery (`N = 4` for
 //! `NaiveDate`, `N = 12` for `DateTime<Utc>`). See the
-//! `ore_encoders::chrono` module docs for encoding details and ordering
-//! properties.
+//! `orderable_bytes::chrono` module docs for encoding details and
+//! ordering properties.
 
 use crate::ciphertext::*;
 use crate::{OreCipher, OreEncrypt, OreError};
 use ::chrono::{DateTime, NaiveDate, Utc};
 
-const NAIVE_DATE_LEN: usize = ore_encoders::chrono::naive_date::PRE_ENCODED_LEN;
-const DATETIME_UTC_LEN: usize = ore_encoders::chrono::datetime_utc::PRE_ENCODED_LEN;
+const NAIVE_DATE_LEN: usize = orderable_bytes::chrono::naive_date::ENCODED_LEN;
+const DATETIME_UTC_LEN: usize = orderable_bytes::chrono::datetime_utc::ENCODED_LEN;
 
 impl<T: OreCipher> OreEncrypt<T> for NaiveDate {
     type LeftOutput = Left<T, NAIVE_DATE_LEN>;
     type FullOutput = CipherText<T, NAIVE_DATE_LEN>;
 
     fn encrypt_left(&self, cipher: &T) -> Result<Self::LeftOutput, OreError> {
-        cipher.encrypt_left(&ore_encoders::chrono::naive_date::pre_encode(self))
+        cipher.encrypt_left(&orderable_bytes::chrono::naive_date::to_orderable_bytes(
+            self,
+        ))
     }
 
     fn encrypt(&self, cipher: &T) -> Result<Self::FullOutput, OreError> {
-        cipher.encrypt(&ore_encoders::chrono::naive_date::pre_encode(self))
+        cipher.encrypt(&orderable_bytes::chrono::naive_date::to_orderable_bytes(
+            self,
+        ))
     }
 }
 
@@ -33,11 +37,15 @@ impl<T: OreCipher> OreEncrypt<T> for DateTime<Utc> {
     type FullOutput = CipherText<T, DATETIME_UTC_LEN>;
 
     fn encrypt_left(&self, cipher: &T) -> Result<Self::LeftOutput, OreError> {
-        cipher.encrypt_left(&ore_encoders::chrono::datetime_utc::pre_encode(self))
+        cipher.encrypt_left(&orderable_bytes::chrono::datetime_utc::to_orderable_bytes(
+            self,
+        ))
     }
 
     fn encrypt(&self, cipher: &T) -> Result<Self::FullOutput, OreError> {
-        cipher.encrypt(&ore_encoders::chrono::datetime_utc::pre_encode(self))
+        cipher.encrypt(&orderable_bytes::chrono::datetime_utc::to_orderable_bytes(
+            self,
+        ))
     }
 }
 

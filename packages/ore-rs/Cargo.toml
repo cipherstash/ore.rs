@@ -16,13 +16,13 @@ quickcheck = "1.0.3"
 rust_decimal_macros = "1.28"
 
 [features]
-# Adds ORE support for `chrono::NaiveDate` and `chrono::DateTime<Utc>`.
-# The pre-encoders live in the sibling `ore-encoders` crate.
-chrono = ["dep:chrono", "ore-encoders/chrono"]
+# Adds ORE support for `chrono::NaiveDate` and `chrono::DateTime<Utc>`. The
+# orderable-bytes encoders live in the sibling `orderable-bytes` crate.
+chrono = ["dep:chrono", "orderable-bytes/chrono"]
 # Adds ORE support for `rust_decimal::Decimal` via a fixed-length 14-byte
-# order-preserving pre-encoding fed into the existing fixed-N ORE machinery.
-# The pre-encoder lives in the sibling `ore-encoders` crate.
-decimal = ["dep:rust_decimal", "ore-encoders/decimal"]
+# order-preserving encoding fed into the existing fixed-N ORE machinery.
+# The encoder lives in the sibling `orderable-bytes` crate.
+decimal = ["dep:rust_decimal", "orderable-bytes/decimal"]
 
 [dependencies]
 aes = { version = "0.8.2", features = ["zeroize"] }
@@ -30,7 +30,7 @@ block-modes = "0.9.1"
 byteorder = "1.4.3"
 chrono = { version = "0.4.42", default-features = false, optional = true }
 hex-literal = "0.4.1"
-ore-encoders = { path = "../ore-encoders", default-features = false }
+orderable-bytes = { path = "../orderable-bytes", default-features = false }
 rand = "0.8.5"
 rand_chacha = "0.3.1"
 rust_decimal = { version = "1.28", default-features = false, optional = true }

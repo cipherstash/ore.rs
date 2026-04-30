@@ -1,13 +1,13 @@
-//! Canonical, order-preserving fixed-length pre-encoder for
+//! Canonical, order-preserving fixed-length byte encoding for
 //! `rust_decimal::Decimal`.
 //!
-//! Maps each `Decimal` to a fixed 14-byte canonical plaintext whose
-//! byte-wise lexicographic order agrees with `Decimal::cmp` and whose byte
-//! equality agrees with `Decimal` value equality (so `1`, `1.0`, `1.00` and
-//! `±0` collide). Intended to be fed into the `ore-rs` fixed-N ORE machinery
-//! with `N = 14`, well under the 15-byte cap imposed by its AES-as-PRF
-//! construction; the resulting ciphertexts inherit the same order and
-//! equality properties.
+//! Maps each `Decimal` to a fixed 14-byte sequence whose byte-wise
+//! lexicographic order agrees with `Decimal::cmp` and whose byte equality
+//! agrees with `Decimal` value equality (so `1`, `1.0`, `1.00` and `±0`
+//! collide). Scheme-agnostic: any comparison-as-bytes consumer
+//! (`ore-rs` BlockORE with `N = 14`, an OPE construction, an ordered hash)
+//! inherits those order and equality properties on the resulting
+//! ciphertext or digest.
 //!
 //! ## Encoding (scientific form, base 10)
 //!
@@ -60,16 +60,16 @@
 //!
 //! ## Constant-time
 //!
-//! `pre_encode` is straight-line code with fixed-iteration loops and
-//! branchless mask arithmetic. It does not call `Decimal::normalize`
+//! `to_orderable_bytes` is straight-line code with fixed-iteration loops
+//! and branchless mask arithmetic. It does not call `Decimal::normalize`
 //! (which loops while `scale > 0`) and does not branch on sign or
 //! zero-ness. Timing does not distinguish the input's sign, zero-ness,
 //! digit count, trailing-zero count, or scale.
 
 use rust_decimal::Decimal;
 
-/// Number of bytes in the canonical plaintext.
-pub const PRE_ENCODED_LEN: usize = 14;
+/// Number of bytes in the canonical orderable-bytes form.
+pub const ENCODED_LEN: usize = 14;
 
 /// Width of the padded-significand field in bytes (13 bytes = 104 bits).
 const MANTISSA_BYTES: usize = 13;
@@ -91,11 +91,11 @@ const SIGN_BIT: u8 = 0x80;
 /// Mask for the 7-bit exponent field in byte 0.
 const EXP_MASK: u8 = 0x7F;
 
-/// Build the canonical, order-preserving fixed-length plaintext for a
-/// `Decimal`. Two `Decimal`s that compare equal under `Decimal::cmp` produce
-/// identical byte arrays.
-pub fn pre_encode(d: &Decimal) -> [u8; PRE_ENCODED_LEN] {
-    let mut out = [0u8; PRE_ENCODED_LEN];
+/// Build the canonical, order-preserving fixed-length byte encoding of a
+/// `Decimal`. Two `Decimal`s that compare equal under `Decimal::cmp`
+/// produce identical byte arrays.
+pub fn to_orderable_bytes(d: &Decimal) -> [u8; ENCODED_LEN] {
+    let mut out = [0u8; ENCODED_LEN];
 
     // The pipeline runs unconditionally — no early return for zero inputs.
     // A `d.is_zero()` short-circuit at the top would distinguish zero from
@@ -330,33 +330,33 @@ mod tests {
 
     #[test]
     fn zero_canonicalises_to_sign_bit_only() {
-        let mut expected = [0u8; PRE_ENCODED_LEN];
+        let mut expected = [0u8; ENCODED_LEN];
         expected[0] = SIGN_BIT;
-        assert_eq!(pre_encode(&dec!(0)), expected);
-        assert_eq!(pre_encode(&dec!(0.0)), expected);
-        assert_eq!(pre_encode(&dec!(0.000)), expected);
+        assert_eq!(to_orderable_bytes(&dec!(0)), expected);
+        assert_eq!(to_orderable_bytes(&dec!(0.0)), expected);
+        assert_eq!(to_orderable_bytes(&dec!(0.000)), expected);
     }
 
     #[test]
     fn negative_zero_canonicalises_with_zero() {
         let neg_zero = -dec!(0);
-        assert_eq!(pre_encode(&neg_zero), pre_encode(&dec!(0)));
+        assert_eq!(to_orderable_bytes(&neg_zero), to_orderable_bytes(&dec!(0)));
     }
 
     #[test]
     fn equivalent_forms_canonicalise_identically() {
-        let one = pre_encode(&dec!(1));
-        assert_eq!(pre_encode(&dec!(1.0)), one);
-        assert_eq!(pre_encode(&dec!(1.00)), one);
-        assert_eq!(pre_encode(&dec!(1.000)), one);
+        let one = to_orderable_bytes(&dec!(1));
+        assert_eq!(to_orderable_bytes(&dec!(1.0)), one);
+        assert_eq!(to_orderable_bytes(&dec!(1.00)), one);
+        assert_eq!(to_orderable_bytes(&dec!(1.000)), one);
     }
 
     #[test]
     fn integer_trailing_zeros_share_significand_bytes() {
         // 100 strips to (sig=1, leading_exp=2). Same significand as 1, so the
         // padded-mantissa region must match.
-        let one = pre_encode(&dec!(1));
-        let hundred = pre_encode(&dec!(100));
+        let one = to_orderable_bytes(&dec!(1));
+        let hundred = to_orderable_bytes(&dec!(100));
         assert_eq!(&one[1..], &hundred[1..]);
         // Top bit (sign) matches; low 7 bits differ by leading_exp.
         assert_eq!(one[0] & SIGN_BIT, SIGN_BIT);
@@ -367,33 +367,33 @@ mod tests {
 
     #[test]
     fn worked_positive_examples() {
-        let one = pre_encode(&dec!(1));
+        let one = to_orderable_bytes(&dec!(1));
         assert_eq!(one[0], SIGN_BIT | (EXP_BIAS as u8));
 
-        let half = pre_encode(&dec!(0.5));
+        let half = to_orderable_bytes(&dec!(0.5));
         assert_eq!(half[0], SIGN_BIT | ((-1i32 + EXP_BIAS) as u8));
 
-        let ten = pre_encode(&dec!(10));
+        let ten = to_orderable_bytes(&dec!(10));
         assert_eq!(ten[0], SIGN_BIT | ((1i32 + EXP_BIAS) as u8));
     }
 
     #[test]
     fn worked_negative_examples() {
-        let neg_one = pre_encode(&dec!(-1));
-        let pos_one = pre_encode(&dec!(1));
+        let neg_one = to_orderable_bytes(&dec!(-1));
+        let pos_one = to_orderable_bytes(&dec!(1));
 
         // Negative byte 0: sign bit clear, low 7 bits are inverted exp.
         assert_eq!(neg_one[0] & SIGN_BIT, 0);
         assert_eq!(neg_one[0] & EXP_MASK, !(EXP_BIAS as u8) & EXP_MASK);
 
         // Negative mantissa bytes are bitwise complements of the positive.
-        for i in 1..PRE_ENCODED_LEN {
+        for i in 1..ENCODED_LEN {
             assert_eq!(neg_one[i], !pos_one[i]);
         }
     }
 
     #[test]
-    fn pre_encode_byte_order_matches_decimal_order() {
+    fn to_orderable_bytes_byte_order_matches_decimal_order() {
         // The canonical bytes themselves must sort consistently with
         // `Decimal::cmp` — this is the property the ORE comparator depends on.
         let values = [
@@ -412,11 +412,11 @@ mod tests {
             Decimal::MAX,
         ];
         for window in values.windows(2) {
-            let a = pre_encode(&window[0]);
-            let b = pre_encode(&window[1]);
+            let a = to_orderable_bytes(&window[0]);
+            let b = to_orderable_bytes(&window[1]);
             assert!(
                 a < b,
-                "pre_encode({}) < pre_encode({}) failed",
+                "to_orderable_bytes({}) < to_orderable_bytes({}) failed",
                 window[0],
                 window[1]
             );
