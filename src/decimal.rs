@@ -134,7 +134,32 @@ pub(crate) fn pre_encode(d: &Decimal) -> [u8; PRE_ENCODED_LEN] {
 
     // Pad the significand out to 29 decimal digits so same-exponent compares
     // across different significand lengths are byte-wise correct.
-    let padded_mantissa = significand * 10u128.pow(PADDED_DIGITS - digits);
+    //
+    // We can't write this as `significand * 10u128.pow(PADDED_DIGITS - digits)`
+    // — `u128::pow` is square-and-multiply on the bits of its exponent, with
+    // both the iteration count and the conditional `acc * base` step driven
+    // by the exponent value. Since the exponent here is `PADDED_DIGITS −
+    // digits` and `digits` is derived from the secret mantissa, that would
+    // leak the digit count via timing.
+    //
+    // Instead, run a fixed `PADDED_DIGITS`-iteration loop that multiplies
+    // `padded_mantissa` by 10 under a branchless mask. The mask is `1` while
+    // we still have padding to apply (`digits + i < PADDED_DIGITS`) and `0`
+    // afterwards; the multiplication itself is computed unconditionally each
+    // iteration so the instruction sequence doesn't depend on `digits`.
+    //
+    // No overflow concern: in any iteration where the mask is `1` we have
+    // `padded_mantissa < 10^(PADDED_DIGITS-1) ≤ 10^28`, so `× 10` stays
+    // under `10^29`. In iterations where the mask is `0`, `padded_mantissa`
+    // sits at its final value (≤ `10^29`) and the unstored `× 10` product
+    // is at most `10^30 ≈ 2^99.7`, well inside `u128`.
+    let mut padded_mantissa = significand;
+    for i in 0..PADDED_DIGITS {
+        let do_step = ((digits + i) < PADDED_DIGITS) as u128;
+        let mask = 0u128.wrapping_sub(do_step);
+        let stepped = padded_mantissa.wrapping_mul(10);
+        padded_mantissa = (padded_mantissa & !mask) | (stepped & mask);
+    }
     let mant_be = padded_mantissa.to_be_bytes();
     debug_assert!(
         mant_be[..16 - MANTISSA_BYTES].iter().all(|&b| b == 0),
