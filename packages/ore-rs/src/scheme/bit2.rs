@@ -61,11 +61,11 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
 
         let rng: R = SeedableRng::from_entropy();
 
-        return Ok(OreAes128 {
+        Ok(OreAes128 {
             prf1: Prf::new(GenericArray::from_slice(k1)),
             prf2: Prf::new(GenericArray::from_slice(k2)),
             rng: RefCell::new(rng),
-        });
+        })
     }
 
     fn encrypt_left<const N: usize>(&self, x: &PlainText<N>) -> EncryptLeftResult<R, N> {
