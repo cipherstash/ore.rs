@@ -49,5 +49,10 @@ name = "decimal"
 harness = false
 required-features = ["decimal"]
 
+[[bench]]
+name = "chrono"
+harness = false
+required-features = ["chrono"]
+
 [[example]]
 name = "encrypt"
