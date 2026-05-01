@@ -1,12 +1,15 @@
 # orderable-bytes
 
-Canonical, order-preserving fixed-length byte encodings for plaintext types.
+Pre-encryption byte encodings for **order-revealing encryption** (ORE) and **order-preserving encryption** (OPE) schemes.
 
-Each module exposes a `to_orderable_bytes` function and an `ENCODED_LEN` constant. The bytes returned have the property that **byte-wise lexicographic order agrees with the type's natural total order**, and **byte equality agrees with value equality**. The crate is scheme-agnostic — these encodings are intended for any comparison-as-bytes consumer that wants to preserve plaintext order on ciphertexts or digests:
+ORE and OPE both produce ciphertexts whose byte-wise comparison reveals the order of the underlying plaintexts. To exploit that property you first need to convert your plaintext — a `Decimal`, a `NaiveDate`, a `DateTime<Utc>`, … — into a canonical byte sequence whose lexicographic order already matches the value's natural total order. **That conversion is what this crate does.** Plug the bytes into an ORE or OPE primitive and the resulting ciphertext inherits the same order and equality semantics as the original plaintext.
 
-- `ore-rs` BlockORE (this workspace)
-- An order-preserving encryption (OPE) construction
-- An ordered hash
+Each module exposes a `to_orderable_bytes` function and an `ENCODED_LEN` constant. The bytes have two guarantees:
+
+- **byte-wise lexicographic order agrees with the type's natural total order**
+- **byte equality agrees with value equality**
+
+The crate is scheme-agnostic — the encodings drop into `ore-rs` BlockORE (this workspace), any OPE construction, an ordered hash, or anything else that compares as bytes.
 
 ## Supported types
 
