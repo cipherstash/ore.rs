@@ -20,6 +20,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - clear pre-existing build warnings in ore-rs
 - move hex-literal to dev-deps; add James to authors
+- release
+
+### Refactoring
+
+- convert to workspace; extract pre-encoders into ore-encoders crate
+- move chrono pre-encoders into ore-encoders crate
+- rename ore-encoders → orderable-bytes; pre_encode → to_orderable_bytes
+
+
+### Benchmarks
+
+- add criterion suite for Decimal ORE encryption
+- add criterion suite for chrono types
+
+### Documentation
+
+- add rustdoc for all public items; deny missing_docs
+
+### Miscellaneous
+
+- clear pre-existing build warnings in ore-rs
+- move hex-literal to dev-deps; add James to authors
 
 ### Refactoring
 
