@@ -255,11 +255,11 @@ const MAX_DIV_5: u128 = u128::MAX / 5;
 ///
 /// Two tricks make this division-free:
 ///
-/// - **Inverse-multiply division.** When `10 | current`, `current / 10` can
-///   be computed as `(current >> 1).wrapping_mul(INV5)`. Halving is exact
-///   for even values, then the multiply-by-`5⁻¹ (mod 2¹²⁸)` recovers the
-///   quotient. When `10 ∤ current` the result is garbage — discarded by
-///   the masked select below.
+/// - **Inverse-multiply division.** When `10 | mantissa`, `mantissa / 10`
+///   can be computed as `(mantissa >> 1).wrapping_mul(INV5)`. Halving is
+///   exact for even values, then the multiply-by-`5⁻¹ (mod 2¹²⁸)` recovers
+///   the quotient. When `10 ∤ mantissa` the result is garbage — discarded
+///   by the masked select below.
 ///
 /// - **Divisibility-by-10 test.** `10 | x ⟺ (2 | x) ∧ (5 | x)`. The
 ///   `2 | x` test is the LSB of `x`. The `5 | x` test exploits the same
@@ -268,32 +268,35 @@ const MAX_DIV_5: u128 = u128::MAX / 5;
 ///   `x.wrapping_mul(INV5) ≤ MAX_DIV_5 ⟺ 5 | x`. The comparison is
 ///   lowered to `overflowing_sub` (SBB + carry on x86, equivalent on ARM),
 ///   which is data-independent on every reasonable target.
-fn strip_trailing_zeros(m: u128) -> (u128, i32) {
-    let mut current = m;
-    let mut count: i32 = 0;
+///
+/// On return `(stripped, exponent)` satisfies
+/// `mantissa == stripped × 10^exponent`, with `stripped` either zero or
+/// not divisible by 10.
+fn strip_trailing_zeros(mut mantissa: u128) -> (u128, i32) {
+    let mut exponent: i32 = 0;
     for _ in 0..PADDED_DIGITS {
-        // Inverse-multiply division by 10. Valid only when 10 | current;
+        // Inverse-multiply division by 10. Valid only when 10 | mantissa;
         // garbage otherwise, but masked out by `do_strip` below.
-        let div = (current >> 1).wrapping_mul(INV5);
+        let div = (mantissa >> 1).wrapping_mul(INV5);
 
-        // CT divisibility-by-10. `5 | current` iff `current * INV5 ≤
+        // CT divisibility-by-10. `5 | mantissa` iff `mantissa * INV5 ≤
         // MAX_DIV_5`; the comparison is implemented via `overflowing_sub`
         // so it lowers to a borrow-out of a subtract instead of a branch.
-        let q5 = current.wrapping_mul(INV5);
+        let q5 = mantissa.wrapping_mul(INV5);
         let (_, borrow) = MAX_DIV_5.overflowing_sub(q5);
-        let div_by_5 = (borrow as u128) ^ 1; // 1 iff 5 | current
-        let div_by_2 = (current & 1) ^ 1; // 1 iff 2 | current
+        let div_by_5 = (borrow as u128) ^ 1; // 1 iff 5 | mantissa
+        let div_by_2 = (mantissa & 1) ^ 1; // 1 iff 2 | mantissa
         let div_by_10 = div_by_5 & div_by_2;
 
-        // Standard `(x | -x) >> 127` nonzero-mask: 1 iff current != 0.
-        let cur_nz = (current | current.wrapping_neg()) >> 127;
+        // Standard `(x | -x) >> 127` nonzero-mask: 1 iff mantissa != 0.
+        let mantissa_nz = (mantissa | mantissa.wrapping_neg()) >> 127;
 
-        let do_strip = cur_nz & div_by_10;
+        let do_strip = mantissa_nz & div_by_10;
         let mask = 0u128.wrapping_sub(do_strip);
-        current = (div & mask) | (current & !mask);
-        count = count.wrapping_add(do_strip as i32);
+        mantissa = (div & mask) | (mantissa & !mask);
+        exponent = exponent.wrapping_add(do_strip as i32);
     }
-    (current, count)
+    (mantissa, exponent)
 }
 
 /// Number of decimal digits in `m`. Returns `0` for `m == 0`.
