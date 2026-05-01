@@ -35,7 +35,7 @@ aes = { version = "0.8.2", features = ["zeroize"] }
 block-modes = "0.9.1"
 byteorder = "1.4.3"
 chrono = { version = "0.4.42", default-features = false, optional = true }
-orderable-bytes = { path = "../orderable-bytes", default-features = false }
+orderable-bytes = { path = "../orderable-bytes", version = "^0.1", default-features = false }
 rand = "0.8.5"
 rand_chacha = "0.3.1"
 rust_decimal = { version = "1.28", default-features = false, optional = true }
