@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+### Miscellaneous
+
+- release v0.8.2
+
+### Build
+
+- bump rand from 0.8.5 to 0.8.6
+
+
 ### Build
 
 - bump rand from 0.8.5 to 0.8.6
