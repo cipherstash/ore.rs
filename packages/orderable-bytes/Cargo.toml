@@ -1,7 +1,10 @@
 [package]
 name = "orderable-bytes"
 version = "0.1.0"
-authors = ["CipherStash <engineering@cipherstash.com>"]
+authors = [
+    "CipherStash <engineering@cipherstash.com>",
+    "James Sadler <james@cipherstash.com>",
+]
 edition = "2021"
 homepage = "https://cipherstash.com"
 description = "Canonical, order-preserving fixed-length byte encodings for plaintext types — feed into ORE or OPE schemes that compare encrypted values lexicographically"

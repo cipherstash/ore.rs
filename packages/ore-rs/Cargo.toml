@@ -1,7 +1,10 @@
 [package]
 name = "ore-rs"
 version = "0.8.0"
-authors = ["Dan Draper <dan@cipherstash.com>"]
+authors = [
+    "Dan Draper <dan@cipherstash.com>",
+    "James Sadler <james@cipherstash.com>",
+]
 edition = "2018"
 homepage = "https://cipherstash.com"
 description = "Order-revealing encryption library used by the CipherStash searchable encryption platform"
@@ -11,6 +14,9 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dev-dependencies]
 criterion = "0.5.1"
+# Test-only: only used inside `#[cfg(test)]`, doc-test snippets, examples,
+# and benches — never inside the library proper.
+hex-literal = "0.4.1"
 quickcheck = "1.0.3"
 # Test-only: macros for constructing `Decimal` literals in unit tests.
 rust_decimal_macros = "1.28"
@@ -29,7 +35,6 @@ aes = { version = "0.8.2", features = ["zeroize"] }
 block-modes = "0.9.1"
 byteorder = "1.4.3"
 chrono = { version = "0.4.42", default-features = false, optional = true }
-hex-literal = "0.4.1"
 orderable-bytes = { path = "../orderable-bytes", default-features = false }
 rand = "0.8.5"
 rand_chacha = "0.3.1"
