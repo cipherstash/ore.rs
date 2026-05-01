@@ -28,6 +28,6 @@ Please review our [security policy](SECURITY.md) before reporting vulnerabilitie
 
 ## License
 
-Copyright &copy; 2024 CipherStash, Inc. All rights reserved.
+Copyright &copy; 2024-2026 CipherStash, Inc. All rights reserved.
 
 Use of this software is governed by the [CipherStash Client Library Licence Agreement](LICENCE).
