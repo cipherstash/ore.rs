@@ -1,6 +1,8 @@
-/*
- * Block ORE Implemenation using a 2-bit indicator function
- */
+//! BlockORE implementation using a 2-bit indicator function, AES-128 as
+//! the per-block PRF, and Knuth-shuffle for the per-block PRP. Plaintexts
+//! are arrays of bytes (`PlainText<N>`); the construction packs
+//! `(prefix ‖ xt[i] ‖ block_index)` into a single 16-byte AES input, which
+//! caps `N` at 15.
 
 use crate::{
     ciphertext::*,
@@ -20,10 +22,15 @@ use std::cmp::Ordering;
 use subtle_ng::{Choice, ConditionallySelectable, ConstantTimeEq};
 use zeroize::ZeroizeOnDrop;
 
+/// Per-block ciphertext component types ([`LeftBlock16`], [`RightBlock32`])
+/// used by this scheme.
 pub mod block_types;
 pub use self::block_types::*;
 
-/* Define our scheme */
+/// AES-128 BlockORE cipher, generic over the RNG used to draw per-encryption
+/// nonces. The two PRF instances are keyed at construction; the RNG is held
+/// in a `RefCell` so encryption can take `&self` while still drawing fresh
+/// randomness. Keys are zeroised on drop.
 #[derive(Debug, ZeroizeOnDrop)]
 pub struct OreAes128<R: Rng + SeedableRng> {
     prf1: Aes128Prf,
@@ -32,6 +39,8 @@ pub struct OreAes128<R: Rng + SeedableRng> {
     rng: RefCell<R>,
 }
 
+/// Convenience alias for [`OreAes128`] backed by `ChaCha20Rng` — the RNG
+/// most callers will want.
 pub type OreAes128ChaCha20 = OreAes128<ChaCha20Rng>;
 
 /* Define some convenience types */
@@ -52,11 +61,11 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
 
         let rng: R = SeedableRng::from_entropy();
 
-        return Ok(OreAes128 {
+        Ok(OreAes128 {
             prf1: Prf::new(GenericArray::from_slice(k1)),
             prf2: Prf::new(GenericArray::from_slice(k2)),
             rng: RefCell::new(rng),
-        });
+        })
     }
 
     fn encrypt_left<const N: usize>(&self, x: &PlainText<N>) -> EncryptLeftResult<R, N> {

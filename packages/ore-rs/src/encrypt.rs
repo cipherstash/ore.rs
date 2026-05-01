@@ -3,11 +3,26 @@ use crate::convert::ToOrderedInteger;
 use crate::PlainText;
 use crate::{OreCipher, OreError};
 
+/// Type-directed entry point for encrypting plaintext values with a given
+/// [`OreCipher`].
+///
+/// Each implementation knows how to canonicalise its target type into the
+/// fixed-size byte plaintext expected by the cipher (e.g. big-endian bytes
+/// for `u64`, an order-preserving 8-byte mapping for `f64`, the 14-byte
+/// scientific-form encoding for `Decimal`). The associated output types
+/// pin the resulting ciphertext shape, with `LeftOutput` the query-only
+/// half and `FullOutput` the full ciphertext suitable for storage.
 pub trait OreEncrypt<T: OreCipher> {
+    /// Output type produced by [`encrypt_left`](Self::encrypt_left).
     type LeftOutput: OreOutput;
+    /// Output type produced by [`encrypt`](Self::encrypt).
     type FullOutput: OreOutput;
 
+    /// Encrypt `self` with `cipher`, producing the Left half only — useful
+    /// for query plaintexts compared against stored ciphertexts.
     fn encrypt_left(&self, cipher: &T) -> Result<Self::LeftOutput, OreError>;
+    /// Encrypt `self` with `input`, producing a full Left+Right ciphertext
+    /// suitable for storage and subsequent comparison.
     fn encrypt(&self, input: &T) -> Result<Self::FullOutput, OreError>;
 }
 

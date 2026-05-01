@@ -1,0 +1,26 @@
+[package]
+name = "orderable-bytes"
+version = "0.1.0"
+authors = [
+    "CipherStash <engineering@cipherstash.com>",
+    "James Sadler <james@cipherstash.com>",
+]
+edition = "2021"
+homepage = "https://cipherstash.com"
+description = "Canonical, order-preserving fixed-length byte encodings for plaintext types — feed into ORE or OPE schemes that compare encrypted values lexicographically"
+license-file = "../../LICENCE"
+readme = "README.md"
+
+[features]
+# Encoder for `rust_decimal::Decimal`.
+decimal = ["dep:rust_decimal"]
+# Encoders for `chrono::NaiveDate` and `chrono::DateTime<Utc>`.
+chrono = ["dep:chrono"]
+
+[dependencies]
+chrono = { version = "0.4.42", default-features = false, optional = true }
+rust_decimal = { version = "1.28", default-features = false, optional = true }
+
+[dev-dependencies]
+quickcheck = "1.0.3"
+rust_decimal_macros = "1.28"

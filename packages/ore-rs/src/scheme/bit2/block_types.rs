@@ -3,12 +3,13 @@ use zeroize::Zeroize;
 use crate::ciphertext::{CipherTextBlock, ParseError};
 use crate::primitives::AesBlock;
 
+/// Per-block component of the Left half of a `bit2` ciphertext: a 16-byte
+/// AES block holding the per-block PRF₁ tag.
 pub type LeftBlock16 = AesBlock;
 
-/*
- * Block type for a Right CipherText with 32-bytes per block
- * corresponding to a plaintext block-size of 8-bits and a 2-bit indicator function.
- */
+/// Per-block component of the Right half of a `bit2` ciphertext: a 32-byte
+/// (256-bit) bitvector encoding one masked truth-table row, one bit per
+/// possible byte value of the plaintext block.
 #[derive(Debug, Copy, Clone, Default)]
 pub struct RightBlock32 {
     // TODO: Make this a slice later when the entire right ciphertext is a big array
@@ -16,6 +17,8 @@ pub struct RightBlock32 {
 }
 
 impl RightBlock32 {
+    /// Set bit `bit` (in `0..256`) to `value` (which must be `0` or `1`).
+    /// Panics in debug if `bit >= 256`.
     #[inline]
     pub fn set_bit(&mut self, bit: usize, value: u8) {
         debug_assert!(bit < 256);
@@ -25,6 +28,8 @@ impl RightBlock32 {
         self.data[byte_index] |= v;
     }
 
+    /// Read bit `bit` (in `0..256`); returns `0` or `1`. Panics in debug if
+    /// `bit >= 256`.
     #[inline]
     pub fn get_bit(&self, bit: usize) -> u8 {
         debug_assert!(bit < 256);

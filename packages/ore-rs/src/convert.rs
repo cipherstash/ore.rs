@@ -22,8 +22,6 @@
   https://lemire.me/blog/2020/12/14/converting-floating-point-numbers-to-integers-while-preserving-order
 */
 
-use core::mem;
-
 pub(crate) trait ToOrderedInteger<T> {
     fn map_to(&self) -> T;
 }
@@ -38,8 +36,12 @@ impl ToOrderedInteger<u64> for f64 {
         // Canonicalise -0.0 to +0.0 so equal-comparing floats produce equal
         // ciphertexts (IEEE-754: -0.0 == +0.0).
         let num: u64 = if *self == 0.0 { 0 } else { self.to_bits() };
-        let signed: i64 = -(unsafe { mem::transmute(num >> 63) });
-        let mut mask: u64 = unsafe { mem::transmute(signed) };
+        // `num >> 63` is the sign bit (0 or 1). Cast to i64 (no bit change,
+        // both 0 and 1 fit), negate (→ 0 or -1), reinterpret as u64 (→ 0 or
+        // 0xFFFF_FFFF_FFFF_FFFF, the broadcast sign mask). Equivalent to
+        // the previous `mem::transmute` pair but `as`-cast safe.
+        let signed: i64 = -((num >> 63) as i64);
+        let mut mask: u64 = signed as u64;
         mask |= 0x8000000000000000;
         num ^ mask
     }

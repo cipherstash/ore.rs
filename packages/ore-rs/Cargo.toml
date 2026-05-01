@@ -1,0 +1,64 @@
+[package]
+name = "ore-rs"
+version = "0.8.0"
+authors = [
+    "Dan Draper <dan@cipherstash.com>",
+    "James Sadler <james@cipherstash.com>",
+]
+edition = "2018"
+homepage = "https://cipherstash.com"
+description = "Order-revealing encryption library used by the CipherStash searchable encryption platform"
+license-file = "../../LICENCE"
+readme = "README.md"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[dev-dependencies]
+criterion = "0.5.1"
+# Test-only: only used inside `#[cfg(test)]`, doc-test snippets, examples,
+# and benches — never inside the library proper.
+hex-literal = "0.4.1"
+quickcheck = "1.0.3"
+# Test-only: macros for constructing `Decimal` literals in unit tests.
+rust_decimal_macros = "1.28"
+
+[features]
+# Adds ORE support for `chrono::NaiveDate` and `chrono::DateTime<Utc>`. The
+# orderable-bytes encoders live in the sibling `orderable-bytes` crate.
+chrono = ["dep:chrono", "orderable-bytes/chrono"]
+# Adds ORE support for `rust_decimal::Decimal` via a fixed-length 14-byte
+# order-preserving encoding fed into the existing fixed-N ORE machinery.
+# The encoder lives in the sibling `orderable-bytes` crate.
+decimal = ["dep:rust_decimal", "orderable-bytes/decimal"]
+
+[dependencies]
+aes = { version = "0.8.2", features = ["zeroize"] }
+block-modes = "0.9.1"
+byteorder = "1.4.3"
+chrono = { version = "0.4.42", default-features = false, optional = true }
+orderable-bytes = { path = "../orderable-bytes", default-features = false }
+rand = "0.8.5"
+rand_chacha = "0.3.1"
+rust_decimal = { version = "1.28", default-features = false, optional = true }
+num = "0.4.0"
+hex = "0.4.3"
+subtle-ng = "2.5.0"
+zeroize = { version = "1.5.7", features = ["zeroize_derive"] }
+lazy_static = "1.4.0"
+thiserror = "1.0.38"
+
+[[bench]]
+name = "oreaes128"
+harness = false
+
+[[bench]]
+name = "decimal"
+harness = false
+required-features = ["decimal"]
+
+[[bench]]
+name = "chrono"
+harness = false
+required-features = ["chrono"]
+
+[[example]]
+name = "encrypt"
