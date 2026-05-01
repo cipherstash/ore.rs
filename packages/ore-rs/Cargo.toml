@@ -36,7 +36,7 @@ block-modes = "0.9.1"
 byteorder = "1.4.3"
 chrono = { version = "0.4.42", default-features = false, optional = true }
 orderable-bytes = { path = "../orderable-bytes", version = "^0.1", default-features = false }
-rand = "0.8.5"
+rand = "0.8.6"
 rand_chacha = "0.3.1"
 rust_decimal = { version = "1.28", default-features = false, optional = true }
 num = "0.4.0"
