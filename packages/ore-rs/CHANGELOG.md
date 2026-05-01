@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+### Build
+
+- bump rand from 0.8.5 to 0.8.6
+
+
 ### Benchmarks
 
 - add criterion suite for Decimal ORE encryption
