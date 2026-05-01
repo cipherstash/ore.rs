@@ -456,6 +456,7 @@ name = "orderable-bytes"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "quickcheck",
  "rust_decimal",
  "rust_decimal_macros",
 ]

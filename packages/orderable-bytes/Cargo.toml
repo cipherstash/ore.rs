@@ -19,4 +19,5 @@ chrono = { version = "0.4.42", default-features = false, optional = true }
 rust_decimal = { version = "1.28", default-features = false, optional = true }
 
 [dev-dependencies]
+quickcheck = "1.0.3"
 rust_decimal_macros = "1.28"

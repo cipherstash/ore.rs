@@ -18,3 +18,7 @@
 pub mod chrono;
 #[cfg(feature = "decimal")]
 pub mod decimal;
+
+#[cfg(test)]
+#[macro_use]
+extern crate quickcheck;

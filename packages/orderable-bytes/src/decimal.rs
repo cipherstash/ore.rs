@@ -422,4 +422,120 @@ mod tests {
             );
         }
     }
+
+    // --- strip_trailing_zeros: edge cases ---
+
+    #[test]
+    fn strip_zero_returns_zero_zero() {
+        // Zero is its own canonical form; we never strip "zeros from zero".
+        assert_eq!(strip_trailing_zeros(0), (0, 0));
+    }
+
+    #[test]
+    fn strip_single_digits_are_canonical() {
+        // 1..=9: no trailing zero to remove, return unchanged with count 0.
+        for d in 1u128..=9 {
+            assert_eq!(strip_trailing_zeros(d), (d, 0), "input {d}");
+        }
+    }
+
+    #[test]
+    fn strip_powers_of_ten_collapse_to_one() {
+        // 10^k for k ∈ [0, 28] (the full range that fits in u96) strips to (1, k).
+        for k in 0..=28u32 {
+            let m = 10u128.pow(k);
+            assert_eq!(strip_trailing_zeros(m), (1, k as i32), "input 10^{k}");
+        }
+    }
+
+    #[test]
+    fn strip_u96_max_has_no_trailing_zeros() {
+        // u96::MAX = 79228162514264337593543950335 ends in 5; nothing to strip.
+        let u96_max = (1u128 << 96) - 1;
+        assert_eq!(strip_trailing_zeros(u96_max), (u96_max, 0));
+    }
+
+    #[test]
+    fn strip_mixed_value_extracts_trailing_zero_count() {
+        // 12_340_000 = 1234 × 10^4
+        assert_eq!(strip_trailing_zeros(12_340_000), (1234, 4));
+        // 50 = 5 × 10^1
+        assert_eq!(strip_trailing_zeros(50), (5, 1));
+        // 100_500 = 1005 × 10^2 (interior zero must NOT be stripped)
+        assert_eq!(strip_trailing_zeros(100_500), (1005, 2));
+    }
+
+    // --- strip_trailing_zeros: properties (quickcheck) ---
+
+    /// Constrain a quickcheck-supplied `u128` to the u96-bounded range that
+    /// the `to_orderable_bytes` caller actually feeds into the helper.
+    fn u96_of(m: u128) -> u128 {
+        m & ((1u128 << 96) - 1)
+    }
+
+    quickcheck! {
+        /// **P1 (reconstruction):** `m == s × 10^c`.
+        fn prop_strip_reconstructs(m: u128) -> bool {
+            let m = u96_of(m);
+            let (s, c) = strip_trailing_zeros(m);
+            // c ∈ [0, 28] for u96 inputs (verified by prop_strip_count_bounded);
+            // 10^c ≤ 10^28 fits comfortably in u128.
+            s.wrapping_mul(10u128.pow(c as u32)) == m
+        }
+
+        /// **P2 (canonical / maximal):** the stripped value has no trailing
+        /// zero — or it is zero.
+        fn prop_strip_result_is_canonical(m: u128) -> bool {
+            let m = u96_of(m);
+            let (s, _) = strip_trailing_zeros(m);
+            s == 0 || s % 10 != 0
+        }
+
+        /// **P3 + P4:** the strip count is in `[0, 28]` for u96 inputs.
+        /// (Larger u128 inputs could legitimately need up to PADDED_DIGITS
+        /// strips, but the function is only ever fed u96-bounded mantissas.)
+        fn prop_strip_count_bounded(m: u128) -> bool {
+            let m = u96_of(m);
+            let (_, c) = strip_trailing_zeros(m);
+            (0..=28).contains(&c)
+        }
+
+        /// **P5 (zero-preserving):** zero input ⟺ zero output.
+        fn prop_strip_zero_preserving(m: u128) -> bool {
+            let m = u96_of(m);
+            let (s, _) = strip_trailing_zeros(m);
+            (m == 0) == (s == 0)
+        }
+
+        /// **P6 (idempotent):** stripping a stripped value yields itself with
+        /// count zero.
+        fn prop_strip_idempotent(m: u128) -> bool {
+            let m = u96_of(m);
+            let (s, _) = strip_trailing_zeros(m);
+            strip_trailing_zeros(s) == (s, 0)
+        }
+
+        /// **P7 (distributive over multiplication by 10^k):** if `s` is the
+        /// non-zero canonical form of `m`, then for any `k` such that
+        /// `s × 10^k` still fits in u96, stripping `s × 10^k` returns
+        /// `(s, k)`. This is the strongest cross-check — it pins down the
+        /// exact mapping rather than just preserving an aggregate property.
+        ///
+        /// Zero is excluded: `0 = 0 × 10^k` for every `k`, so the "canonical
+        /// trailing-zero count" of zero is genuinely ambiguous. The function
+        /// pins it at `0` (covered by `prop_strip_zero_preserving`).
+        fn prop_strip_distributes_over_mul_by_pow_ten(m: u128, k: u8) -> quickcheck::TestResult {
+            let m = u96_of(m);
+            let (s, _) = strip_trailing_zeros(m);
+            if s == 0 {
+                return quickcheck::TestResult::discard();
+            }
+            let k = (k as u32) % 29; // [0, 28]
+            let extended = match s.checked_mul(10u128.pow(k)) {
+                Some(v) if v < (1u128 << 96) => v,
+                _ => return quickcheck::TestResult::discard(),
+            };
+            quickcheck::TestResult::from_bool(strip_trailing_zeros(extended) == (s, k as i32))
+        }
+    }
 }
