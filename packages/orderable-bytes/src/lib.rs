@@ -17,7 +17,7 @@
 pub mod chrono;
 #[cfg(feature = "decimal")]
 pub mod decimal;
-pub mod numeric;
+pub mod primitive;
 
 #[cfg(test)]
 #[macro_use]
