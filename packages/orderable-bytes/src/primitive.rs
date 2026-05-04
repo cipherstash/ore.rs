@@ -2,39 +2,30 @@
 //! primitives `bool`, `u8`, `i8`, `i16`, `i32`, `i64`, `u128`, `i128`,
 //! and the IEEE 754 double `f64`.
 //!
-//! Encoded widths:
+//! Each impl emits the type's native byte width — no padding:
 //!
-//! - `bool`, `u8`, `i8`, `i16`, `i32`, `i64`, `f64` → `[u8; 8]`
+//! - `bool`, `u8`, `i8` → `[u8; 1]`
+//! - `i16` → `[u8; 2]`
+//! - `i32` → `[u8; 4]`
+//! - `i64`, `f64` → `[u8; 8]`
 //! - `u128`, `i128` → `[u8; 16]`
 //!
-//! Sub-`u64` integer types are widened to `u64` (sign-flipping for
-//! signed integers, identity-cast for `bool`/`u8`) and serialised
-//! big-endian, matching the `IntoOrePlaintext<u64>` widening used by
-//! the cipherstash-suite ORE indexer (so e.g. an `i16` value lands in
-//! the low two bytes of the output, with the upper six bytes zero).
-//! 128-bit integers use their native width.
-//!
-//! Byte-wise lex compare on the output agrees with the type's natural
-//! total order *within that type*. Cross-type comparison is not
-//! meaningful — `i16(0)` and `i64(0)` both encode to non-equal byte
-//! patterns, and the encodings of an `i16` value and the same value
-//! held as `i64` differ.
+//! Consumers that need a fixed wider encoding (e.g. an ORE construction
+//! whose plaintext block size is `[u8; 8]`) should zero-extend the
+//! orderable bytes upstream of the encrypter; widening is monotonic on
+//! lex order so it preserves the encoding's guarantees.
 //!
 //! ## Unsigned integers (`u8`, `u128`)
 //!
-//! Already in lex order — no sign-flip needed. `u8` is zero-extended
-//! to `u64` before BE serialisation; `u128` uses its native width.
+//! Already in lex order — no sign-flip needed. Native big-endian.
 //!
 //! ## Signed integers (`i8`, `i16`, `i32`, `i64`, `i128`)
 //!
 //! Each two's-complement input is mapped to its unsigned equivalent by
 //! flipping the sign bit at its native width (`x ^ (1 << (N-1))`),
-//! widened to `u64` by zero-extension (or kept at native width for
-//! `i128`), and serialised big-endian. Sign-flipping moves negatives
-//! below positives (the sign bit `1` for negatives clears to `0`, vice
-//! versa for positives) and preserves order within each sign class;
-//! the zero-extension is a no-op on lex order because the high padding
-//! bytes are constant.
+//! then serialised big-endian. Sign-flipping moves negatives below
+//! positives (the sign bit `1` for negatives clears to `0`, vice versa
+//! for positives) and preserves order within each sign class.
 //!
 //! ## `f64`
 //!
@@ -58,52 +49,49 @@
 use crate::ToOrderableBytes;
 
 impl ToOrderableBytes for bool {
-    const ENCODED_LEN: usize = 8;
+    const ENCODED_LEN: usize = 1;
     type Bytes = [u8; Self::ENCODED_LEN];
 
     fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
-        // `false as u64 == 0`, `true as u64 == 1`. Lex order on the
-        // BE-encoded `u64` then puts `false` strictly below `true`.
-        (*self as u64).to_be_bytes()
+        // `false as u8 == 0`, `true as u8 == 1`. `false` sorts strictly
+        // below `true`.
+        [*self as u8]
     }
 }
 
 impl ToOrderableBytes for u8 {
-    const ENCODED_LEN: usize = 8;
+    const ENCODED_LEN: usize = 1;
     type Bytes = [u8; Self::ENCODED_LEN];
 
     fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
-        u64::from(*self).to_be_bytes()
+        [*self]
     }
 }
 
 impl ToOrderableBytes for i8 {
-    const ENCODED_LEN: usize = 8;
+    const ENCODED_LEN: usize = 1;
     type Bytes = [u8; Self::ENCODED_LEN];
 
     fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
-        let sign_flipped = (*self as u8) ^ (1u8 << 7);
-        u64::from(sign_flipped).to_be_bytes()
+        [(*self as u8) ^ (1u8 << 7)]
     }
 }
 
 impl ToOrderableBytes for i16 {
-    const ENCODED_LEN: usize = 8;
+    const ENCODED_LEN: usize = 2;
     type Bytes = [u8; Self::ENCODED_LEN];
 
     fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
-        let sign_flipped = (*self as u16) ^ (1u16 << 15);
-        u64::from(sign_flipped).to_be_bytes()
+        ((*self as u16) ^ (1u16 << 15)).to_be_bytes()
     }
 }
 
 impl ToOrderableBytes for i32 {
-    const ENCODED_LEN: usize = 8;
+    const ENCODED_LEN: usize = 4;
     type Bytes = [u8; Self::ENCODED_LEN];
 
     fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
-        let sign_flipped = (*self as u32) ^ (1u32 << 31);
-        u64::from(sign_flipped).to_be_bytes()
+        ((*self as u32) ^ (1u32 << 31)).to_be_bytes()
     }
 }
 
@@ -162,8 +150,8 @@ mod tests {
 
     #[test]
     fn bool_known_anchors() {
-        assert_eq!(false.to_orderable_bytes(), [0; 8]);
-        assert_eq!(true.to_orderable_bytes(), [0, 0, 0, 0, 0, 0, 0, 0x01]);
+        assert_eq!(false.to_orderable_bytes(), [0x00]);
+        assert_eq!(true.to_orderable_bytes(), [0x01]);
     }
 
     #[test]
@@ -175,10 +163,10 @@ mod tests {
 
     #[test]
     fn u8_known_anchors() {
-        // Zero-extend to u64 BE: the u8 value lands in the last byte.
-        assert_eq!(u8::MIN.to_orderable_bytes(), [0; 8]);
-        assert_eq!(0x42u8.to_orderable_bytes(), [0, 0, 0, 0, 0, 0, 0, 0x42]);
-        assert_eq!(u8::MAX.to_orderable_bytes(), [0, 0, 0, 0, 0, 0, 0, 0xFF]);
+        // Native: u8 is already in lex order, no transform.
+        assert_eq!(u8::MIN.to_orderable_bytes(), [0x00]);
+        assert_eq!(0x42u8.to_orderable_bytes(), [0x42]);
+        assert_eq!(u8::MAX.to_orderable_bytes(), [0xFF]);
     }
 
     #[test]
@@ -198,11 +186,10 @@ mod tests {
 
     #[test]
     fn i8_known_anchors() {
-        // Sign-flip at u8 (XOR 0x80), then zero-extend to u64 BE: the
-        // i8 value lands in the last byte, upper seven bytes zero.
-        assert_eq!(i8::MIN.to_orderable_bytes(), [0, 0, 0, 0, 0, 0, 0, 0x00]);
-        assert_eq!(0i8.to_orderable_bytes(), [0, 0, 0, 0, 0, 0, 0, 0x80]);
-        assert_eq!(i8::MAX.to_orderable_bytes(), [0, 0, 0, 0, 0, 0, 0, 0xFF]);
+        // Sign-flip at u8 (XOR 0x80) so MIN→0x00, 0→0x80, MAX→0xFF.
+        assert_eq!(i8::MIN.to_orderable_bytes(), [0x00]);
+        assert_eq!(0i8.to_orderable_bytes(), [0x80]);
+        assert_eq!(i8::MAX.to_orderable_bytes(), [0xFF]);
     }
 
     #[test]
@@ -222,17 +209,10 @@ mod tests {
 
     #[test]
     fn i16_known_anchors() {
-        // Sign-flip at u16, then zero-extend to u64 BE: the i16 value
-        // lands in the low two bytes, with the upper six bytes zero.
-        assert_eq!(
-            i16::MIN.to_orderable_bytes(),
-            [0, 0, 0, 0, 0, 0, 0x00, 0x00]
-        );
-        assert_eq!(0i16.to_orderable_bytes(), [0, 0, 0, 0, 0, 0, 0x80, 0x00]);
-        assert_eq!(
-            i16::MAX.to_orderable_bytes(),
-            [0, 0, 0, 0, 0, 0, 0xFF, 0xFF]
-        );
+        // Sign-flip at u16 (XOR 0x8000), then BE.
+        assert_eq!(i16::MIN.to_orderable_bytes(), [0x00, 0x00]);
+        assert_eq!(0i16.to_orderable_bytes(), [0x80, 0x00]);
+        assert_eq!(i16::MAX.to_orderable_bytes(), [0xFF, 0xFF]);
     }
 
     #[test]
@@ -252,20 +232,10 @@ mod tests {
 
     #[test]
     fn i32_known_anchors() {
-        // Sign-flip at u32, then zero-extend to u64 BE: the i32 value
-        // lands in the low four bytes, with the upper four bytes zero.
-        assert_eq!(
-            i32::MIN.to_orderable_bytes(),
-            [0, 0, 0, 0, 0x00, 0x00, 0x00, 0x00]
-        );
-        assert_eq!(
-            0i32.to_orderable_bytes(),
-            [0, 0, 0, 0, 0x80, 0x00, 0x00, 0x00]
-        );
-        assert_eq!(
-            i32::MAX.to_orderable_bytes(),
-            [0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF]
-        );
+        // Sign-flip at u32 (XOR 0x8000_0000), then BE.
+        assert_eq!(i32::MIN.to_orderable_bytes(), [0x00, 0x00, 0x00, 0x00]);
+        assert_eq!(0i32.to_orderable_bytes(), [0x80, 0x00, 0x00, 0x00]);
+        assert_eq!(i32::MAX.to_orderable_bytes(), [0xFF, 0xFF, 0xFF, 0xFF]);
     }
 
     #[test]
