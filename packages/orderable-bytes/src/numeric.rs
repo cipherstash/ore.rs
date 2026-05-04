@@ -1,13 +1,13 @@
 //! Canonical, order-preserving fixed-length byte encodings for the
-//! signed-integer primitives `i16`, `i32`, `i64` and the IEEE 754
-//! double `f64`.
+//! primitives `bool`, `i16`, `i32`, `i64` and the IEEE 754 double
+//! `f64`.
 //!
-//! All four impls emit a fixed `[u8; 8]`. Narrower integer types are
-//! sign-flipped within their native width and then zero-extended to
-//! `u64` before big-endian serialisation, matching the
-//! `IntoOrePlaintext<u64>` widening used by the cipherstash-suite ORE
-//! indexer (so an `i16` value lands in the low two bytes of the
-//! output, with the upper six bytes zero).
+//! All five impls emit a fixed `[u8; 8]`. Narrower types are mapped to
+//! `u64` (sign-flipping for signed integers, identity-cast for `bool`)
+//! and serialised big-endian, matching the `IntoOrePlaintext<u64>`
+//! widening used by the cipherstash-suite ORE indexer (so e.g. an
+//! `i16` value lands in the low two bytes of the output, with the
+//! upper six bytes zero).
 //!
 //! Byte-wise lex compare on the output agrees with the type's natural
 //! total order *within that type*. Cross-type comparison is not
@@ -45,6 +45,17 @@
 //! that need a canonical NaN must canonicalise upstream.
 
 use crate::ToOrderableBytes;
+
+impl ToOrderableBytes for bool {
+    const ENCODED_LEN: usize = 8;
+    type Bytes = [u8; Self::ENCODED_LEN];
+
+    fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
+        // `false as u64 == 0`, `true as u64 == 1`. Lex order on the
+        // BE-encoded `u64` then puts `false` strictly below `true`.
+        (*self as u64).to_be_bytes()
+    }
+}
 
 impl ToOrderableBytes for i16 {
     const ENCODED_LEN: usize = 8;
@@ -98,6 +109,19 @@ impl ToOrderableBytes for f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- bool ---
+
+    #[test]
+    fn bool_known_anchors() {
+        assert_eq!(false.to_orderable_bytes(), [0; 8]);
+        assert_eq!(true.to_orderable_bytes(), [0, 0, 0, 0, 0, 0, 0, 0x01]);
+    }
+
+    #[test]
+    fn bool_byte_order_matches_natural_order() {
+        assert!(false.to_orderable_bytes() < true.to_orderable_bytes());
+    }
 
     // --- i16 ---
 
