@@ -140,9 +140,93 @@ impl<const N: usize> PartialEq for OreCllw8V1<N> {
 
 impl<const N: usize> Eq for OreCllw8V1<N> {}
 
+/// Macro to implement CllwOreEncrypt for signed integer types.
+///
+/// Sign-flips the plaintext to its unsigned equivalent (`x ^ (1 << (N-1))`)
+/// so two's-complement order on `iN` matches unsigned order on `uN`, then
+/// delegates to the matching unsigned ORE impl. The output ciphertext type
+/// is shared with the unsigned variant (`OreCllw8V1<N>`) — the bytes are
+/// identical and `compare_slice` is byte-level, so a separate type would
+/// add no information.
+///
+/// **Decryption note**: there is no `CllwOreDecrypt` impl for the signed
+/// case. To round-trip, decrypt to `uN` (using the existing unsigned impl)
+/// and reverse the bias yourself: `(biased ^ (1 << (N-1))) as iN`.
+macro_rules! impl_cllw_ore_iint {
+    ($iint_type:ty, $uint_type:ty, $array_size:expr) => {
+        impl CllwOreEncrypt for $iint_type {
+            type Output = OreCllw8V1<$array_size>;
+
+            fn encrypt_with_salt(
+                self,
+                key: &Key,
+                salt: Option<&[u8]>,
+            ) -> Result<Self::Output, Error> {
+                let biased = (self as $uint_type) ^ (1 << (<$uint_type>::BITS - 1));
+                biased.encrypt_with_salt(key, salt)
+            }
+        }
+    };
+}
+
+// Generate encrypt implementations for all signed integer types.
+impl_cllw_ore_iint!(i8, u8, 8);
+impl_cllw_ore_iint!(i16, u16, 16);
+impl_cllw_ore_iint!(i32, u32, 32);
+impl_cllw_ore_iint!(i64, u64, 64);
+impl_cllw_ore_iint!(i128, u128, 128);
+
+/// CLWW ORE for `bool`. Maps `false → 0u8`, `true → 1u8` and delegates to the
+/// `u8` impl. The output ciphertext type is shared with `u8` (`OreCllw8V1<8>`),
+/// so `false` ciphertext is strictly less than `true`.
+impl CllwOreEncrypt for bool {
+    type Output = OreCllw8V1<8>;
+
+    fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+        (self as u8).encrypt_with_salt(key, salt)
+    }
+}
+
+/// Macro to implement [`CllwOreEncrypt`] for floating-point types.
+///
+/// Maps the IEEE-754 bit pattern to a sortable `uN` using the standard
+/// monotonic float→int trick: flip the sign bit on non-negatives, flip all
+/// bits on negatives. The resulting `uN` orders by IEEE-754 totalOrder
+/// (matches `f{32,64}::total_cmp`), then delegates to the matching unsigned
+/// ORE impl. The output ciphertext type is shared with the unsigned variant.
+///
+/// **`−0.0` vs `+0.0`**: distinguished — `−0.0` ciphertext is strictly less
+/// than `+0.0`. IEEE-754 `==` considers them equal; the encoding does not.
+///
+/// **Decryption note**: there is no [`CllwOreDecrypt`] impl for floats. To
+/// round-trip, decrypt to the matching `uN` and reverse the bias yourself:
+/// `let mask = (bits >> (BITS-1)).wrapping_neg() | (1 << (BITS-1));`
+/// `let f = fN::from_bits(bits ^ mask);`.
+macro_rules! impl_cllw_ore_float {
+    ($float_type:ty, $uint_type:ty, $array_size:expr) => {
+        impl CllwOreEncrypt for $float_type {
+            type Output = OreCllw8V1<$array_size>;
+
+            fn encrypt_with_salt(
+                self,
+                key: &Key,
+                salt: Option<&[u8]>,
+            ) -> Result<Self::Output, Error> {
+                let bits = self.to_bits();
+                let mask = (bits >> (<$uint_type>::BITS - 1)).wrapping_neg()
+                    | (1 << (<$uint_type>::BITS - 1));
+                (bits ^ mask).encrypt_with_salt(key, salt)
+            }
+        }
+    };
+}
+
+impl_cllw_ore_float!(f32, u32, 32);
+impl_cllw_ore_float!(f64, u64, 64);
+
 // --- Fixed-size numeric OPE ---
 
-/// Fixed-size CLWW OPE ciphertext for unsigned integer types.
+/// Fixed-size CLWW OPE ciphertext for integer types.
 ///
 /// Ciphertexts are compared with standard lexicographic byte ordering.
 /// Encryption uses the CLWW keystream from Section 3.2 of the paper; the
@@ -164,11 +248,11 @@ impl<const N: usize> Eq for OreCllw8V1<N> {}
 /// The size `N` is the ciphertext byte length: one byte per plaintext bit
 /// plus one reserved leading byte that absorbs the carry.
 ///
-/// - `OpeCllw8V1<9>` encrypts `u8` (8 bits → 9 bytes)
-/// - `OpeCllw8V1<17>` encrypts `u16` (16 bits → 17 bytes)
-/// - `OpeCllw8V1<33>` encrypts `u32` (32 bits → 33 bytes)
-/// - `OpeCllw8V1<65>` encrypts `u64` (64 bits → 65 bytes)
-/// - `OpeCllw8V1<129>` encrypts `u128` (128 bits → 129 bytes)
+/// - `OpeCllw8V1<9>` encrypts `u8` or `i8` (8 bits → 9 bytes)
+/// - `OpeCllw8V1<17>` encrypts `u16` or `i16` (16 bits → 17 bytes)
+/// - `OpeCllw8V1<33>` encrypts `u32` or `i32` (32 bits → 33 bytes)
+/// - `OpeCllw8V1<65>` encrypts `u64` or `i64` (64 bits → 65 bytes)
+/// - `OpeCllw8V1<129>` encrypts `u128` or `i128` (128 bits → 129 bytes)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "postgres-types", derive(ToSql))]
 #[cfg_attr(feature = "postgres-types", postgres(name = "ore_cllw_8_ope_v1"))]
@@ -235,7 +319,67 @@ impl_cllw_ope_uint!(u32);
 impl_cllw_ope_uint!(u64);
 impl_cllw_ope_uint!(u128);
 
-#[cfg(any(feature = "chrono", feature = "decimal"))]
+/// Implements [`CllwOpeEncrypt`] for signed integer types by sign-flipping to
+/// the matching unsigned width and delegating to the unsigned OPE impl.
+/// The output ciphertext type is shared with the unsigned variant — OPE has
+/// no decrypt path, so there is no type ambiguity.
+macro_rules! impl_cllw_ope_iint {
+    ($iint_type:ty, $uint_type:ty) => {
+        impl CllwOpeEncrypt for $iint_type {
+            type Output = OpeCllw8V1<{ <$uint_type>::BITS as usize + 1 }>;
+
+            fn encrypt_ope_with_salt(
+                self,
+                key: &Key,
+                salt: Option<&[u8]>,
+            ) -> Result<Self::Output, Error> {
+                let biased = (self as $uint_type) ^ (1 << (<$uint_type>::BITS - 1));
+                biased.encrypt_ope_with_salt(key, salt)
+            }
+        }
+    };
+}
+
+impl_cllw_ope_iint!(i8, u8);
+impl_cllw_ope_iint!(i16, u16);
+impl_cllw_ope_iint!(i32, u32);
+impl_cllw_ope_iint!(i64, u64);
+impl_cllw_ope_iint!(i128, u128);
+
+/// CLWW OPE for `bool`. Delegates to the `u8` OPE impl; see the ORE `bool`
+/// impl for the encoding rationale.
+impl CllwOpeEncrypt for bool {
+    type Output = OpeCllw8V1<{ u8::BITS as usize + 1 }>;
+
+    fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+        (self as u8).encrypt_ope_with_salt(key, salt)
+    }
+}
+
+/// Macro to implement [`CllwOpeEncrypt`] for floating-point types using the
+/// same monotonic float→int bias as the ORE float impl.
+macro_rules! impl_cllw_ope_float {
+    ($float_type:ty, $uint_type:ty) => {
+        impl CllwOpeEncrypt for $float_type {
+            type Output = OpeCllw8V1<{ <$uint_type>::BITS as usize + 1 }>;
+
+            fn encrypt_ope_with_salt(
+                self,
+                key: &Key,
+                salt: Option<&[u8]>,
+            ) -> Result<Self::Output, Error> {
+                let bits = self.to_bits();
+                let mask = (bits >> (<$uint_type>::BITS - 1)).wrapping_neg()
+                    | (1 << (<$uint_type>::BITS - 1));
+                (bits ^ mask).encrypt_ope_with_salt(key, salt)
+            }
+        }
+    };
+}
+
+impl_cllw_ope_float!(f32, u32);
+impl_cllw_ope_float!(f64, u64);
+
 impl<const N: usize> OpeCllw8V1<N> {
     /// Construct a ciphertext from raw bytes produced by
     /// [`super::encrypt_ope_bits`]. Crate-internal — used by feature
@@ -570,6 +714,303 @@ mod tests {
     ope_quickcheck_type!(u32);
     ope_quickcheck_type!(u64);
     ope_quickcheck_type!(u128);
+
+    // --- Signed integer ORE/OPE property suites ---
+    //
+    // These mirror `quickcheck_type!`/`ope_quickcheck_type!` but use
+    // signed-aware properties (no `1 << (BITS-1)`, anchors at MIN/-1/0/1/MAX).
+
+    macro_rules! quickcheck_iint_type {
+        ($ty:ident, $uty:ident) => {
+            paste! {
+                quickcheck! {
+                    /// Determinism: same plaintext encrypts to equal ciphertexts.
+                    fn [<prop_eq_ $ty>](key: Key, x: $ty) -> bool {
+                        let a = key.encrypt(x).unwrap();
+                        let b = key.encrypt(x).unwrap();
+                        a == b
+                    }
+
+                    /// Order homomorphism: ciphertext order matches plaintext order.
+                    fn [<prop_cmp_ $ty>](key: Key, x: $ty, y: $ty) -> bool {
+                        let a = key.encrypt(x).unwrap();
+                        let b = key.encrypt(y).unwrap();
+                        a.cmp(&b) == x.cmp(&y)
+                    }
+
+                    /// Sign class: any negative encrypts below zero, zero below any positive.
+                    fn [<prop_sign_class_ $ty>](key: Key, x: $ty) -> TestResult {
+                        let zero_ct = key.encrypt::<$ty>(0).unwrap();
+                        let ct = key.encrypt(x).unwrap();
+                        TestResult::from_bool(match x.cmp(&0) {
+                            Ordering::Less => ct < zero_ct,
+                            Ordering::Equal => ct == zero_ct,
+                            Ordering::Greater => ct > zero_ct,
+                        })
+                    }
+
+                    /// MIN encrypts to a value strictly below 0.
+                    fn [<prop_min_less_than_zero_ $ty>](key: Key) -> bool {
+                        let min_ct = key.encrypt($ty::MIN).unwrap();
+                        let zero_ct = key.encrypt::<$ty>(0).unwrap();
+                        min_ct < zero_ct
+                    }
+
+                    /// MAX encrypts to a value strictly above 0.
+                    fn [<prop_max_greater_than_zero_ $ty>](key: Key) -> bool {
+                        let max_ct = key.encrypt($ty::MAX).unwrap();
+                        let zero_ct = key.encrypt::<$ty>(0).unwrap();
+                        max_ct > zero_ct
+                    }
+
+                    /// MIN encrypts deterministically (regression check on the
+                    /// signed boundary, where bias maps it to 0u).
+                    fn [<prop_min_ $ty>](key: Key) -> bool {
+                        let a = key.encrypt($ty::MIN).unwrap();
+                        let b = key.encrypt($ty::MIN).unwrap();
+                        a == b
+                    }
+
+                    /// MAX encrypts deterministically.
+                    fn [<prop_max_ $ty>](key: Key) -> bool {
+                        let a = key.encrypt($ty::MAX).unwrap();
+                        let b = key.encrypt($ty::MAX).unwrap();
+                        a == b
+                    }
+
+                    /// (x-1) < x for all x > MIN.
+                    fn [<prop_one_less_than_ $ty>](key: Key, x: $ty) -> TestResult {
+                        if x == $ty::MIN {
+                            return TestResult::discard();
+                        }
+                        let a = key.encrypt(x - 1).unwrap();
+                        let b = key.encrypt(x).unwrap();
+                        TestResult::from_bool(a.cmp(&b) == Ordering::Less)
+                    }
+
+                    /// Round-trip: decrypt to the unsigned bias and reverse the
+                    /// XOR to recover the signed plaintext. Documents the
+                    /// expected unbias pattern alongside verifying it.
+                    fn [<prop_decrypt_ $ty>](key: Key, x: $ty) -> bool {
+                        let ciphertext = key.encrypt(x).unwrap();
+                        let biased: $uty = key.decrypt(ciphertext).unwrap();
+                        let recovered = (biased ^ (1 << (<$uty>::BITS - 1))) as $ty;
+                        x == recovered
+                    }
+                }
+            }
+        };
+    }
+
+    quickcheck_iint_type!(i16, u16);
+    quickcheck_iint_type!(i32, u32);
+    quickcheck_iint_type!(i64, u64);
+    quickcheck_iint_type!(i128, u128);
+
+    macro_rules! ope_quickcheck_iint_type {
+        ($ty:ident, $bits:expr) => {
+            paste! {
+                quickcheck! {
+                    fn [<prop_ope_eq_ $ty>](key: Key, x: $ty) -> bool {
+                        let a = key.encrypt_ope(x).unwrap();
+                        let b = key.encrypt_ope(x).unwrap();
+                        a == b
+                    }
+
+                    fn [<prop_ope_cmp_ $ty>](key: Key, x: $ty, y: $ty) -> bool {
+                        let a = key.encrypt_ope(x).unwrap();
+                        let b = key.encrypt_ope(y).unwrap();
+                        a.cmp(&b) == x.cmp(&y)
+                    }
+
+                    fn [<prop_ope_sign_class_ $ty>](key: Key, x: $ty) -> TestResult {
+                        let zero_ct = key.encrypt_ope::<$ty>(0).unwrap();
+                        let ct = key.encrypt_ope(x).unwrap();
+                        TestResult::from_bool(match x.cmp(&0) {
+                            Ordering::Less => ct < zero_ct,
+                            Ordering::Equal => ct == zero_ct,
+                            Ordering::Greater => ct > zero_ct,
+                        })
+                    }
+
+                    fn [<prop_ope_length_ $ty>](key: Key, x: $ty) -> bool {
+                        let ct = key.encrypt_ope(x).unwrap();
+                        ct.as_ref().len() == $bits + 1
+                    }
+
+                    fn [<prop_ope_hex_round_trip_ $ty>](key: Key, x: $ty) -> bool {
+                        let ct = key.encrypt_ope(x).unwrap();
+                        let hex_str = hex::encode(ct.as_ref());
+                        let ct2 = OpeCllw8V1::<{ $bits + 1 }>::from_hex(&hex_str).unwrap();
+                        ct == ct2
+                    }
+
+                    fn [<prop_ope_different_salts_differ_ $ty>](key: Key, x: $ty) -> bool {
+                        let ct1 = x.encrypt_ope_with_salt(&key, Some(b"domain1")).unwrap();
+                        let ct2 = x.encrypt_ope_with_salt(&key, Some(b"domain2")).unwrap();
+                        ct1 != ct2
+                    }
+                }
+            }
+        };
+    }
+
+    ope_quickcheck_iint_type!(i16, 16);
+    ope_quickcheck_iint_type!(i32, 32);
+    ope_quickcheck_iint_type!(i64, 64);
+    ope_quickcheck_iint_type!(i128, 128);
+
+    // Sanity anchors that pin the signed encoding at MIN/0/MAX and across
+    // sign boundaries — easier to read than the property tests above.
+    #[test]
+    fn signed_ore_anchors_i32() {
+        let key = Key::from([0u8; 32]);
+        let min = key.encrypt(i32::MIN).unwrap();
+        let neg_one = key.encrypt(-1i32).unwrap();
+        let zero = key.encrypt(0i32).unwrap();
+        let one = key.encrypt(1i32).unwrap();
+        let max = key.encrypt(i32::MAX).unwrap();
+        assert!(min < neg_one);
+        assert!(neg_one < zero);
+        assert!(zero < one);
+        assert!(one < max);
+    }
+
+    #[test]
+    fn signed_ore_decrypt_i64_anchors() {
+        // Round-trip pattern for signed: decrypt to the unsigned bias, then
+        // reverse the sign-flip XOR to recover the signed plaintext.
+        let key = Key::from([7u8; 32]);
+        for x in [i64::MIN, -1_000_000_000, -1, 0, 1, 1_000_000_000, i64::MAX] {
+            let ct = key.encrypt(x).unwrap();
+            let biased: u64 = key.decrypt(ct).unwrap();
+            let recovered = (biased ^ (1u64 << 63)) as i64;
+            assert_eq!(recovered, x);
+        }
+    }
+
+    #[test]
+    fn signed_ope_anchors_i32() {
+        let key = Key::from([0u8; 32]);
+        let min = key.encrypt_ope(i32::MIN).unwrap();
+        let neg_one = key.encrypt_ope(-1i32).unwrap();
+        let zero = key.encrypt_ope(0i32).unwrap();
+        let one = key.encrypt_ope(1i32).unwrap();
+        let max = key.encrypt_ope(i32::MAX).unwrap();
+        assert!(min < neg_one);
+        assert!(neg_one < zero);
+        assert!(zero < one);
+        assert!(one < max);
+    }
+
+    // --- Bool ---
+
+    #[test]
+    fn bool_ore_anchors() {
+        let key = Key::from([0u8; 32]);
+        let f = key.encrypt(false).unwrap();
+        let t = key.encrypt(true).unwrap();
+        assert!(f < t);
+        assert_eq!(f, key.encrypt(false).unwrap());
+        assert_eq!(t, key.encrypt(true).unwrap());
+    }
+
+    #[test]
+    fn bool_ope_anchors() {
+        let key = Key::from([0u8; 32]);
+        let f = key.encrypt_ope(false).unwrap();
+        let t = key.encrypt_ope(true).unwrap();
+        assert!(f < t);
+        assert_eq!(f, key.encrypt_ope(false).unwrap());
+        assert_eq!(t, key.encrypt_ope(true).unwrap());
+    }
+
+    // --- Float property suites ---
+    //
+    // The encoding matches IEEE-754 totalOrder (same total order as
+    // `f{32,64}::total_cmp`), including the `−0.0 < +0.0` split. NaN inputs
+    // are discarded — the encoding is consistent on them too, but excluding
+    // NaN keeps the assertion crisp and avoids depending on quickcheck's
+    // NaN generation behaviour.
+
+    macro_rules! quickcheck_float_type {
+        ($ty:ident) => {
+            paste! {
+                quickcheck! {
+                    fn [<prop_eq_ $ty>](key: Key, x: $ty) -> TestResult {
+                        if x.is_nan() {
+                            return TestResult::discard();
+                        }
+                        let a = key.encrypt(x).unwrap();
+                        let b = key.encrypt(x).unwrap();
+                        TestResult::from_bool(a == b)
+                    }
+
+                    fn [<prop_cmp_ $ty>](key: Key, x: $ty, y: $ty) -> TestResult {
+                        if x.is_nan() || y.is_nan() {
+                            return TestResult::discard();
+                        }
+                        let a = key.encrypt(x).unwrap();
+                        let b = key.encrypt(y).unwrap();
+                        TestResult::from_bool(a.cmp(&b) == x.total_cmp(&y))
+                    }
+
+                    fn [<prop_ope_eq_ $ty>](key: Key, x: $ty) -> TestResult {
+                        if x.is_nan() {
+                            return TestResult::discard();
+                        }
+                        let a = key.encrypt_ope(x).unwrap();
+                        let b = key.encrypt_ope(x).unwrap();
+                        TestResult::from_bool(a == b)
+                    }
+
+                    fn [<prop_ope_cmp_ $ty>](key: Key, x: $ty, y: $ty) -> TestResult {
+                        if x.is_nan() || y.is_nan() {
+                            return TestResult::discard();
+                        }
+                        let a = key.encrypt_ope(x).unwrap();
+                        let b = key.encrypt_ope(y).unwrap();
+                        TestResult::from_bool(a.cmp(&b) == x.total_cmp(&y))
+                    }
+                }
+            }
+        };
+    }
+
+    quickcheck_float_type!(f32);
+    quickcheck_float_type!(f64);
+
+    #[test]
+    fn float_ore_anchors_f32() {
+        let key = Key::from([0u8; 32]);
+        let neg_inf = key.encrypt(f32::NEG_INFINITY).unwrap();
+        let neg_one = key.encrypt(-1f32).unwrap();
+        let neg_zero = key.encrypt(-0f32).unwrap();
+        let pos_zero = key.encrypt(0f32).unwrap();
+        let one = key.encrypt(1f32).unwrap();
+        let inf = key.encrypt(f32::INFINITY).unwrap();
+        assert!(neg_inf < neg_one);
+        assert!(neg_one < neg_zero);
+        assert!(neg_zero < pos_zero);
+        assert!(pos_zero < one);
+        assert!(one < inf);
+    }
+
+    #[test]
+    fn float_ope_anchors_f64() {
+        let key = Key::from([0u8; 32]);
+        let neg_inf = key.encrypt_ope(f64::NEG_INFINITY).unwrap();
+        let neg_one = key.encrypt_ope(-1f64).unwrap();
+        let neg_zero = key.encrypt_ope(-0f64).unwrap();
+        let pos_zero = key.encrypt_ope(0f64).unwrap();
+        let one = key.encrypt_ope(1f64).unwrap();
+        let inf = key.encrypt_ope(f64::INFINITY).unwrap();
+        assert!(neg_inf < neg_one);
+        assert!(neg_one < neg_zero);
+        assert!(neg_zero < pos_zero);
+        assert!(pos_zero < one);
+        assert!(one < inf);
+    }
 
     // --- Empirical exactness check ---
     //

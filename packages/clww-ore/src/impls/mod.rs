@@ -8,7 +8,7 @@ pub(crate) mod byte_array;
 pub(crate) mod chrono;
 #[cfg(feature = "decimal")]
 pub(crate) mod decimal;
-pub(crate) mod num;
+pub(crate) mod primitives;
 pub(crate) mod string;
 pub(crate) mod variable;
 
