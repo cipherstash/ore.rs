@@ -1,12 +1,12 @@
 //! Canonical, order-preserving fixed-length byte encodings for the
-//! primitives `bool`, `u8`, `i8`, `i16`, `i32`, `i64`, `u128`, `i128`,
-//! and the IEEE 754 double `f64`.
+//! primitives `bool`, `char`, `u8`, `i8`, `i16`, `i32`, `i64`, `u128`,
+//! `i128`, and the IEEE 754 floats `f32` and `f64`.
 //!
 //! Each impl emits the type's native byte width — no padding:
 //!
 //! - `bool`, `u8`, `i8` → `[u8; 1]`
 //! - `i16`, `u16` → `[u8; 2]`
-//! - `i32`, `u32` → `[u8; 4]`
+//! - `i32`, `u32`, `char`, `f32` → `[u8; 4]`
 //! - `i64`, `u64`, `f64` → `[u8; 8]`
 //! - `u128`, `i128` → `[u8; 16]`
 //!
@@ -31,10 +31,19 @@
 //! positives (the sign bit `1` for negatives clears to `0`, vice versa
 //! for positives) and preserves order within each sign class.
 //!
-//! ## `f64`
+//! ## `char`
 //!
-//! IEEE 754 doubles are mapped to a lex-orderable `u64` using the
-//! standard monotonic encoding:
+//! Encoded as the big-endian bytes of the underlying `u32` Unicode
+//! scalar value (`*self as u32`). Rust's `Ord` impl for `char` compares
+//! by code point, and surrogate code points (`U+D800`..=`U+DFFF`) are
+//! not representable as `char`, so the native `u32` lex order is
+//! exactly the order we need.
+//!
+//! ## IEEE 754 floats (`f32`, `f64`)
+//!
+//! Each float is mapped to a lex-orderable unsigned integer of the
+//! same width (`u32` for `f32`, `u64` for `f64`) using the standard
+//! monotonic encoding:
 //!
 //! - Negatives flip every bit (their bit pattern's lex order is the
 //!   reverse of magnitude order, so flipping inverts it).
@@ -42,13 +51,14 @@
 //!   negatives in lex order).
 //!
 //! `-0.0` is canonicalised to `+0.0` before encoding so the two compare
-//! byte-equal — matching `-0.0 == 0.0` on `f64`.
+//! byte-equal — matching `-0.0 == 0.0` for IEEE 754.
 //!
-//! NaN handling is unspecified. `f64` is `PartialOrd` rather than `Ord`
-//! (NaN compares unordered against every value, including itself), so
-//! the trait's order/equality guarantees only apply to non-NaN inputs.
-//! Different NaN bit patterns will produce different bytes; consumers
-//! that need a canonical NaN must canonicalise upstream.
+//! NaN handling is unspecified. Floats implement `PartialOrd` rather
+//! than `Ord` (NaN compares unordered against every value, including
+//! itself), so the trait's order/equality guarantees only apply to
+//! non-NaN inputs. Different NaN bit patterns will produce different
+//! bytes; consumers that need a canonical NaN must canonicalise
+//! upstream.
 
 use crate::ToOrderableBytes;
 
@@ -150,6 +160,31 @@ impl ToOrderableBytes for i128 {
 
     fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
         ((*self as u128) ^ (1u128 << 127)).to_be_bytes()
+    }
+}
+
+impl ToOrderableBytes for char {
+    const ENCODED_LEN: usize = 4;
+    type Bytes = [u8; Self::ENCODED_LEN];
+
+    fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
+        (*self as u32).to_be_bytes()
+    }
+}
+
+impl ToOrderableBytes for f32 {
+    const ENCODED_LEN: usize = 4;
+    type Bytes = [u8; Self::ENCODED_LEN];
+
+    fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
+        // Canonicalise -0.0 → 0.0 so the two share one byte encoding
+        // (their f32 equality demands byte equality under our contract).
+        let value = if *self == -0.0 { 0.0 } else { *self };
+        let bits = value.to_bits();
+        // Branchless monotonic mapping (see `f64` impl for derivation).
+        let sign_extension = (bits as i32 >> 31) as u32;
+        let mask = sign_extension | (1u32 << 31);
+        (bits ^ mask).to_be_bytes()
     }
 }
 
@@ -468,6 +503,86 @@ mod tests {
                 window[1]
             );
         }
+    }
+
+    // --- char ---
+
+    #[test]
+    fn char_known_anchors() {
+        // 'A' = U+0041 = 0x0000_0041 BE.
+        assert_eq!('A'.to_orderable_bytes(), [0x00, 0x00, 0x00, 0x41]);
+        // '\0' = U+0000 (lowest code point).
+        assert_eq!('\0'.to_orderable_bytes(), [0x00, 0x00, 0x00, 0x00]);
+        // char::MAX = U+10FFFF (highest valid scalar value).
+        assert_eq!(char::MAX.to_orderable_bytes(), [0x00, 0x10, 0xFF, 0xFF]);
+    }
+
+    #[test]
+    fn char_byte_order_matches_natural_order() {
+        // Spans ASCII, BMP, and supplementary planes (above the surrogate gap).
+        let ascending = [
+            '\0',
+            '0',
+            'A',
+            'a',
+            '\u{7F}',
+            '\u{D7FF}',
+            '\u{E000}',
+            '\u{1F600}',
+            char::MAX,
+        ];
+        for window in ascending.windows(2) {
+            assert!(
+                window[0].to_orderable_bytes() < window[1].to_orderable_bytes(),
+                "{:?} < {:?} failed",
+                window[0],
+                window[1]
+            );
+        }
+    }
+
+    // --- f32 ---
+
+    #[test]
+    fn f32_zero_canonical_bytes() {
+        // +0.0 → 0x8000_0000 (sign-bit-only flip on all-zero bits).
+        assert_eq!(0.0f32.to_orderable_bytes(), [0x80, 0x00, 0x00, 0x00]);
+    }
+
+    #[test]
+    fn f32_negative_zero_canonicalises_with_zero() {
+        assert_eq!((-0.0f32).to_orderable_bytes(), 0.0f32.to_orderable_bytes());
+    }
+
+    #[test]
+    fn f32_byte_order_matches_natural_order() {
+        let ascending = [
+            f32::NEG_INFINITY,
+            f32::MIN,
+            -1e30,
+            -1.0,
+            -f32::MIN_POSITIVE,
+            0.0,
+            f32::MIN_POSITIVE,
+            1.0,
+            1e30,
+            f32::MAX,
+            f32::INFINITY,
+        ];
+        for window in ascending.windows(2) {
+            let a = window[0].to_orderable_bytes();
+            let b = window[1].to_orderable_bytes();
+            assert!(a < b, "{} < {} failed", window[0], window[1]);
+        }
+    }
+
+    #[test]
+    fn f32_subnormals_sort_above_zero_below_normals() {
+        // Smallest positive subnormal (`f32::from_bits(1)`) must land
+        // strictly between 0.0 and the smallest positive normal.
+        let subnormal = f32::from_bits(1);
+        assert!(0.0f32.to_orderable_bytes() < subnormal.to_orderable_bytes());
+        assert!(subnormal.to_orderable_bytes() < f32::MIN_POSITIVE.to_orderable_bytes());
     }
 
     // --- f64 ---
