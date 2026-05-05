@@ -5,9 +5,7 @@
 //! - [`OreCllw8VariableV1`] — Order-Revealing Encryption ciphertext for
 //!   variable-length plaintexts (strings, byte slices). Supports decryption.
 //! - [`OpeCllw8VariableV1`] — Order-Preserving Encryption ciphertext for
-//!   variable-length plaintexts (strings, byte slices, and any custom byte
-//!   encoding fed through [`super::encrypt_ope_bits`], such as the
-//!   `decimal`- and `chrono`-feature encoders). Encrypt-only.
+//!   variable-length plaintexts (strings, byte slices). Encrypt-only.
 //!
 //! The actual encryption logic for `&str` / `&[u8]` lives in
 //! [`super::string`]; this module only defines the ciphertext types,

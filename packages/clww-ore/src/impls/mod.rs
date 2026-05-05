@@ -2,6 +2,8 @@ use crate::Key;
 use std::cmp::Ordering;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
+#[cfg(any(feature = "chrono", feature = "decimal"))]
+pub(crate) mod byte_array;
 #[cfg(feature = "chrono")]
 pub(crate) mod chrono;
 #[cfg(feature = "decimal")]

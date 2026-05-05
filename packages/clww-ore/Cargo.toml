@@ -16,14 +16,15 @@ categories.workspace = true
 default = ["postgres-types"]
 postgres-types = ["dep:postgres-types"]
 # Adds OPE support for `rust_decimal::Decimal`.
-decimal = ["dep:rust_decimal"]
+decimal = ["dep:rust_decimal", "dep:orderable-bytes", "orderable-bytes/decimal"]
 # Adds OPE support for `chrono::NaiveDate` and `chrono::DateTime<Utc>`.
-chrono = ["dep:chrono"]
+chrono = ["dep:chrono", "dep:orderable-bytes", "orderable-bytes/chrono"]
 
 [dependencies]
 blake3 = "1.5.4"
 chrono = { version = "0.4.42", default-features = false, optional = true }
 hex = { workspace = true }
+orderable-bytes = { version = "0.1.1", default-features = false, optional = true }
 postgres-types = { version = "0.2.8", features = ["derive", "array-impls"], optional = true }
 rust_decimal = { version = "1.28", default-features = false, optional = true }
 subtle = "2.6.1"
