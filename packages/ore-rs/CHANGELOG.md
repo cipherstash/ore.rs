@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - impl OreEncrypt for all primitives via ToOrderableBytes
 
+### Miscellaneous
+
+- release
+
+### Refactoring
+
+- introduce ToOrderableBytes trait
+- drop dead convert module
+
+
+### Features
+
+- impl OreEncrypt for all primitives via ToOrderableBytes
+
 ### Refactoring
 
 - introduce ToOrderableBytes trait
