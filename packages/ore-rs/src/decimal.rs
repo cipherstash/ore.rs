@@ -10,19 +10,21 @@
 use crate::ciphertext::{CipherText, Left};
 use crate::encrypt::OreEncrypt;
 use crate::{OreCipher, OreError};
-use orderable_bytes::decimal::{to_orderable_bytes, ENCODED_LEN};
+use orderable_bytes::ToOrderableBytes;
 use rust_decimal::Decimal;
+
+const ENCODED_LEN: usize = <Decimal as ToOrderableBytes>::ENCODED_LEN;
 
 impl<T: OreCipher> OreEncrypt<T> for Decimal {
     type LeftOutput = Left<T, ENCODED_LEN>;
     type FullOutput = CipherText<T, ENCODED_LEN>;
 
     fn encrypt_left(&self, cipher: &T) -> Result<Self::LeftOutput, OreError> {
-        cipher.encrypt_left(&to_orderable_bytes(self))
+        cipher.encrypt_left(&self.to_orderable_bytes())
     }
 
     fn encrypt(&self, cipher: &T) -> Result<Self::FullOutput, OreError> {
-        cipher.encrypt(&to_orderable_bytes(self))
+        cipher.encrypt(&self.to_orderable_bytes())
     }
 }
 

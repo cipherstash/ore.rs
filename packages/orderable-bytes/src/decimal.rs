@@ -60,16 +60,15 @@
 //!
 //! ## Constant-time
 //!
-//! `to_orderable_bytes` is straight-line code with fixed-iteration loops
-//! and branchless mask arithmetic. It does not call `Decimal::normalize`
-//! (which loops while `scale > 0`) and does not branch on sign or
-//! zero-ness. Timing does not distinguish the input's sign, zero-ness,
-//! digit count, trailing-zero count, or scale.
+//! [`<Decimal as ToOrderableBytes>::to_orderable_bytes`](crate::ToOrderableBytes::to_orderable_bytes)
+//! is straight-line code with fixed-iteration loops and branchless mask
+//! arithmetic. It does not call `Decimal::normalize` (which loops while
+//! `scale > 0`) and does not branch on sign or zero-ness. Timing does
+//! not distinguish the input's sign, zero-ness, digit count,
+//! trailing-zero count, or scale.
 
+use crate::ToOrderableBytes;
 use rust_decimal::Decimal;
-
-/// Number of bytes in the canonical orderable-bytes form.
-pub const ENCODED_LEN: usize = 14;
 
 /// Width of the padded-significand field in bytes (13 bytes = 104 bits).
 const MANTISSA_BYTES: usize = 13;
@@ -94,138 +93,144 @@ const EXP_MASK: u8 = 0x7F;
 /// Build the canonical, order-preserving fixed-length byte encoding of a
 /// `Decimal`. Two `Decimal`s that compare equal under `Decimal::cmp`
 /// produce identical byte arrays.
-pub fn to_orderable_bytes(d: &Decimal) -> [u8; ENCODED_LEN] {
-    let mut out = [0u8; ENCODED_LEN];
+impl ToOrderableBytes for Decimal {
+    const ENCODED_LEN: usize = 14;
+    type Bytes = [u8; Self::ENCODED_LEN];
 
-    // The pipeline runs unconditionally — no early return for zero inputs.
-    // A `d.is_zero()` short-circuit at the top would distinguish zero from
-    // non-zero plaintexts via timing. Instead we feed zero through the same
-    // sequence of operations as every other value (the helpers tolerate
-    // `m == 0` and produce `(significand=0, digits=0, trailing=0)`) and
-    // canonicalise the resulting byte 0 to the zero plaintext at the end
-    // via a branchless mask.
-    //
-    // We deliberately don't call `Decimal::normalize()` here. `normalize`
-    // strips trailing zeros from the mantissa via a `while scale > 0` loop
-    // whose iteration count depends on the secret value's trailing-zero
-    // count — a timing side channel. Our own `strip_trailing_zeros` already
-    // strips *all* trailing zeros (a strict superset of what `normalize`
-    // would remove, since it doesn't stop at scale=0), so the leading-digit
-    // exponent we compute below is identical whether the input has been
-    // normalised first or not. Skipping the call removes the leak.
-    let raw_mantissa = d.mantissa();
-    let scale = d.scale() as i32;
-    // Branchless absolute value via the standard two's-complement identity
-    // `abs(x) = (x ^ s) - s` where `s` is the arithmetic right-shift of the
-    // sign bit (`-1` if `x` is negative, `0` otherwise). For positives this
-    // collapses to `x - 0 = x`; for negatives to `~x + 1 = -x`. Equivalent
-    // in value to `i128::unsigned_abs`, which compiles to a CMOV on tier-1
-    // ISAs but is not language-guaranteed constant-time. The explicit form
-    // here removes the dependency on optimiser behaviour.
-    let sign_extension = raw_mantissa >> 127;
-    let abs_mantissa = ((raw_mantissa ^ sign_extension).wrapping_sub(sign_extension)) as u128;
-    let (significand, trailing) = strip_trailing_zeros(abs_mantissa);
-    let digits = digit_count(significand);
+    fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
+        let d = self;
+        let mut out = [0u8; Self::ENCODED_LEN];
 
-    // value = ±significand × 10^trailing × 10^(-scale)
-    // leading_exp = decimal exponent of the leading significant digit.
-    //
-    // For non-zero `Decimal`s `leading_exp` lies in `[-28, 28]`. The
-    // pipeline also runs for zero inputs (significand = 0, digits = 0,
-    // trailing = 0), where the formula collapses to `-1 - scale` and
-    // `leading_exp` lands in `[-29, -1]`; this produces a perfectly valid
-    // — though arbitrary — non-zero positive plaintext that we'll
-    // overwrite at the end with the canonical zero. The widened range
-    // `[-29, 28]` covers both branches without leaking the zero/non-zero
-    // distinction in debug builds either.
-    let leading_exp = digits as i32 - 1 + trailing - scale;
-    debug_assert!(
-        (-29..=28).contains(&leading_exp),
-        "leading_exp {} out of bounds — mantissa or scale corrupted",
-        leading_exp,
-    );
-    let biased_exp = (leading_exp + EXP_BIAS) as u8;
-    debug_assert!(biased_exp <= EXP_MASK, "biased_exp overflowed 7 bits");
+        // The pipeline runs unconditionally — no early return for zero inputs.
+        // A `d.is_zero()` short-circuit at the top would distinguish zero from
+        // non-zero plaintexts via timing. Instead we feed zero through the same
+        // sequence of operations as every other value (the helpers tolerate
+        // `m == 0` and produce `(significand=0, digits=0, trailing=0)`) and
+        // canonicalise the resulting byte 0 to the zero plaintext at the end
+        // via a branchless mask.
+        //
+        // We deliberately don't call `Decimal::normalize()` here. `normalize`
+        // strips trailing zeros from the mantissa via a `while scale > 0` loop
+        // whose iteration count depends on the secret value's trailing-zero
+        // count — a timing side channel. Our own `strip_trailing_zeros` already
+        // strips *all* trailing zeros (a strict superset of what `normalize`
+        // would remove, since it doesn't stop at scale=0), so the leading-digit
+        // exponent we compute below is identical whether the input has been
+        // normalised first or not. Skipping the call removes the leak.
+        let raw_mantissa = d.mantissa();
+        let scale = d.scale() as i32;
+        // Branchless absolute value via the standard two's-complement identity
+        // `abs(x) = (x ^ s) - s` where `s` is the arithmetic right-shift of the
+        // sign bit (`-1` if `x` is negative, `0` otherwise). For positives this
+        // collapses to `x - 0 = x`; for negatives to `~x + 1 = -x`. Equivalent
+        // in value to `i128::unsigned_abs`, which compiles to a CMOV on tier-1
+        // ISAs but is not language-guaranteed constant-time. The explicit form
+        // here removes the dependency on optimiser behaviour.
+        let sign_extension = raw_mantissa >> 127;
+        let abs_mantissa = ((raw_mantissa ^ sign_extension).wrapping_sub(sign_extension)) as u128;
+        let (significand, trailing) = strip_trailing_zeros(abs_mantissa);
+        let digits = digit_count(significand);
 
-    // Pad the significand out to 29 decimal digits so same-exponent compares
-    // across different significand lengths are byte-wise correct.
-    //
-    // We can't write this as `significand * 10u128.pow(PADDED_DIGITS - digits)`
-    // — `u128::pow` is square-and-multiply on the bits of its exponent, with
-    // both the iteration count and the conditional `acc * base` step driven
-    // by the exponent value. Since the exponent here is `PADDED_DIGITS −
-    // digits` and `digits` is derived from the secret mantissa, that would
-    // leak the digit count via timing.
-    //
-    // Instead, run a fixed `PADDED_DIGITS`-iteration loop that multiplies
-    // `padded_mantissa` by 10 under a branchless mask. The mask is `1` while
-    // we still have padding to apply (`digits + i < PADDED_DIGITS`) and `0`
-    // afterwards; the multiplication itself is computed unconditionally each
-    // iteration so the instruction sequence doesn't depend on `digits`.
-    //
-    // No overflow concern: in any iteration where the mask is `1` we have
-    // `padded_mantissa < 10^(PADDED_DIGITS-1) ≤ 10^28`, so `× 10` stays
-    // under `10^29`. In iterations where the mask is `0`, `padded_mantissa`
-    // sits at its final value (≤ `10^29`) and the unstored `× 10` product
-    // is at most `10^30 ≈ 2^99.7`, well inside `u128`.
-    let mut padded_mantissa = significand;
-    for i in 0..PADDED_DIGITS {
-        let do_step = ((digits + i) < PADDED_DIGITS) as u128;
-        let mask = 0u128.wrapping_sub(do_step);
-        let stepped = padded_mantissa.wrapping_mul(10);
-        padded_mantissa = (padded_mantissa & !mask) | (stepped & mask);
+        // value = ±significand × 10^trailing × 10^(-scale)
+        // leading_exp = decimal exponent of the leading significant digit.
+        //
+        // For non-zero `Decimal`s `leading_exp` lies in `[-28, 28]`. The
+        // pipeline also runs for zero inputs (significand = 0, digits = 0,
+        // trailing = 0), where the formula collapses to `-1 - scale` and
+        // `leading_exp` lands in `[-29, -1]`; this produces a perfectly valid
+        // — though arbitrary — non-zero positive plaintext that we'll
+        // overwrite at the end with the canonical zero. The widened range
+        // `[-29, 28]` covers both branches without leaking the zero/non-zero
+        // distinction in debug builds either.
+        let leading_exp = digits as i32 - 1 + trailing - scale;
+        debug_assert!(
+            (-29..=28).contains(&leading_exp),
+            "leading_exp {} out of bounds — mantissa or scale corrupted",
+            leading_exp,
+        );
+        let biased_exp = (leading_exp + EXP_BIAS) as u8;
+        debug_assert!(biased_exp <= EXP_MASK, "biased_exp overflowed 7 bits");
+
+        // Pad the significand out to 29 decimal digits so same-exponent compares
+        // across different significand lengths are byte-wise correct.
+        //
+        // We can't write this as `significand * 10u128.pow(PADDED_DIGITS - digits)`
+        // — `u128::pow` is square-and-multiply on the bits of its exponent, with
+        // both the iteration count and the conditional `acc * base` step driven
+        // by the exponent value. Since the exponent here is `PADDED_DIGITS −
+        // digits` and `digits` is derived from the secret mantissa, that would
+        // leak the digit count via timing.
+        //
+        // Instead, run a fixed `PADDED_DIGITS`-iteration loop that multiplies
+        // `padded_mantissa` by 10 under a branchless mask. The mask is `1` while
+        // we still have padding to apply (`digits + i < PADDED_DIGITS`) and `0`
+        // afterwards; the multiplication itself is computed unconditionally each
+        // iteration so the instruction sequence doesn't depend on `digits`.
+        //
+        // No overflow concern: in any iteration where the mask is `1` we have
+        // `padded_mantissa < 10^(PADDED_DIGITS-1) ≤ 10^28`, so `× 10` stays
+        // under `10^29`. In iterations where the mask is `0`, `padded_mantissa`
+        // sits at its final value (≤ `10^29`) and the unstored `× 10` product
+        // is at most `10^30 ≈ 2^99.7`, well inside `u128`.
+        let mut padded_mantissa = significand;
+        for i in 0..PADDED_DIGITS {
+            let do_step = ((digits + i) < PADDED_DIGITS) as u128;
+            let mask = 0u128.wrapping_sub(do_step);
+            let stepped = padded_mantissa.wrapping_mul(10);
+            padded_mantissa = (padded_mantissa & !mask) | (stepped & mask);
+        }
+        let mant_be = padded_mantissa.to_be_bytes();
+        debug_assert!(
+            mant_be[..16 - MANTISSA_BYTES].iter().all(|&b| b == 0),
+            "padded mantissa overflowed 104 bits",
+        );
+        let mant_field = &mant_be[16 - MANTISSA_BYTES..];
+
+        // Sign-class handling is folded into a single branchless mask so the
+        // function executes the same instructions regardless of the input's
+        // sign. `neg_mask` is `0xFF` for negatives and `0x00` for positives
+        // (and zero, which lives in the positive sign-class), formed from the
+        // arithmetic shift of the sign bit and a u8 truncation.
+        //
+        // - byte 0: positives want `SIGN_BIT | biased_exp`; negatives want
+        //   `(!biased_exp) & EXP_MASK`. Expressed as one expression:
+        //     (SIGN_BIT & !neg_mask)        — keep sign bit only when positive
+        //   | (biased_exp ^ (neg_mask & EXP_MASK))
+        //                                   — XOR the 7 exp bits with `neg_mask`,
+        //                                     which is a no-op for positives and
+        //                                     a 7-bit complement for negatives.
+        //
+        // - mantissa bytes: positives want the bytes unchanged; negatives want
+        //   the bitwise complement. `b ^ neg_mask` does both: XOR with `0x00`
+        //   is a no-op, XOR with `0xFF` is bitwise NOT.
+        let neg_mask = (raw_mantissa >> 127) as u8;
+        out[0] = (SIGN_BIT & !neg_mask) | (biased_exp ^ (neg_mask & EXP_MASK));
+        for (i, &b) in mant_field.iter().enumerate() {
+            out[1 + i] = b ^ neg_mask;
+        }
+
+        // Final canonicalisation for the zero plaintext, applied branchlessly
+        // so the function's timing doesn't reveal whether the input was zero.
+        //
+        // The non-zero pipeline ran end-to-end on the zero input too. With
+        // `significand = 0` the padded mantissa is also `0`, so `out[1..]` is
+        // already the all-zero canonical zero tail; we only need to fix up
+        // `out[0]`, which currently holds some valid-looking positive
+        // `SIGN_BIT | biased_exp` byte.
+        //
+        // Build a full-byte mask `zero_mask` that is `0xFF` when `abs_mantissa
+        // == 0` and `0x00` otherwise:
+        //   - `(x | -x) >> 127` is `1` if `x != 0`, `0` if `x == 0` (standard
+        //     u128 nonzero-detection idiom).
+        //   - XOR with `1` flips it to "is zero".
+        //   - Subtract from `0u8` to broadcast the bit across all 8 bits.
+        // Then merge: keep `out[0]` for non-zero, replace with `SIGN_BIT` for
+        // zero.
+        let mant_nonzero_bit = ((abs_mantissa | abs_mantissa.wrapping_neg()) >> 127) as u8;
+        let zero_mask = 0u8.wrapping_sub(mant_nonzero_bit ^ 1);
+        out[0] = (out[0] & !zero_mask) | (SIGN_BIT & zero_mask);
+        out
     }
-    let mant_be = padded_mantissa.to_be_bytes();
-    debug_assert!(
-        mant_be[..16 - MANTISSA_BYTES].iter().all(|&b| b == 0),
-        "padded mantissa overflowed 104 bits",
-    );
-    let mant_field = &mant_be[16 - MANTISSA_BYTES..];
-
-    // Sign-class handling is folded into a single branchless mask so the
-    // function executes the same instructions regardless of the input's
-    // sign. `neg_mask` is `0xFF` for negatives and `0x00` for positives
-    // (and zero, which lives in the positive sign-class), formed from the
-    // arithmetic shift of the sign bit and a u8 truncation.
-    //
-    // - byte 0: positives want `SIGN_BIT | biased_exp`; negatives want
-    //   `(!biased_exp) & EXP_MASK`. Expressed as one expression:
-    //     (SIGN_BIT & !neg_mask)        — keep sign bit only when positive
-    //   | (biased_exp ^ (neg_mask & EXP_MASK))
-    //                                   — XOR the 7 exp bits with `neg_mask`,
-    //                                     which is a no-op for positives and
-    //                                     a 7-bit complement for negatives.
-    //
-    // - mantissa bytes: positives want the bytes unchanged; negatives want
-    //   the bitwise complement. `b ^ neg_mask` does both: XOR with `0x00`
-    //   is a no-op, XOR with `0xFF` is bitwise NOT.
-    let neg_mask = (raw_mantissa >> 127) as u8;
-    out[0] = (SIGN_BIT & !neg_mask) | (biased_exp ^ (neg_mask & EXP_MASK));
-    for (i, &b) in mant_field.iter().enumerate() {
-        out[1 + i] = b ^ neg_mask;
-    }
-
-    // Final canonicalisation for the zero plaintext, applied branchlessly
-    // so the function's timing doesn't reveal whether the input was zero.
-    //
-    // The non-zero pipeline ran end-to-end on the zero input too. With
-    // `significand = 0` the padded mantissa is also `0`, so `out[1..]` is
-    // already the all-zero canonical zero tail; we only need to fix up
-    // `out[0]`, which currently holds some valid-looking positive
-    // `SIGN_BIT | biased_exp` byte.
-    //
-    // Build a full-byte mask `zero_mask` that is `0xFF` when `abs_mantissa
-    // == 0` and `0x00` otherwise:
-    //   - `(x | -x) >> 127` is `1` if `x != 0`, `0` if `x == 0` (standard
-    //     u128 nonzero-detection idiom).
-    //   - XOR with `1` flips it to "is zero".
-    //   - Subtract from `0u8` to broadcast the bit across all 8 bits.
-    // Then merge: keep `out[0]` for non-zero, replace with `SIGN_BIT` for
-    // zero.
-    let mant_nonzero_bit = ((abs_mantissa | abs_mantissa.wrapping_neg()) >> 127) as u8;
-    let zero_mask = 0u8.wrapping_sub(mant_nonzero_bit ^ 1);
-    out[0] = (out[0] & !zero_mask) | (SIGN_BIT & zero_mask);
-    out
 }
 
 /// `5⁻¹ mod 2¹²⁸`. Verified: `5 * INV5 ≡ 1 (mod 2¹²⁸)`. Used to substitute
@@ -333,33 +338,33 @@ mod tests {
 
     #[test]
     fn zero_canonicalises_to_sign_bit_only() {
-        let mut expected = [0u8; ENCODED_LEN];
+        let mut expected = [0u8; 14];
         expected[0] = SIGN_BIT;
-        assert_eq!(to_orderable_bytes(&dec!(0)), expected);
-        assert_eq!(to_orderable_bytes(&dec!(0.0)), expected);
-        assert_eq!(to_orderable_bytes(&dec!(0.000)), expected);
+        assert_eq!(dec!(0).to_orderable_bytes(), expected);
+        assert_eq!(dec!(0.0).to_orderable_bytes(), expected);
+        assert_eq!(dec!(0.000).to_orderable_bytes(), expected);
     }
 
     #[test]
     fn negative_zero_canonicalises_with_zero() {
         let neg_zero = -dec!(0);
-        assert_eq!(to_orderable_bytes(&neg_zero), to_orderable_bytes(&dec!(0)));
+        assert_eq!(neg_zero.to_orderable_bytes(), dec!(0).to_orderable_bytes());
     }
 
     #[test]
     fn equivalent_forms_canonicalise_identically() {
-        let one = to_orderable_bytes(&dec!(1));
-        assert_eq!(to_orderable_bytes(&dec!(1.0)), one);
-        assert_eq!(to_orderable_bytes(&dec!(1.00)), one);
-        assert_eq!(to_orderable_bytes(&dec!(1.000)), one);
+        let one = dec!(1).to_orderable_bytes();
+        assert_eq!(dec!(1.0).to_orderable_bytes(), one);
+        assert_eq!(dec!(1.00).to_orderable_bytes(), one);
+        assert_eq!(dec!(1.000).to_orderable_bytes(), one);
     }
 
     #[test]
     fn integer_trailing_zeros_share_significand_bytes() {
         // 100 strips to (sig=1, leading_exp=2). Same significand as 1, so the
         // padded-mantissa region must match.
-        let one = to_orderable_bytes(&dec!(1));
-        let hundred = to_orderable_bytes(&dec!(100));
+        let one = dec!(1).to_orderable_bytes();
+        let hundred = dec!(100).to_orderable_bytes();
         assert_eq!(&one[1..], &hundred[1..]);
         // Top bit (sign) matches; low 7 bits differ by leading_exp.
         assert_eq!(one[0] & SIGN_BIT, SIGN_BIT);
@@ -370,27 +375,27 @@ mod tests {
 
     #[test]
     fn worked_positive_examples() {
-        let one = to_orderable_bytes(&dec!(1));
+        let one = dec!(1).to_orderable_bytes();
         assert_eq!(one[0], SIGN_BIT | (EXP_BIAS as u8));
 
-        let half = to_orderable_bytes(&dec!(0.5));
+        let half = dec!(0.5).to_orderable_bytes();
         assert_eq!(half[0], SIGN_BIT | ((-1i32 + EXP_BIAS) as u8));
 
-        let ten = to_orderable_bytes(&dec!(10));
+        let ten = dec!(10).to_orderable_bytes();
         assert_eq!(ten[0], SIGN_BIT | ((1i32 + EXP_BIAS) as u8));
     }
 
     #[test]
     fn worked_negative_examples() {
-        let neg_one = to_orderable_bytes(&dec!(-1));
-        let pos_one = to_orderable_bytes(&dec!(1));
+        let neg_one = dec!(-1).to_orderable_bytes();
+        let pos_one = dec!(1).to_orderable_bytes();
 
         // Negative byte 0: sign bit clear, low 7 bits are inverted exp.
         assert_eq!(neg_one[0] & SIGN_BIT, 0);
         assert_eq!(neg_one[0] & EXP_MASK, !(EXP_BIAS as u8) & EXP_MASK);
 
         // Negative mantissa bytes are bitwise complements of the positive.
-        for i in 1..ENCODED_LEN {
+        for i in 1..<Decimal as ToOrderableBytes>::ENCODED_LEN {
             assert_eq!(neg_one[i], !pos_one[i]);
         }
     }
@@ -415,8 +420,8 @@ mod tests {
             Decimal::MAX,
         ];
         for window in values.windows(2) {
-            let a = to_orderable_bytes(&window[0]);
-            let b = to_orderable_bytes(&window[1]);
+            let a = window[0].to_orderable_bytes();
+            let b = window[1].to_orderable_bytes();
             assert!(
                 a < b,
                 "to_orderable_bytes({}) < to_orderable_bytes({}) failed",
