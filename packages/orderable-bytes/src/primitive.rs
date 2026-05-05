@@ -5,9 +5,9 @@
 //! Each impl emits the type's native byte width — no padding:
 //!
 //! - `bool`, `u8`, `i8` → `[u8; 1]`
-//! - `i16` → `[u8; 2]`
-//! - `i32` → `[u8; 4]`
-//! - `i64`, `f64` → `[u8; 8]`
+//! - `i16`, `u16` → `[u8; 2]`
+//! - `i32`, `u32` → `[u8; 4]`
+//! - `i64`, `u64`, `f64` → `[u8; 8]`
 //! - `u128`, `i128` → `[u8; 16]`
 //!
 //! Consumers that need a fixed wider encoding (e.g. an ORE construction
@@ -15,7 +15,11 @@
 //! orderable bytes upstream of the encrypter; widening is monotonic on
 //! lex order so it preserves the encoding's guarantees.
 //!
-//! ## Unsigned integers (`u8`, `u128`)
+//! ## `bool`
+//!
+//! Encoded as `false → 0x00`, `true → 0x01`. Already in lex order.
+//!
+//! ## Unsigned integers (`u8`, `u16`, `u32`, `u64`, `u128`)
 //!
 //! Already in lex order — no sign-flip needed. Native big-endian.
 //!
@@ -77,6 +81,15 @@ impl ToOrderableBytes for i8 {
     }
 }
 
+impl ToOrderableBytes for u16 {
+    const ENCODED_LEN: usize = 2;
+    type Bytes = [u8; Self::ENCODED_LEN];
+
+    fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
+        self.to_be_bytes()
+    }
+}
+
 impl ToOrderableBytes for i16 {
     const ENCODED_LEN: usize = 2;
     type Bytes = [u8; Self::ENCODED_LEN];
@@ -86,12 +99,30 @@ impl ToOrderableBytes for i16 {
     }
 }
 
+impl ToOrderableBytes for u32 {
+    const ENCODED_LEN: usize = 4;
+    type Bytes = [u8; Self::ENCODED_LEN];
+
+    fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
+        self.to_be_bytes()
+    }
+}
+
 impl ToOrderableBytes for i32 {
     const ENCODED_LEN: usize = 4;
     type Bytes = [u8; Self::ENCODED_LEN];
 
     fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
         ((*self as u32) ^ (1u32 << 31)).to_be_bytes()
+    }
+}
+
+impl ToOrderableBytes for u64 {
+    const ENCODED_LEN: usize = 8;
+    type Bytes = [u8; Self::ENCODED_LEN];
+
+    fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
+        self.to_be_bytes()
     }
 }
 
@@ -205,6 +236,28 @@ mod tests {
         }
     }
 
+    // --- u16 ---
+
+    #[test]
+    fn u16_known_anchors() {
+        assert_eq!(u16::MIN.to_orderable_bytes(), [0x00, 0x00]);
+        assert_eq!(u16::MAX.to_orderable_bytes(), [0xFF, 0xFF]);
+        assert_eq!(0x1234u16.to_orderable_bytes(), [0x12, 0x34]);
+    }
+
+    #[test]
+    fn u16_byte_order_matches_natural_order() {
+        let ascending = [u16::MIN, 1, 256, 10000, u16::MAX - 1, u16::MAX];
+        for window in ascending.windows(2) {
+            assert!(
+                window[0].to_orderable_bytes() < window[1].to_orderable_bytes(),
+                "{} < {} failed",
+                window[0],
+                window[1]
+            );
+        }
+    }
+
     // --- i16 ---
 
     #[test]
@@ -228,6 +281,39 @@ mod tests {
         }
     }
 
+    // --- u32 ---
+
+    #[test]
+    fn u32_known_anchors() {
+        assert_eq!(u32::MIN.to_orderable_bytes(), [0x00; 4]);
+        assert_eq!(u32::MAX.to_orderable_bytes(), [0xFF; 4]);
+        assert_eq!(
+            0x1234_5678u32.to_orderable_bytes(),
+            [0x12, 0x34, 0x56, 0x78]
+        );
+    }
+
+    #[test]
+    fn u32_byte_order_matches_natural_order() {
+        let ascending = [
+            u32::MIN,
+            1,
+            1 << 8,
+            1 << 16,
+            1 << 24,
+            u32::MAX - 1,
+            u32::MAX,
+        ];
+        for window in ascending.windows(2) {
+            assert!(
+                window[0].to_orderable_bytes() < window[1].to_orderable_bytes(),
+                "{} < {} failed",
+                window[0],
+                window[1]
+            );
+        }
+    }
+
     // --- i32 ---
 
     #[test]
@@ -241,6 +327,39 @@ mod tests {
     #[test]
     fn i32_byte_order_matches_natural_order() {
         let ascending = [i32::MIN, -1_000_000_000, -1, 0, 1, 1_000_000_000, i32::MAX];
+        for window in ascending.windows(2) {
+            assert!(
+                window[0].to_orderable_bytes() < window[1].to_orderable_bytes(),
+                "{} < {} failed",
+                window[0],
+                window[1]
+            );
+        }
+    }
+
+    // --- u64 ---
+
+    #[test]
+    fn u64_known_anchors() {
+        assert_eq!(u64::MIN.to_orderable_bytes(), [0x00; 8]);
+        assert_eq!(u64::MAX.to_orderable_bytes(), [0xFF; 8]);
+        let one = 1u64.to_orderable_bytes();
+        let mut expected_one = [0u8; 8];
+        expected_one[7] = 1;
+        assert_eq!(one, expected_one);
+    }
+
+    #[test]
+    fn u64_byte_order_matches_natural_order() {
+        let ascending = [
+            u64::MIN,
+            1,
+            1 << 16,
+            1 << 32,
+            1 << 48,
+            u64::MAX - 1,
+            u64::MAX,
+        ];
         for window in ascending.windows(2) {
             assert!(
                 window[0].to_orderable_bytes() < window[1].to_orderable_bytes(),
