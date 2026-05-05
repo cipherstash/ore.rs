@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+### Features
+
+- impl OreEncrypt for all primitives via ToOrderableBytes
+
+### Refactoring
+
+- introduce ToOrderableBytes trait
+- drop dead convert module
+
+
 ### Build
 
 - bump rand from 0.8.5 to 0.8.6
