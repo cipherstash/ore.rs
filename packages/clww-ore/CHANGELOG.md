@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+### Documentation
+
+- correct OPE correctness claim; add empirical error-rate test
+- add backward-carry OPE engineering note
+- rewrite engineering note around exact OPE
+- correct scheme name from CLLW to CLWW
+
+### Features
+
+- add OPE variant of CLWW order-revealing encryption
+- MSB-bit placement → exact OPE
+- add OPE support for `Decimal` behind `decimal` feature
+- add OPE support for `chrono` types behind `chrono` feature
+- ✨ add ORE and OPE encryption for signed integers, bool, f32, f64
+
+### Fixes
+
+- make variable-length OPE ordering exact
+- make numeric OPE ordering exact
+- allow println in ignored empirical error-rate test
+
+### Refactoring
+
+- colocate OPE impls with their plaintext-type modules
+- simplify OPE encoding helper and tighten hot path
+- split variable-length ciphertext types into `variable` module
+- switch chrono OPE outputs to fixed-size variants
+- ♻️ adopt orderable-bytes for fixed-length encoders
+
+### Testing
+
+- convert NaiveDate equal-inputs test to a quickcheck prop
+
+### Review
+
+- address OPE PR feedback
+
 ## [0.34.0] - 2026-03-04
 
 ### Changed
