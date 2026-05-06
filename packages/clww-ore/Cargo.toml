@@ -1,7 +1,7 @@
 [package]
 name = "cllw-ore"
 version = "0.4.1"
-description = "Fast, efficient Order-Revealing Encryption using CLWW scheme"
+description = "Fast, efficient Order-Revealing and Order-Preserving Encryption using CLWW schemes"
 documentation = "https://docs.rs/cllw-ore"
 license-file = "LICENSE"
 edition.workspace = true

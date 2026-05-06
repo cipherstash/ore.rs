@@ -6,17 +6,20 @@
 
  [Website](https://cipherstash.com) | [Docs](https://cipherstash.com/docs) | [Discussions](https://github.com/orgs/cipherstash/discussions)
 
-## Fast, efficient Order-Revealing Encryption
+## Fast, efficient Order-Revealing and Order-Preserving Encryption
 
-This crate implements the Order Revealing Encryption scheme developed by Chenette, Lewi, Weis and Wu
-at Stanford in 2015 (hence "CLWW").
+This crate implements the Order-Revealing Encryption (ORE) and Order-Preserving Encryption (OPE)
+schemes from Chenette, Lewi, Weis and Wu (Stanford, 2015 — hence "CLWW").
 
-It is faster and more space efficient than the "Block" ORE scheme developed by Lewi and Wu a year later
-however has weaker security properties.
+Both schemes are faster and more space efficient than the "Block" ORE scheme developed by Lewi and
+Wu a year later, but have weaker security properties. The OPE variant additionally produces
+ciphertexts that compare under standard lexicographic byte ordering, with no custom comparator
+required — making it usable directly with operators like `<`, `>` and `BETWEEN` in databases that
+already know how to compare opaque byte strings.
 
-At CipherStash, we use this crate for encrypting terms in our encrypted JSON indexer but for everything else
-we use the Block scheme.
-See [ore.rs](https://ore.rs) for more information.
+At CipherStash, we use the ORE variant for encrypting terms in our encrypted JSON indexer, and the
+OPE variant for ordered range queries on encrypted columns. For everything else we use the Block
+scheme; see [ore.rs](https://ore.rs) for more information.
 
 ## CipherStash
 
