@@ -251,11 +251,9 @@ fn right_block(input: &[u8], n: usize) -> &[u8] {
 fn get_bit(block: &[u8], bit: usize) -> u8 {
     debug_assert!(block.len() == RightBlock32::BLOCK_SIZE);
     debug_assert!(bit < 256);
-    let byte_index = bit / 8;
-    let position = bit % 8;
-    let v = 1 << position;
-
-    (block[byte_index] & v) >> position
+    let byte_index = bit >> 3;
+    let position = bit & 0b111;
+    (block[byte_index] >> position) & 1
 }
 
 impl<const N: usize> PartialEq for CipherText<OreAes128ChaCha20, N> {

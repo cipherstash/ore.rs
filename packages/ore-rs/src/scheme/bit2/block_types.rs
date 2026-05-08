@@ -22,9 +22,9 @@ impl RightBlock32 {
     #[inline]
     pub fn set_bit(&mut self, bit: usize, value: u8) {
         debug_assert!(bit < 256);
-        let byte_index = bit / 8;
-        let mask = bit % 8;
-        let v = value << mask;
+        let byte_index = bit >> 3;
+        let position = bit & 0b111;
+        let v = value << position;
         self.data[byte_index] |= v;
     }
 
@@ -33,11 +33,9 @@ impl RightBlock32 {
     #[inline]
     pub fn get_bit(&self, bit: usize) -> u8 {
         debug_assert!(bit < 256);
-        let byte_index = bit / 8;
-        let position = bit % 8;
-        let v = 1 << position;
-
-        (self.data[byte_index] & v) >> position
+        let byte_index = bit >> 3;
+        let position = bit & 0b111;
+        (self.data[byte_index] >> position) & 1
     }
 }
 
@@ -91,15 +89,15 @@ mod tests {
 
     #[test]
     fn set_and_get_bit() {
-        let mut block: RightBlock32 = Default::default();
-        block.set_bit(17, 1);
-        assert_eq!(block.get_bit(17), 1);
-
-        block.set_bit(180, 1);
-        assert_eq!(block.get_bit(180), 1);
-
-        block.set_bit(255, 1);
-        assert_eq!(block.get_bit(255), 1);
+        for bit in 0..256usize {
+            let mut block: RightBlock32 = Default::default();
+            block.set_bit(bit, 1);
+            assert_eq!(block.get_bit(bit), 1, "set+get bit {bit}");
+            // Other positions are untouched.
+            for other in (0..256usize).filter(|&i| i != bit) {
+                assert_eq!(block.get_bit(other), 0, "bit {other} after setting bit {bit}");
+            }
+        }
     }
 
     #[test]
