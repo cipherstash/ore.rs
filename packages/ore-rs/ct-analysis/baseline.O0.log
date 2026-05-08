@@ -1,0 +1,167 @@
+============================================================
+Constant-Time Analysis Report
+============================================================
+Source: packages/ore-rs/ct-analysis/analyzer-output/ct_extract.O0.s
+Architecture: arm64
+Compiler: unknown
+Optimization: unknown
+Functions analyzed: 1077
+Instructions analyzed: 2074
+
+VIOLATIONS FOUND:
+----------------------------------------
+[WARN] CBNZ
+  Function: Ltmp0
+  Reason: compare-and-branch may leak timing information if value depends on secret data
+
+[WARN] TBNZ
+  Function: Ltmp40
+  Reason: test-bit-and-branch may leak timing information if value depends on secret data
+
+[WARN] TBNZ
+  Function: Ltmp47
+  Reason: test-bit-and-branch may leak timing information if value depends on secret data
+
+[WARN] TBNZ
+  Function: LBB14_1
+  Reason: test-bit-and-branch may leak timing information if value depends on secret data
+
+[WARN] B.NE
+  Function: Ltmp93
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] CBNZ
+  Function: Ltmp97
+  Reason: compare-and-branch may leak timing information if value depends on secret data
+
+[WARN] B.EQ
+  Function: Ltmp104
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] B.EQ
+  Function: Ltmp110
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] B.EQ
+  Function: Ltmp114
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] B.EQ
+  Function: Ltmp118
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] CBNZ
+  Function: Ltmp150
+  Reason: compare-and-branch may leak timing information if value depends on secret data
+
+[WARN] TBNZ
+  Function: Ltmp151
+  Reason: test-bit-and-branch may leak timing information if value depends on secret data
+
+[WARN] B.HI
+  Function: Ltmp154
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] B.HI
+  Function: LBB34_4
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] CBNZ
+  Function: Ltmp164
+  Reason: compare-and-branch may leak timing information if value depends on secret data
+
+[WARN] TBNZ
+  Function: Ltmp165
+  Reason: test-bit-and-branch may leak timing information if value depends on secret data
+
+[WARN] B.HI
+  Function: Ltmp168
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] B.HI
+  Function: LBB36_4
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] CBNZ
+  Function: LBB37_1
+  Reason: compare-and-branch may leak timing information if value depends on secret data
+
+[WARN] CBNZ
+  Function: LBB37_10
+  Reason: compare-and-branch may leak timing information if value depends on secret data
+
+[WARN] B.NE
+  Function: LBB37_11
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] B.NE
+  Function: LBB37_13
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] CBZ
+  Function: Ltmp245
+  Reason: compare-and-branch may leak timing information if value depends on secret data
+
+[WARN] B.EQ
+  Function: LBB38_1
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] B.EQ
+  Function: LBB39_1
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] B.NE
+  Function: Ltmp294
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] TBNZ
+  Function: Ltmp297
+  Reason: test-bit-and-branch may leak timing information if value depends on secret data
+
+[WARN] TBNZ
+  Function: LBB41_5
+  Reason: test-bit-and-branch may leak timing information if value depends on secret data
+
+[WARN] CBZ
+  Function: LBB41_7
+  Reason: compare-and-branch may leak timing information if value depends on secret data
+
+[ERROR] UDIV
+  Function: LBB41_9
+  Reason: UDIV has early termination optimization; execution time depends on operand values
+
+[WARN] CBNZ
+  Function: Ltmp309
+  Reason: compare-and-branch may leak timing information if value depends on secret data
+
+[WARN] TBNZ
+  Function: Ltmp311
+  Reason: test-bit-and-branch may leak timing information if value depends on secret data
+
+[WARN] CBNZ
+  Function: Ltmp316
+  Reason: compare-and-branch may leak timing information if value depends on secret data
+
+[WARN] B.HI
+  Function: Ltmp320
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] B.HI
+  Function: LBB41_17
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] CBNZ
+  Function: LBB41_33
+  Reason: compare-and-branch may leak timing information if value depends on secret data
+
+[WARN] B.NE
+  Function: LBB41_34
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] B.NE
+  Function: LBB41_36
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+----------------------------------------
+Result: FAILED
+Errors: 1, Warnings: 37

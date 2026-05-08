@@ -196,8 +196,9 @@ Write `packages/ore-rs/ct-analysis/README.md`:
 
 This directory holds the reproducibility harness for static-analyzing the
 `OreAes128` comparison code with the Trail of Bits
-[`constant-time-analysis`](https://github.com/trailofbits/constant-time-analysis)
-tool.
+[`constant-time-analysis`](https://github.com/trailofbits/skills/tree/main/plugins/constant-time-analysis)
+Claude Code skill (a plugin in the `trailofbits/skills` monorepo, not a
+standalone repo).
 
 ## Why
 
@@ -210,13 +211,14 @@ after future edits.
 
 ## Running
 
-1. Clone the analyzer:
+1. Clone the Trail of Bits skills monorepo:
    ```
-   git clone https://github.com/trailofbits/constant-time-analysis.git ~/tools/ct-analyzer
+   git clone https://github.com/trailofbits/skills.git ~/tools/trailofbits-skills
    ```
-2. From the repo root:
+2. From the repo root, point the harness at the plugin's `analyzer.py`:
    ```
-   ./packages/ore-rs/ct-analysis/run.sh ~/tools/ct-analyzer/analyzer.py
+   ./packages/ore-rs/ct-analysis/run.sh \
+     ~/tools/trailofbits-skills/plugins/constant-time-analysis/analyzer.py
    ```
 3. Inspect `packages/ore-rs/ct-analysis/analyzer-output/`:
    - `analyzer.O2.log` — release-equivalent. Should contain **0 ERROR** findings.
@@ -677,6 +679,8 @@ Bench delta vs main on aarch64-apple-darwin:
 ---
 
 ## Task 6: Re-audit Findings 1 & 2; document the analyzer baseline
+
+> **Status:** Complete. `aarch64-apple-darwin` baseline captured after rebasing onto `feat/trailmark` (which provides the Trail of Bits Claude Code plugins). Result: -O2 PASSED (0 errors, 14 intrinsic warnings); -O0 FAILED with 1 ERROR — the `num_blocks` UDIV at `bit2.rs:211` on public inputs only, optimizer-folded at -O2, not security-relevant.
 
 Run the analyzer one more time on the post-fix code, confirm the prefix-equality scan has no remaining ERRORs and only intrinsic WARNs (the final `match` in `ordering_from_i8`), and commit the analyzer's clean baseline log so future PRs can diff against it.
 
