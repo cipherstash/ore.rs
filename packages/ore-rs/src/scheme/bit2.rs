@@ -48,7 +48,8 @@ type EncryptLeftResult<R, const N: usize> = Result<Left<OreAes128<R>, N>, OreErr
 type EncryptResult<R, const N: usize> = Result<CipherText<OreAes128<R>, N>, OreError>;
 
 fn cmp(a: u8, b: u8) -> u8 {
-    u8::from(a > b)
+    use subtle_ng::ConstantTimeGreater;
+    a.ct_gt(&b).unwrap_u8()
 }
 
 impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
