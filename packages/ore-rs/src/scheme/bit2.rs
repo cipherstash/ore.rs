@@ -52,6 +52,19 @@ fn cmp(a: u8, b: u8) -> u8 {
     a.ct_gt(&b).unwrap_u8()
 }
 
+/// Branchless-friendly conversion from a tristate i8 (`-1` = Less,
+/// `0` = Equal, `1` = Greater) to `std::cmp::Ordering`. This is the
+/// single observable branch in the comparison's externally visible
+/// contract; everything before it is constant-time.
+#[inline]
+fn ordering_from_i8(t: i8) -> Ordering {
+    match t {
+        1 => Ordering::Greater,
+        0 => Ordering::Equal,
+        _ => Ordering::Less,
+    }
+}
+
 impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
     type LeftBlockType = LeftBlock16;
     type RightBlockType = RightBlock32;
@@ -215,23 +228,19 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
 
         let l: usize = l as usize;
 
-        if bool::from(is_equal) {
-            return Some(Ordering::Equal);
-        }
-
         let b_right = &b[num_blocks * (left_size + 1)..];
         let hash_key = HashKey::from_slice(&b_right[0..NONCE_SIZE]);
         let hash: Aes128Z2Hash = Hash::new(hash_key);
         let h = hash.hash(left_block(a_f, l));
-
         let target_block = right_block(&b_right[NONCE_SIZE..], l);
         let test = get_bit(target_block, a[l] as usize) ^ h;
 
-        if test == 1 {
-            return Some(Ordering::Greater);
-        }
+        // Encode as i8: 1 = Greater, -1 = Less, 0 = Equal.
+        // `test` is 0 or 1, so (test as i8) * 2 - 1 is +1 or -1.
+        let mut order: i8 = (test as i8) * 2 - 1;
+        order.conditional_assign(&0i8, is_equal);
 
-        Some(Ordering::Less)
+        Some(ordering_from_i8(order))
     }
 }
 
@@ -278,19 +287,14 @@ impl<const N: usize> Ord for CipherText<OreAes128ChaCha20, N> {
 
         let l: usize = l as usize;
 
-        if bool::from(is_equal) {
-            return Ordering::Equal;
-        }
-
         let hash: Aes128Z2Hash = Hash::new(AesBlock::from_slice(&b.right.nonce));
         let h = hash.hash(&self.left.f[l]);
-
         let test = b.right.data[l].get_bit(self.left.xt[l] as usize) ^ h;
-        if test == 1 {
-            return Ordering::Greater;
-        }
 
-        Ordering::Less
+        let mut order: i8 = (test as i8) * 2 - 1;
+        order.conditional_assign(&0i8, is_equal);
+
+        ordering_from_i8(order)
     }
 }
 
