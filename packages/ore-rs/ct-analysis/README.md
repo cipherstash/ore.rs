@@ -28,8 +28,8 @@ after future edits.
    ```
 3. Inspect `packages/ore-rs/ct-analysis/analyzer-output/`:
    - `analyzer.O2.log` — release-equivalent. Should contain **0 ERROR** findings.
-     A small number of WARN-level conditional branches in the final
-     `Ordering` selection are intrinsic to the comparison's contract.
+     A small number of WARN-level conditional branches remain — see the
+     "Baseline" section below for the categorization.
    - `analyzer.O0.log` — debug. Will have UDIV findings in loop bookkeeping
      that the optimizer removes; only ERRORs in `get_bit` / `set_bit` /
      `cmp(u8, u8)` are security-relevant.
@@ -47,10 +47,42 @@ the last clean run on `aarch64-apple-darwin`.
 **`baseline.O2.log` — release-equivalent (the security-relevant one):**
 - Result: PASSED
 - 0 errors, 14 warnings.
-- The 14 WARNs are intrinsic to the comparison's contract: the final
-  3-arm `match` in `ordering_from_i8` (the externally visible
-  `Ordering` output is necessarily branchful) and a few compiler-inserted
-  slice bounds checks where the index is a public-input loop counter.
+- All 14 WARNs are conditional branches on **public structural data** —
+  not on secrets. They fall into four categories (decoded by reading
+  the asm; rustc emits no `.loc` markers in `--release --emit=asm`,
+  so labels were mapped to source semantically):
+
+  1. **Length-mismatch early return** (1 warning, `Lfunc_begin0` in
+     `compare_raw_slices`). The `if a.len() != b.len() { return None; }`
+     check at `bit2.rs:189`. `a.len()` and `b.len()` are structural
+     ciphertext byte-lengths, always knowable to anyone who can see
+     the bytes.
+  2. **Loop continuation/termination on public counters** (~5 warnings).
+     The prefix-equality scan and the oblivious post-loop walk both
+     iterate `0..num_blocks`; the loop-back conditions and the
+     iterator's `take()` upper-bound checks branch on `n` vs
+     `num_blocks` / `a.len()` — all public.
+  3. **Compiler-inserted slice bounds-check panic paths** (~4 warnings).
+     `a[n]`, `b[n]`, and `right_data[n*32 + ...]` indexing emits a
+     panic-if-out-of-bounds branch. `n` is the public loop counter;
+     these branches are dead code in practice (the indices are always
+     in range by construction) but the compiler keeps them.
+  4. **Zeroize-on-drop loops** (~2 warnings, `;MEMBARRIER` annotated
+     in the asm). The `subtle_ng::Choice` and AES key state are
+     zeroized when going out of scope; the zeroize loop's continuation
+     branch is on the buffer size — public/structural.
+
+  The 11/3 split between `compare_raw_slices` and `CipherText::cmp`
+  reflects the iterator-form loop in the former (`a.iter().enumerate().take(num_blocks)`)
+  introducing extra take-bound + iterator-end checks vs the const-N
+  loop in the latter (`for n in 0..N`).
+
+  Notably absent: the `ordering_from_i8` 3-arm match. It was inlined
+  and elided — `t ∈ {-1, 0, 1}` already matches `Ordering`'s
+  `#[repr(i8)]` discriminants (`Less=-1, Equal=0, Greater=1`), so the
+  match compiles to a no-op cast. The comparison's externally visible
+  `Ordering` output is still the externally observable result, but
+  there's no residual branch attributable to it in this asm.
 
 **`baseline.O0.log` — debug builds:**
 - Result: FAILED (1 error, 37 warnings).
@@ -69,8 +101,8 @@ To check whether your change regressed the constant-time property:
    (or whatever path your plugin install resolves to).
 2. Diff `analyzer-output/analyzer.O2.log` against `baseline.O2.log`.
 3. New WARNs/ERRORs are regressions and need root-cause analysis before
-   merging. The plan in `docs/plans/2026-05-08-ore-constant-time-remediation.md`
-   documents the categorization of acceptable findings.
+   merging. Acceptable categories are documented in the four-bullet list
+   above; anything outside those four is a regression.
 
 The companion [`trailmark`](https://github.com/trailofbits/trailmark)
 tool can be used to determine the blast radius of any newly-flagged
