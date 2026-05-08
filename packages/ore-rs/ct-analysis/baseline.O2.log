@@ -5,8 +5,8 @@ Source: packages/ore-rs/ct-analysis/analyzer-output/ct_extract.O2.s
 Architecture: arm64
 Compiler: unknown
 Optimization: unknown
-Functions analyzed: 116
-Instructions analyzed: 829
+Functions analyzed: 113
+Instructions analyzed: 821
 
 VIOLATIONS FOUND:
 ----------------------------------------
@@ -14,20 +14,24 @@ VIOLATIONS FOUND:
   Function: Lfunc_begin0
   Reason: conditional branch may leak timing information if condition depends on secret data
 
+[WARN] CBNZ
+  Function: Lfunc_begin0
+  Reason: compare-and-branch may leak timing information if value depends on secret data
+
 [WARN] B.HI
-  Function: LBB5_6
+  Function: LBB5_7
   Reason: conditional branch may leak timing information if condition depends on secret data
 
 [WARN] B.NE
-  Function: LBB5_6
+  Function: LBB5_7
   Reason: conditional branch may leak timing information if condition depends on secret data
 
 [WARN] B.LS
-  Function: LBB5_8
+  Function: LBB5_9
   Reason: conditional branch may leak timing information if condition depends on secret data
 
 [WARN] B.EQ
-  Function: LBB5_13
+  Function: LBB5_14
   Reason: conditional branch may leak timing information if condition depends on secret data
 
 [WARN] B.HI
@@ -47,11 +51,11 @@ VIOLATIONS FOUND:
   Reason: conditional branch may leak timing information if condition depends on secret data
 
 [WARN] B.NE
-  Function: LBB5_22
+  Function: LBB5_23
   Reason: conditional branch may leak timing information if condition depends on secret data
 
 [WARN] B.NE
-  Function: LBB5_36
+  Function: LBB5_37
   Reason: conditional branch may leak timing information if condition depends on secret data
 
 [WARN] B.NE
@@ -68,4 +72,4 @@ VIOLATIONS FOUND:
 
 ----------------------------------------
 Result: PASSED
-Errors: 0, Warnings: 14
+Errors: 0, Warnings: 15

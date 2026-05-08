@@ -46,17 +46,19 @@ the last clean run on `aarch64-apple-darwin`.
 
 **`baseline.O2.log` — release-equivalent (the security-relevant one):**
 - Result: PASSED
-- 0 errors, 14 warnings.
-- All 14 WARNs are conditional branches on **public structural data** —
+- 0 errors, 15 warnings.
+- All 15 WARNs are conditional branches on **public structural data** —
   not on secrets. They fall into four categories (decoded by reading
   the asm; rustc emits no `.loc` markers in `--release --emit=asm`,
   so labels were mapped to source semantically):
 
-  1. **Length-mismatch early return** (1 warning, `Lfunc_begin0` in
-     `compare_raw_slices`). The `if a.len() != b.len() { return None; }`
-     check at `bit2.rs:189`. `a.len()` and `b.len()` are structural
-     ciphertext byte-lengths, always knowable to anyone who can see
-     the bytes.
+  1. **Structural-shape preconditions** (2 flagged warnings, both at
+     `Lfunc_begin0` in `compare_raw_slices`). The function rejects
+     malformed inputs at entry: `a.len() != b.len()` (B.NE), `a.len()
+     < NONCE_SIZE` (B.LO — the analyzer doesn't flag this opcode but
+     it's there in the asm), and `(a.len() - NONCE_SIZE) %
+     block_total != 0` (CBNZ). All branch on public ciphertext
+     byte-lengths (always knowable to anyone who can see the bytes).
   2. **Loop continuation/termination on public counters** (~5 warnings).
      The prefix-equality scan and the oblivious post-loop walk both
      iterate `0..num_blocks`; the loop-back conditions and the
@@ -85,13 +87,15 @@ the last clean run on `aarch64-apple-darwin`.
   there's no residual branch attributable to it in this asm.
 
 **`baseline.O0.log` — debug builds:**
-- Result: FAILED (1 error, 37 warnings).
-- The 1 ERROR is a `UDIV` at `bit2.rs:211` (`(a.len() - NONCE_SIZE) /
-  (left_size + right_size + 1)`). Both operands are public: `a.len()`
-  is the structural ciphertext length (always knowable to anyone who
-  sees the bytes), and the divisor is a compile-time constant `49`.
-  The optimizer folds it to a multiply at -O2 (hence O2 passes).
-  Not security-relevant.
+- Result: FAILED (2 errors, 39 warnings).
+- Both ERRORs are `UDIV` instructions in the precondition + body of
+  `compare_raw_slices`: `body_len % block_total` (the divisibility
+  check) and `body_len / block_total` (the actual `num_blocks`
+  computation). Both have the same security profile: operands are
+  `a.len() - NONCE_SIZE` (structural ciphertext length, public) and
+  the compile-time constant `49`. The optimizer folds both to
+  multiply-by-magic-number at -O2 (hence -O2 passes). Not
+  security-relevant.
 - WARN-level findings at -O0 are dominated by loop-counter arithmetic
   the optimizer removes at -O2.
 
