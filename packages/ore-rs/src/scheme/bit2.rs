@@ -231,9 +231,21 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
         let b_right = &b[num_blocks * (left_size + 1)..];
         let hash_key = HashKey::from_slice(&b_right[0..NONCE_SIZE]);
         let hash: Aes128Z2Hash = Hash::new(hash_key);
-        let h = hash.hash(left_block(a_f, l));
-        let target_block = right_block(&b_right[NONCE_SIZE..], l);
-        let test = get_bit(target_block, a[l] as usize) ^ h;
+        let right_data = &b_right[NONCE_SIZE..];
+
+        // Hash every block, use subtle_ng to pick the contribution at index l.
+        // `test` ends up holding the masked bit from the unequal block; for all
+        // other blocks it stays 0. Constant-time because the conditional_assign
+        // is byte-wise CT and the loop runs unconditionally over num_blocks.
+        let mut test: u8 = 0;
+        for (n, &a_n) in a.iter().enumerate().take(num_blocks) {
+            let is_target: Choice = (n as u64).ct_eq(&(l as u64));
+            let h_n = hash.hash(left_block(a_f, n));
+            let target_block_n = right_block(right_data, n);
+            let bit_n = get_bit(target_block_n, a_n as usize);
+            let candidate = bit_n ^ h_n;
+            test.conditional_assign(&candidate, is_target);
+        }
 
         // Encode as i8: 1 = Greater, -1 = Less, 0 = Equal.
         // `test` is 0 or 1, so (test as i8) * 2 - 1 is +1 or -1.
@@ -288,8 +300,15 @@ impl<const N: usize> Ord for CipherText<OreAes128ChaCha20, N> {
         let l: usize = l as usize;
 
         let hash: Aes128Z2Hash = Hash::new(AesBlock::from_slice(&b.right.nonce));
-        let h = hash.hash(&self.left.f[l]);
-        let test = b.right.data[l].get_bit(self.left.xt[l] as usize) ^ h;
+
+        let mut test: u8 = 0;
+        for n in 0..N {
+            let is_target: Choice = (n as u64).ct_eq(&(l as u64));
+            let h_n = hash.hash(&self.left.f[n]);
+            let bit_n = b.right.data[n].get_bit(self.left.xt[n] as usize);
+            let candidate = bit_n ^ h_n;
+            test.conditional_assign(&candidate, is_target);
+        }
 
         let mut order: i8 = (test as i8) * 2 - 1;
         order.conditional_assign(&0i8, is_equal);
