@@ -95,7 +95,11 @@ mod tests {
             assert_eq!(block.get_bit(bit), 1, "set+get bit {bit}");
             // Other positions are untouched.
             for other in (0..256usize).filter(|&i| i != bit) {
-                assert_eq!(block.get_bit(other), 0, "bit {other} after setting bit {bit}");
+                assert_eq!(
+                    block.get_bit(other),
+                    0,
+                    "bit {other} after setting bit {bit}"
+                );
             }
         }
     }
