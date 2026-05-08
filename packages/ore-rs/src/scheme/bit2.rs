@@ -404,6 +404,27 @@ mod tests {
             matches!(Ore::compare_raw_slices(&a, &b), Some(Ordering::Equal))
         }
 
+        fn compare_u32_raw_slices(x: u32, y: u32) -> bool {
+            let ore = init_ore();
+            let a = x.encrypt(&ore).unwrap().to_bytes();
+            let b = y.encrypt(&ore).unwrap().to_bytes();
+
+            match Ore::compare_raw_slices(&a, &b) {
+                Some(Ordering::Greater) => x > y,
+                Some(Ordering::Less)    => x < y,
+                Some(Ordering::Equal)   => x == y,
+                None                    => false
+            }
+        }
+
+        fn equality_u32_raw_slices(x: u32) -> bool {
+            let ore = init_ore();
+            let a = x.encrypt(&ore).unwrap().to_bytes();
+            let b = x.encrypt(&ore).unwrap().to_bytes();
+
+            matches!(Ore::compare_raw_slices(&a, &b), Some(Ordering::Equal))
+        }
+
         fn compare_u32(x: u32, y: u32) -> bool {
             let ore = init_ore();
             let a = x.encrypt(&ore).unwrap();
