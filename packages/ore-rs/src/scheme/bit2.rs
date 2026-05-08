@@ -205,10 +205,23 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
         };
         let left_size = Self::LeftBlockType::BLOCK_SIZE;
         let right_size = Self::RightBlockType::BLOCK_SIZE;
+        let block_total = left_size + right_size + 1;
 
-        // TODO: This calculation slows things down a bit - maybe store the number of blocks in the
-        // first byte?
-        let num_blocks = (a.len() - NONCE_SIZE) / (left_size + right_size + 1);
+        // Reject malformed ciphertexts. The byte layout is
+        // `num_blocks * block_total + NONCE_SIZE`, so a.len() must be at
+        // least NONCE_SIZE and the remainder must divide evenly. Without
+        // this check, `a.len() - NONCE_SIZE` would wrap on undersized
+        // input and `num_blocks` would be silently wrong on non-canonical
+        // sizes (the latter is what cargo-mutants used to find a coverage
+        // gap on this function).
+        if a.len() < NONCE_SIZE {
+            return None;
+        }
+        let body_len = a.len() - NONCE_SIZE;
+        if body_len % block_total != 0 {
+            return None;
+        }
+        let num_blocks = body_len / block_total;
 
         let mut is_equal = Choice::from(1);
         let mut l: u64 = 0; // Unequal block
@@ -539,6 +552,21 @@ mod tests {
         let a_32 = 10u32.encrypt(&ore).unwrap().to_bytes();
 
         assert_eq!(Ore::compare_raw_slices(&a_64, &a_32), Option::None);
+    }
+
+    #[test]
+    fn compare_raw_slices_too_short() {
+        // Both inputs equal length but shorter than NONCE_SIZE — malformed.
+        // Without the precondition, a.len() - NONCE_SIZE would wrap.
+        let short = vec![0u8; 8];
+        assert_eq!(Ore::compare_raw_slices(&short, &short), None);
+    }
+
+    #[test]
+    fn compare_raw_slices_non_divisible_body() {
+        // a.len() = 17 -> body_len = 1, not divisible by 49. Malformed.
+        let weird = vec![0u8; 17];
+        assert_eq!(Ore::compare_raw_slices(&weird, &weird), None);
     }
 
     #[test]
