@@ -48,7 +48,21 @@ type EncryptLeftResult<R, const N: usize> = Result<Left<OreAes128<R>, N>, OreErr
 type EncryptResult<R, const N: usize> = Result<CipherText<OreAes128<R>, N>, OreError>;
 
 fn cmp(a: u8, b: u8) -> u8 {
-    u8::from(a > b)
+    use subtle_ng::ConstantTimeGreater;
+    a.ct_gt(&b).unwrap_u8()
+}
+
+/// Branchless-friendly conversion from a tristate i8 (`-1` = Less,
+/// `0` = Equal, `1` = Greater) to `std::cmp::Ordering`. This is the
+/// single observable branch in the comparison's externally visible
+/// contract; everything before it is constant-time.
+#[inline]
+fn ordering_from_i8(t: i8) -> Ordering {
+    match t {
+        1 => Ordering::Greater,
+        0 => Ordering::Equal,
+        _ => Ordering::Less,
+    }
 }
 
 impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
@@ -191,10 +205,23 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
         };
         let left_size = Self::LeftBlockType::BLOCK_SIZE;
         let right_size = Self::RightBlockType::BLOCK_SIZE;
+        let block_total = left_size + right_size + 1;
 
-        // TODO: This calculation slows things down a bit - maybe store the number of blocks in the
-        // first byte?
-        let num_blocks = (a.len() - NONCE_SIZE) / (left_size + right_size + 1);
+        // Reject malformed ciphertexts. The byte layout is
+        // `num_blocks * block_total + NONCE_SIZE`, so a.len() must be at
+        // least NONCE_SIZE and the remainder must divide evenly. Without
+        // this check, `a.len() - NONCE_SIZE` would wrap on undersized
+        // input and `num_blocks` would be silently wrong on non-canonical
+        // sizes (the latter is what cargo-mutants used to find a coverage
+        // gap on this function).
+        if a.len() < NONCE_SIZE {
+            return None;
+        }
+        let body_len = a.len() - NONCE_SIZE;
+        if body_len % block_total != 0 {
+            return None;
+        }
+        let num_blocks = body_len / block_total;
 
         let mut is_equal = Choice::from(1);
         let mut l: u64 = 0; // Unequal block
@@ -214,23 +241,31 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
 
         let l: usize = l as usize;
 
-        if bool::from(is_equal) {
-            return Some(Ordering::Equal);
-        }
-
         let b_right = &b[num_blocks * (left_size + 1)..];
         let hash_key = HashKey::from_slice(&b_right[0..NONCE_SIZE]);
         let hash: Aes128Z2Hash = Hash::new(hash_key);
-        let h = hash.hash(left_block(a_f, l));
+        let right_data = &b_right[NONCE_SIZE..];
 
-        let target_block = right_block(&b_right[NONCE_SIZE..], l);
-        let test = get_bit(target_block, a[l] as usize) ^ h;
-
-        if test == 1 {
-            return Some(Ordering::Greater);
+        // Hash every block, use subtle_ng to pick the contribution at index l.
+        // `test` ends up holding the masked bit from the unequal block; for all
+        // other blocks it stays 0. Constant-time because the conditional_assign
+        // is byte-wise CT and the loop runs unconditionally over num_blocks.
+        let mut test: u8 = 0;
+        for (n, &a_n) in a.iter().enumerate().take(num_blocks) {
+            let is_target: Choice = (n as u64).ct_eq(&(l as u64));
+            let h_n = hash.hash(left_block(a_f, n));
+            let target_block_n = right_block(right_data, n);
+            let bit_n = get_bit(target_block_n, a_n as usize);
+            let candidate = bit_n ^ h_n;
+            test.conditional_assign(&candidate, is_target);
         }
 
-        Some(Ordering::Less)
+        // Encode as i8: 1 = Greater, -1 = Less, 0 = Equal.
+        // `test` is 0 or 1, so (test as i8) * 2 - 1 is +1 or -1.
+        let mut order: i8 = (test as i8) * 2 - 1;
+        order.conditional_assign(&0i8, is_equal);
+
+        Some(ordering_from_i8(order))
     }
 }
 
@@ -251,11 +286,9 @@ fn right_block(input: &[u8], n: usize) -> &[u8] {
 fn get_bit(block: &[u8], bit: usize) -> u8 {
     debug_assert!(block.len() == RightBlock32::BLOCK_SIZE);
     debug_assert!(bit < 256);
-    let byte_index = bit / 8;
-    let position = bit % 8;
-    let v = 1 << position;
-
-    (block[byte_index] & v) >> position
+    let byte_index = bit >> 3;
+    let position = bit & 0b111;
+    (block[byte_index] >> position) & 1
 }
 
 impl<const N: usize> PartialEq for CipherText<OreAes128ChaCha20, N> {
@@ -279,19 +312,21 @@ impl<const N: usize> Ord for CipherText<OreAes128ChaCha20, N> {
 
         let l: usize = l as usize;
 
-        if bool::from(is_equal) {
-            return Ordering::Equal;
-        }
-
         let hash: Aes128Z2Hash = Hash::new(AesBlock::from_slice(&b.right.nonce));
-        let h = hash.hash(&self.left.f[l]);
 
-        let test = b.right.data[l].get_bit(self.left.xt[l] as usize) ^ h;
-        if test == 1 {
-            return Ordering::Greater;
+        let mut test: u8 = 0;
+        for n in 0..N {
+            let is_target: Choice = (n as u64).ct_eq(&(l as u64));
+            let h_n = hash.hash(&self.left.f[n]);
+            let bit_n = b.right.data[n].get_bit(self.left.xt[n] as usize);
+            let candidate = bit_n ^ h_n;
+            test.conditional_assign(&candidate, is_target);
         }
 
-        Ordering::Less
+        let mut order: i8 = (test as i8) * 2 - 1;
+        order.conditional_assign(&0i8, is_equal);
+
+        ordering_from_i8(order)
     }
 }
 
@@ -362,6 +397,27 @@ mod tests {
         }
 
         fn equality_u64_raw_slices(x: u64) -> bool {
+            let ore = init_ore();
+            let a = x.encrypt(&ore).unwrap().to_bytes();
+            let b = x.encrypt(&ore).unwrap().to_bytes();
+
+            matches!(Ore::compare_raw_slices(&a, &b), Some(Ordering::Equal))
+        }
+
+        fn compare_u32_raw_slices(x: u32, y: u32) -> bool {
+            let ore = init_ore();
+            let a = x.encrypt(&ore).unwrap().to_bytes();
+            let b = y.encrypt(&ore).unwrap().to_bytes();
+
+            match Ore::compare_raw_slices(&a, &b) {
+                Some(Ordering::Greater) => x > y,
+                Some(Ordering::Less)    => x < y,
+                Some(Ordering::Equal)   => x == y,
+                None                    => false
+            }
+        }
+
+        fn equality_u32_raw_slices(x: u32) -> bool {
             let ore = init_ore();
             let a = x.encrypt(&ore).unwrap().to_bytes();
             let b = x.encrypt(&ore).unwrap().to_bytes();
@@ -517,6 +573,21 @@ mod tests {
         let a_32 = 10u32.encrypt(&ore).unwrap().to_bytes();
 
         assert_eq!(Ore::compare_raw_slices(&a_64, &a_32), Option::None);
+    }
+
+    #[test]
+    fn compare_raw_slices_too_short() {
+        // Both inputs equal length but shorter than NONCE_SIZE — malformed.
+        // Without the precondition, a.len() - NONCE_SIZE would wrap.
+        let short = vec![0u8; 8];
+        assert_eq!(Ore::compare_raw_slices(&short, &short), None);
+    }
+
+    #[test]
+    fn compare_raw_slices_non_divisible_body() {
+        // a.len() = 17 -> body_len = 1, not divisible by 49. Malformed.
+        let weird = vec![0u8; 17];
+        assert_eq!(Ore::compare_raw_slices(&weird, &weird), None);
     }
 
     #[test]

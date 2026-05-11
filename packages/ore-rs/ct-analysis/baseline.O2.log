@@ -1,0 +1,75 @@
+============================================================
+Constant-Time Analysis Report
+============================================================
+Source: packages/ore-rs/ct-analysis/analyzer-output/ct_extract.O2.s
+Architecture: arm64
+Compiler: unknown
+Optimization: unknown
+Functions analyzed: 113
+Instructions analyzed: 821
+
+VIOLATIONS FOUND:
+----------------------------------------
+[WARN] B.NE
+  Function: Lfunc_begin0
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] CBNZ
+  Function: Lfunc_begin0
+  Reason: compare-and-branch may leak timing information if value depends on secret data
+
+[WARN] B.HI
+  Function: LBB5_7
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] B.NE
+  Function: LBB5_7
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] B.LS
+  Function: LBB5_9
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] B.EQ
+  Function: LBB5_14
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] B.HI
+  Function: Ltmp1
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] B.EQ
+  Function: Ltmp3
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] B.HI
+  Function: Ltmp3
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] B.NE
+  Function: Ltmp3
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] B.NE
+  Function: LBB5_23
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] B.NE
+  Function: LBB5_37
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] B.NE
+  Function: LBB6_1
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] B.NE
+  Function: LBB6_19
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+[WARN] B.NE
+  Function: LBB6_22
+  Reason: conditional branch may leak timing information if condition depends on secret data
+
+----------------------------------------
+Result: PASSED
+Errors: 0, Warnings: 15

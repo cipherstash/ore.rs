@@ -62,3 +62,6 @@ required-features = ["chrono"]
 
 [[example]]
 name = "encrypt"
+
+[[example]]
+name = "ct_extract"
