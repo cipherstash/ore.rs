@@ -657,6 +657,196 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// The fixed-width OPE ciphertext for a primitive is byte-for-byte
+    /// identical to the variable-length OPE ciphertext of the canonical
+    /// big-endian byte form that the fixed impl feeds through
+    /// [`super::encrypt_ope_bits`]:
+    ///
+    /// - unsigned integers — `x.to_be_bytes()`
+    /// - signed integers — the sign-flipped unsigned width's `to_be_bytes()`
+    /// - floats — the monotonic-bias bits' `to_be_bytes()`
+    /// - `bool` — the single `as u8` byte
+    ///
+    /// In every case both paths push the same MSB-first bit stream through the
+    /// encoder, so a fixed-width OPE ciphertext can be read as a variable OPE
+    /// ciphertext of the same byte width and vice versa.
+    ///
+    /// `$canonical_be` maps a value of `$ty` to that byte form.
+    macro_rules! ope_fixed_matches_variable_be_bytes {
+        ($anchor:ident, $prop:ident, $ty:ty, $values:expr, $canonical_be:expr) => {
+            #[test]
+            fn $anchor() {
+                let key = Key::from([0u8; 32]);
+                let canonical_be: fn($ty) -> Vec<u8> = $canonical_be;
+                for x in $values {
+                    let fixed = key.encrypt_ope(x).unwrap();
+                    let variable = key.encrypt_ope(canonical_be(x).as_slice()).unwrap();
+                    assert_eq!(
+                        fixed.as_ref(),
+                        variable.as_ref(),
+                        "fixed vs variable OPE wire mismatch for {x:?}",
+                    );
+                }
+            }
+
+            quickcheck! {
+                /// Property form of the matching anchor test: holds for every
+                /// key and every value of the type.
+                fn $prop(key: Key, x: $ty) -> bool {
+                    let canonical_be: fn($ty) -> Vec<u8> = $canonical_be;
+                    let fixed = key.encrypt_ope(x).unwrap();
+                    let variable = key.encrypt_ope(canonical_be(x).as_slice()).unwrap();
+                    fixed.as_ref() == variable.as_ref()
+                }
+            }
+        };
+    }
+
+    ope_fixed_matches_variable_be_bytes!(
+        ope_u8_fixed_matches_variable_be_bytes,
+        prop_ope_u8_fixed_matches_variable_be_bytes,
+        u8,
+        [0u8, 1, 42, 0x7F, 0x80, u8::MAX],
+        |x| x.to_be_bytes().to_vec()
+    );
+
+    ope_fixed_matches_variable_be_bytes!(
+        ope_u16_fixed_matches_variable_be_bytes,
+        prop_ope_u16_fixed_matches_variable_be_bytes,
+        u16,
+        [0u16, 1, 42, 0x0123, 0xDEAD, u16::MAX],
+        |x| x.to_be_bytes().to_vec()
+    );
+
+    ope_fixed_matches_variable_be_bytes!(
+        ope_u32_fixed_matches_variable_be_bytes,
+        prop_ope_u32_fixed_matches_variable_be_bytes,
+        u32,
+        [0u32, 1, 42, 0x0123_4567, 0xDEAD_BEEF, u32::MAX],
+        |x| x.to_be_bytes().to_vec()
+    );
+
+    ope_fixed_matches_variable_be_bytes!(
+        ope_u64_fixed_matches_variable_be_bytes,
+        prop_ope_u64_fixed_matches_variable_be_bytes,
+        u64,
+        [
+            0u64,
+            1,
+            42,
+            0x0123_4567_89AB_CDEF,
+            0xDEAD_BEEF_DEAD_BEEF,
+            u64::MAX
+        ],
+        |x| x.to_be_bytes().to_vec()
+    );
+
+    ope_fixed_matches_variable_be_bytes!(
+        ope_u128_fixed_matches_variable_be_bytes,
+        prop_ope_u128_fixed_matches_variable_be_bytes,
+        u128,
+        [
+            0u128,
+            1,
+            42,
+            0x0123_4567_89AB_CDEF_0123_4567_89AB_CDEF,
+            u128::MAX
+        ],
+        |x| x.to_be_bytes().to_vec()
+    );
+
+    ope_fixed_matches_variable_be_bytes!(
+        ope_i8_fixed_matches_variable_be_bytes,
+        prop_ope_i8_fixed_matches_variable_be_bytes,
+        i8,
+        [i8::MIN, -42, -1, 0, 1, 42, i8::MAX],
+        |x| ((x as u8) ^ (1 << (u8::BITS - 1))).to_be_bytes().to_vec()
+    );
+
+    ope_fixed_matches_variable_be_bytes!(
+        ope_i16_fixed_matches_variable_be_bytes,
+        prop_ope_i16_fixed_matches_variable_be_bytes,
+        i16,
+        [i16::MIN, -42, -1, 0, 1, 42, i16::MAX],
+        |x| ((x as u16) ^ (1 << (u16::BITS - 1))).to_be_bytes().to_vec()
+    );
+
+    ope_fixed_matches_variable_be_bytes!(
+        ope_i32_fixed_matches_variable_be_bytes,
+        prop_ope_i32_fixed_matches_variable_be_bytes,
+        i32,
+        [i32::MIN, -42, -1, 0, 1, 42, i32::MAX],
+        |x| ((x as u32) ^ (1 << (u32::BITS - 1))).to_be_bytes().to_vec()
+    );
+
+    ope_fixed_matches_variable_be_bytes!(
+        ope_i64_fixed_matches_variable_be_bytes,
+        prop_ope_i64_fixed_matches_variable_be_bytes,
+        i64,
+        [i64::MIN, -42, -1, 0, 1, 42, i64::MAX],
+        |x| ((x as u64) ^ (1 << (u64::BITS - 1))).to_be_bytes().to_vec()
+    );
+
+    ope_fixed_matches_variable_be_bytes!(
+        ope_i128_fixed_matches_variable_be_bytes,
+        prop_ope_i128_fixed_matches_variable_be_bytes,
+        i128,
+        [i128::MIN, -42, -1, 0, 1, 42, i128::MAX],
+        |x| ((x as u128) ^ (1 << (u128::BITS - 1)))
+            .to_be_bytes()
+            .to_vec()
+    );
+
+    ope_fixed_matches_variable_be_bytes!(
+        ope_bool_fixed_matches_variable_be_bytes,
+        prop_ope_bool_fixed_matches_variable_be_bytes,
+        bool,
+        [false, true],
+        |b| [b as u8].to_vec()
+    );
+
+    ope_fixed_matches_variable_be_bytes!(
+        ope_f32_fixed_matches_variable_be_bytes,
+        prop_ope_f32_fixed_matches_variable_be_bytes,
+        f32,
+        [
+            0.0f32,
+            -0.0,
+            1.0,
+            -1.0,
+            f32::MIN,
+            f32::MAX,
+            f32::INFINITY,
+            f32::NEG_INFINITY
+        ],
+        |x| {
+            let bits = x.to_bits();
+            let mask = (bits >> (u32::BITS - 1)).wrapping_neg() | (1 << (u32::BITS - 1));
+            (bits ^ mask).to_be_bytes().to_vec()
+        }
+    );
+
+    ope_fixed_matches_variable_be_bytes!(
+        ope_f64_fixed_matches_variable_be_bytes,
+        prop_ope_f64_fixed_matches_variable_be_bytes,
+        f64,
+        [
+            0.0f64,
+            -0.0,
+            1.0,
+            -1.0,
+            f64::MIN,
+            f64::MAX,
+            f64::INFINITY,
+            f64::NEG_INFINITY
+        ],
+        |x| {
+            let bits = x.to_bits();
+            let mask = (bits >> (u64::BITS - 1)).wrapping_neg() | (1 << (u64::BITS - 1));
+            (bits ^ mask).to_be_bytes().to_vec()
+        }
+    );
+
     /// Per-type OPE property suite: determinism, ordering, length, serialisation
     /// round-trips, salt domain-separation, and a regression check for the
     /// pre-fix 1/256 wrap-around bug.
