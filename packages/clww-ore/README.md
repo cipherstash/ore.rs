@@ -17,9 +17,10 @@ ciphertexts that compare under standard lexicographic byte ordering, with no cus
 required — making it usable directly with operators like `<`, `>` and `BETWEEN` in databases that
 already know how to compare opaque byte strings.
 
-At CipherStash, we use the ORE variant for encrypting terms in our encrypted JSON indexer, and the
-OPE variant for ordered range queries on encrypted columns. For everything else we use the Block
-scheme; see [ore.rs](https://ore.rs) for more information.
+At CipherStash, we use the ORE variant for encrypting terms in our encrypted JSON indexer. For
+ordered range queries on encrypted columns we prefer ORE with a custom operator family/class,
+falling back to the OPE variant only when the database doesn't provide those. For everything else
+we use the Block scheme; see [ore.rs](https://ore.rs) for more information.
 
 ## CipherStash
 
