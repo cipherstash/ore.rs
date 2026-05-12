@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MSB-bit placement → exact OPE
 - add OPE support for `Decimal` behind `decimal` feature
 - add OPE support for `chrono` types behind `chrono` feature
+- add OPE support for `serde_json::Value` scalars behind `serde_json` feature
 - ✨ add ORE and OPE encryption for signed integers, bool, f32, f64
 
 ### Fixes

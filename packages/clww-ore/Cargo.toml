@@ -19,6 +19,8 @@ postgres-types = ["dep:postgres-types"]
 decimal = ["dep:rust_decimal", "dep:orderable-bytes", "orderable-bytes/decimal"]
 # Adds OPE support for `chrono::NaiveDate` and `chrono::DateTime<Utc>`.
 chrono = ["dep:chrono", "dep:orderable-bytes", "orderable-bytes/chrono"]
+# Adds OPE support for `serde_json::Value` (scalar variants only — objects and arrays are unsupported).
+serde_json = ["dep:serde_json", "dep:orderable-bytes"]
 
 [dependencies]
 blake3 = "1.5.4"
@@ -27,6 +29,7 @@ hex = { workspace = true }
 orderable-bytes = { version = "0.1.1", default-features = false, optional = true }
 postgres-types = { version = "0.2.8", features = ["derive", "array-impls"], optional = true }
 rust_decimal = { version = "1.28", default-features = false, optional = true }
+serde_json = { version = "1.0.132", optional = true }
 subtle = "2.6.1"
 thiserror.workspace = true
 unicode-normalization = "0.1.24"

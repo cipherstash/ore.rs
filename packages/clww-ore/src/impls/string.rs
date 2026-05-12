@@ -89,7 +89,7 @@ impl CllwOpeEncrypt for &[u8] {
 ///
 /// Eventually, this will move to a more sophisticated collation that can handle
 /// more complex strings using the [Unicode Collation Algorithm](https://www.unicode.org/reports/tr10/).
-fn orderize_string(input: &str) -> String {
+pub(crate) fn orderize_string(input: &str) -> String {
     fn filter_push(out: &mut String, c: char) {
         if c.is_alphanumeric() || c.is_whitespace() || c.is_ascii_punctuation() {
             out.push(c);
