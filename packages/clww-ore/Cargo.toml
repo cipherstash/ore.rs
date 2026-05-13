@@ -19,7 +19,7 @@ postgres-types = ["dep:postgres-types"]
 decimal = ["dep:rust_decimal", "dep:orderable-bytes", "orderable-bytes/decimal"]
 # Adds OPE support for `chrono::NaiveDate` and `chrono::DateTime<Utc>`.
 chrono = ["dep:chrono", "dep:orderable-bytes", "orderable-bytes/chrono"]
-# Adds OPE support for `serde_json::Value` (scalar variants only — objects and arrays are unsupported).
+# Adds OPE support for `serde_json::Value` (all variants, including nested objects and arrays).
 serde_json = ["dep:serde_json", "dep:orderable-bytes"]
 
 [dependencies]
