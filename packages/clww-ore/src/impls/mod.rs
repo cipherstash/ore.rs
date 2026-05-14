@@ -8,8 +8,6 @@ pub(crate) mod byte_array;
 pub(crate) mod chrono;
 #[cfg(feature = "decimal")]
 pub(crate) mod decimal;
-#[cfg(feature = "serde_json")]
-pub(crate) mod json;
 pub(crate) mod primitives;
 pub(crate) mod string;
 pub(crate) mod variable;
