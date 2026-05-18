@@ -11,30 +11,38 @@ use crate::impls::variable::{OpeCllw8VariableV1, OreCllw8VariableV1};
 use crate::{CllwOpeEncrypt, CllwOreEncrypt, Error, Key};
 use unicode_normalization::char::decompose_canonical;
 
+/// Encrypts a bit stream into a CLLW ORE ciphertext.
+///
+/// `bits` is an iterator of one byte per plaintext bit, each `0` or `1`. The
+/// CLLW keystream is derived from `key` (optionally domain-separated by `salt`)
+/// and each ciphertext byte is `(PRF_i + bit_i) mod 256`. The output length is
+/// the number of plaintext bits — one byte per bit — and bytes compare under
+/// cllw-ore's ORE comparison (first-differing-byte `y + 1 == x`), **not** plain
+/// lex order. See [`OreCllw8VariableV1`].
+pub fn encrypt_ore_bits<I>(bits: I, key: &Key, salt: Option<&[u8]>) -> Vec<u8>
+where
+    I: IntoIterator<Item = u8>,
+{
+    let mut hasher = blake3::Hasher::new_keyed(&key.0);
+    if let Some(salt) = salt {
+        let _ = hasher.update(salt);
+    }
+    bits.into_iter().fold(Vec::new(), |mut out, bit| {
+        let mut buf: [u8; 16] = [0; 16];
+        hasher.finalize_xof().fill(&mut buf);
+        let byte = u128::from_be_bytes(buf).wrapping_add(bit as u128) & 0xFF;
+        let _ = hasher.update(&[bit]);
+        out.push(byte as u8);
+        out
+    })
+}
+
 impl CllwOreEncrypt for &[u8] {
     type Output = OreCllw8VariableV1;
 
     fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
-        let len = self.len() * u8::BITS as usize;
-        let mut hasher = blake3::Hasher::new_keyed(&key.0);
-        if let Some(salt) = salt {
-            let _ = hasher.update(salt);
-        }
-
-        // Process each byte through the Biterator (MSB first)
-        let bytes = self.iter().flat_map(|&byte| Biterator::new(byte)).fold(
-            Vec::with_capacity(len),
-            |mut out, bit| {
-                let mut buf: [u8; 16] = [0; 16];
-                hasher.finalize_xof().fill(&mut buf);
-                let byte = u128::from_be_bytes(buf).wrapping_add(bit as u128) & 0xFF;
-                let _ = hasher.update(&[bit]);
-                out.push(byte as u8);
-                out
-            },
-        );
-
-        Ok(OreCllw8VariableV1::from(bytes))
+        let bits = self.iter().flat_map(|&byte| Biterator::new(byte));
+        Ok(OreCllw8VariableV1::from(encrypt_ore_bits(bits, key, salt)))
     }
 }
 
@@ -43,21 +51,11 @@ impl CllwOreEncrypt for &str {
 
     fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         let string = orderize_string(self);
-        let len = string.len() * u8::BITS as usize;
-        let mut hasher = blake3::Hasher::new_keyed(&key.0);
-        if let Some(salt) = salt {
-            let _ = hasher.update(salt);
-        }
-        let bytes = string_biter(&string).fold(Vec::with_capacity(len), |mut out, bit| {
-            let mut buf: [u8; 16] = [0; 16];
-            hasher.finalize_xof().fill(&mut buf);
-            let byte = u128::from_be_bytes(buf).wrapping_add(bit as u128) & 0xFF;
-            let _ = hasher.update(&[bit]);
-            out.push(byte as u8);
-            out
-        });
-
-        Ok(OreCllw8VariableV1::from(bytes))
+        Ok(OreCllw8VariableV1::from(encrypt_ore_bits(
+            string_biter(&string),
+            key,
+            salt,
+        )))
     }
 }
 
@@ -89,7 +87,7 @@ impl CllwOpeEncrypt for &[u8] {
 ///
 /// Eventually, this will move to a more sophisticated collation that can handle
 /// more complex strings using the [Unicode Collation Algorithm](https://www.unicode.org/reports/tr10/).
-pub(crate) fn orderize_string(input: &str) -> String {
+pub fn orderize_string(input: &str) -> String {
     fn filter_push(out: &mut String, c: char) {
         if c.is_alphanumeric() || c.is_whitespace() || c.is_ascii_punctuation() {
             out.push(c);

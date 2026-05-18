@@ -8,8 +8,6 @@ pub(crate) mod byte_array;
 pub(crate) mod chrono;
 #[cfg(feature = "decimal")]
 pub(crate) mod decimal;
-#[cfg(feature = "serde_json")]
-pub(crate) mod json;
 pub(crate) mod primitives;
 pub(crate) mod string;
 pub(crate) mod variable;
@@ -36,7 +34,11 @@ pub(crate) mod variable;
 ///
 /// `n` is the number of plaintext bits, which must equal the number of items
 /// yielded by `bits` (debug-checked).
-pub(super) fn encrypt_ope_bits<I>(bits: I, n: usize, key: &Key, salt: Option<&[u8]>) -> Vec<u8>
+///
+/// `bits` is an iterator of one byte per plaintext bit, each `0` or `1`. The
+/// MSB-first byte form of an integer or string is just one convenient producer
+/// — callers may freely pack their own tagged bit streams.
+pub fn encrypt_ope_bits<I>(bits: I, n: usize, key: &Key, salt: Option<&[u8]>) -> Vec<u8>
 where
     I: IntoIterator<Item = u8>,
 {

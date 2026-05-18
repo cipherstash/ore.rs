@@ -133,7 +133,9 @@ mod impls;
 mod nibble_iterator;
 
 pub use impls::primitives::{OpeCllw8V1, OreCllw8V1};
+pub use impls::string::orderize_string;
 pub use impls::variable::{OpeCllw8VariableV1, OreCllw8VariableV1};
+pub use impls::{encrypt_ope_bits, string::encrypt_ore_bits};
 
 /// An error occurred during encryption or decryption.
 ///

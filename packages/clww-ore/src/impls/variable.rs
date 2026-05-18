@@ -189,13 +189,13 @@ pub struct OpeCllw8VariableV1 {
 }
 
 impl OpeCllw8VariableV1 {
-    /// Construct a ciphertext from raw bytes produced by [`super::encrypt_ope_bits`].
+    /// Construct a ciphertext from raw bytes produced by [`crate::encrypt_ope_bits`].
     ///
-    /// Crate-internal: callers (the `&str` / `&[u8]` impls in
-    /// [`super::string`], plus feature-gated modules like `decimal` and
-    /// `chrono`) build their own canonical byte form, run it through the
-    /// shared OPE primitive, and wrap the resulting bytes here.
-    pub(crate) fn from_bytes(bytes: Vec<u8>) -> Self {
+    /// Callers (`&str`/`&[u8]` impls, feature-gated modules like `decimal` and
+    /// `chrono`, and external consumers wiring their own tagged plaintext bit
+    /// streams) build the canonical byte form, run it through
+    /// [`crate::encrypt_ope_bits`], and wrap the resulting bytes here.
+    pub fn from_bytes(bytes: Vec<u8>) -> Self {
         Self { bytes }
     }
 }
