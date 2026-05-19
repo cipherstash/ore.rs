@@ -44,6 +44,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - address OPE PR feedback
 
+
+### Documentation
+
+- 📝 reflect OPE support and missing crates in suite + cllw-ore READMEs
+- 📝 clarify cllw-ore OPE is a fallback when operator classes are unavailable
+
+### Features
+
+- ✨ add OPE encryption for serde_json::Value scalars
+- ✨ extend JSON OPE encoding to nested arrays and objects
+
+### Miscellaneous
+
+- remove unused dev-dependencies from cllw-ore
+
+### Refactoring
+
+- 🔥 remove serde_json JSON OPE impl
+- reinstate the cllw_ore json support
+- ♻️ plaintext-side domain separation for orderable terms
+
 ## [0.34.0] - 2026-03-04
 
 ### Changed
