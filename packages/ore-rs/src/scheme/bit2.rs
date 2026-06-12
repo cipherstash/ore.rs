@@ -7,20 +7,19 @@
 use crate::{
     ciphertext::*,
     primitives::{
-        hash::Aes128Z2Hash, prf::Aes128Prf, prp::KnuthShufflePRP, AesBlock, Hash, HashKey, Prf,
-        Prp, NONCE_SIZE,
+        hash::Aes128Z2Hash, prf::Aes128Prf, AesBlock, Hash, HashKey, Prf, Prp, NONCE_SIZE,
     },
+    scheme::width::{AesBlockBuf, Bit8, BlockWidth, RightBitVec},
     OreCipher, OreError, PlainText,
 };
 
 use aes::cipher::generic_array::GenericArray;
-use lazy_static::lazy_static;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use subtle_ng::{Choice, ConditionallySelectable, ConstantTimeEq};
-use zeroize::ZeroizeOnDrop;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Per-block ciphertext component types ([`LeftBlock16`], [`RightBlock32`])
 /// used by this scheme.
@@ -51,6 +50,79 @@ fn cmp(a: u8, b: u8) -> u8 {
     u8::from(a > b)
 }
 
+/// Derive the per-block PRP seeds for `x` under `prf2`: seed `n` is
+/// `PRF₂(x[0..n] ‖ 0…)`. The seeds are **key-equivalent material** — anyone
+/// holding seed `n` can rebuild that block's permutation and invert `xt[n]`
+/// — so they live in their own buffer, never in the (serialisable) `Left`,
+/// and the caller must consume them via [`SeedBuf`]'s zeroize-on-drop.
+struct SeedBuf<const N: usize>([AesBlock; N]);
+
+impl<const N: usize> Drop for SeedBuf<N> {
+    fn drop(&mut self) {
+        for seed in self.0.iter_mut() {
+            seed.zeroize();
+        }
+    }
+}
+
+fn derive_prp_seeds<const N: usize>(prf2: &Aes128Prf, x: &PlainText<N>) -> SeedBuf<N> {
+    let mut seeds = [AesBlock::default(); N];
+    for (n, block) in seeds.iter_mut().enumerate() {
+        block[0..n].clone_from_slice(&x[0..n]);
+        // TODO (tracked in v2 plan, fixed for new schemes by the §5(b)
+        // accumulator): the block index is not bound here, so a run of
+        // identical prefix bytes yields identical seeds.
+    }
+    prf2.encrypt_all(&mut seeds);
+    SeedBuf(seeds)
+}
+
+/// Build the right-ciphertext bitvector for one block: for every candidate
+/// value `j`, bit `j` is `(π⁻¹(j) > x) ⊕ h[j]`.
+///
+/// This is the naive per-bit form, retained in this refactor for risk
+/// staging; the permutation-direct bulk form replaces it in the next PR
+/// (v2 plan §2) without changing the output bytes.
+fn encode_right_block<W: BlockWidth>(
+    block: &mut W::RightBlock,
+    prp: &W::Prp,
+    x: u8,
+    hashes: &[u8],
+) -> Result<(), OreError> {
+    debug_assert_eq!(hashes.len(), W::DOMAIN);
+    for (j, h) in hashes.iter().enumerate() {
+        let jstar = prp.invert(j as u8)?;
+        let indicator = cmp(jstar, x);
+        block.set_bit(j, indicator ^ h);
+    }
+    Ok(())
+}
+
+impl<R: Rng + SeedableRng> OreAes128<R> {
+    /// Fill `left` with the PRF₁ tag inputs and permuted values for `x`,
+    /// using the given PRP seeds. After this returns, `left.f[n]` holds the
+    /// *unencrypted* tag input `(x[0..n] ‖ xt[n] ‖ n)`; the caller runs the
+    /// final PRF₁ pass once any other use of the inputs (the RO key
+    /// template) is done.
+    fn build_left<const N: usize>(
+        &self,
+        left: &mut Left<Self, N>,
+        seeds: &SeedBuf<N>,
+        x: &PlainText<N>,
+    ) -> Result<(), OreError> {
+        for n in 0..N {
+            let prp: <Bit8 as BlockWidth>::Prp = Prp::new(&seeds.0[n])?;
+            left.xt[n] = prp.permute(x[n])?;
+
+            left.f[n][0..n].clone_from_slice(&x[0..n]);
+            left.f[n][n] = left.xt[n];
+            // Include the block number in the value passed to the Random Oracle
+            left.f[n][N] = n as u8;
+        }
+        Ok(())
+    }
+}
+
 impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
     type LeftBlockType = LeftBlock16;
     type RightBlockType = RightBlock32;
@@ -71,37 +143,8 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
     fn encrypt_left<const N: usize>(&self, x: &PlainText<N>) -> EncryptLeftResult<R, N> {
         let mut output = Left::<Self, N>::init();
 
-        // Build the prefixes
-        // TODO: Don't modify struct values directly - use a function on a "Left" trait
-        output.f.iter_mut().enumerate().for_each(|(n, block)| {
-            block[0..n].clone_from_slice(&x[0..n]);
-            // TODO: Include the block number in the prefix to avoid repeating values for common
-            // blocks in a long prefix
-            // e.g. when plaintext is 4700 (2-bytes/blocks)
-            // xt = [17, 17, 17, 17, 17, 17, 223, 76]
-        });
-
-        self.prf2.encrypt_all(&mut output.f);
-
-        for (n, xn) in x.iter().enumerate().take(N) {
-            // Set prefix and create PRP for the block
-            let prp: KnuthShufflePRP<u8, 256> = Prp::new(&output.f[n])?;
-
-            output.xt[n] = prp.permute(*xn)?;
-        }
-
-        // Reset the f block
-        // We don't actually need to clear sensitive data here, we
-        // just need fast "zero set". Reassigning the value will drop the old one and allocate new
-        // data to the stack
-        output.f = [Default::default(); N];
-
-        for n in 0..N {
-            output.f[n][0..n].clone_from_slice(&x[0..n]);
-            output.f[n][n] = output.xt[n];
-            // Include the block number in the value passed to the Random Oracle
-            output.f[n][N] = n as u8;
-        }
+        let seeds = derive_prp_seeds(&self.prf2, x);
+        self.build_left(&mut output, &seeds, x)?;
         self.prf1.encrypt_all(&mut output.f);
 
         Ok(output)
@@ -114,73 +157,64 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
         // Generate a 16-byte random nonce
         self.rng.borrow_mut().try_fill(&mut right.nonce)?;
 
-        // Build the prefixes
-        // TODO: Don't modify struct values directly - use a function on a "Left"
-        left.f.iter_mut().enumerate().for_each(|(n, block)| {
-            block[0..n].clone_from_slice(&x[0..n]);
-        });
+        let seeds = derive_prp_seeds(&self.prf2, x);
 
-        self.prf2.encrypt_all(&mut left.f);
+        /* TODO: This seems to work but it is technically using the nonce as the key
+         * (instead of using it as the plaintext). This appears to be how the original
+         * ORE implementation does it but it feels a bit wonky to me.
+         * Alternatives are catalogued in the v2 plan §6 and will be settled
+         * there for new schemes; this scheme keeps the construction for
+         * wire compatibility.
+         */
+        let hasher: Aes128Z2Hash = Hash::new(AesBlock::from_slice(&right.nonce));
 
-        // To make zeroizing / resetting the RO keys
-        // Since the AesBlock type is stack allocated this should get optimised to a single memcpy
-        lazy_static! {
-            static ref ZEROED_RO_KEYS: [AesBlock; 256] = [Default::default(); 256];
+        // RO key template: entry `j` of the template holds the *input*
+        // `(x[0..n] ‖ j ‖ n)` for the current block. Between blocks only
+        // three bytes per entry change (the prefix byte just fixed, the
+        // candidate byte position, and the block index), so the template is
+        // maintained incrementally; `work` receives a copy each block for
+        // the in-place PRF/hash passes. Template and work hold secret
+        // intermediate state and are zeroized at the end.
+        let mut template = <Bit8 as BlockWidth>::RoKeyBuf::zeroed();
+        for (j, entry) in template.iter_mut().enumerate() {
+            entry[0] = j as u8;
         }
-
-        let mut ro_keys = *ZEROED_RO_KEYS;
+        let mut work = <Bit8 as BlockWidth>::RoKeyBuf::zeroed();
 
         for n in 0..N {
-            // Set prefix and create PRP for the block
-            let prp: KnuthShufflePRP<u8, 256> = Prp::new(&left.f[n])?;
-
+            let prp: <Bit8 as BlockWidth>::Prp = Prp::new(&seeds.0[n])?;
             left.xt[n] = prp.permute(x[n])?;
-
-            // Reset the f block
-            left.f[n].default_in_place();
 
             left.f[n][0..n].clone_from_slice(&x[0..n]);
             left.f[n][n] = left.xt[n];
             // Include the block number in the value passed to the Random Oracle
             left.f[n][N] = n as u8;
 
-            for (j, ro_key) in ro_keys.iter_mut().enumerate() {
-                /*
-                 * The output of F in H(F(k1, y|i-1||j), r)
-                 */
-                ro_key[0..n].clone_from_slice(&x[0..n]);
-                ro_key[n] = j as u8;
-                ro_key[N] = n as u8;
+            if n > 0 {
+                // Extend the prefix over the previous candidate position and
+                // move the candidate byte and block index along.
+                for (j, entry) in template.iter_mut().enumerate() {
+                    entry[n - 1] = x[n - 1];
+                    entry[n] = j as u8;
+                    entry[N] = n as u8;
+                }
             }
 
-            self.prf1.encrypt_all(&mut ro_keys);
+            work.copy_from(&template);
+            self.prf1.encrypt_all(work.as_mut_slice());
 
-            /* TODO: This seems to work but it is technically using the nonce as the key
-             * (instead of using it as the plaintext). This appears to be how the original
-             * ORE implementation does it but it feels a bit wonky to me. Should check with David.
-             * It is useful though because the AES crate makes it easy to encrypt groups of 8
-             * plaintexts under the same key. We really want the ability to encrypt the same
-             * plaintext (i.e. the nonce) under different keys but this may be an acceptable
-             * approximation.
-             *
-             * If not, we will probably need to implement our own parallel encrypt using intrisics
-             * like in the AES crate: https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/ni/aes128.rs#L26
-             */
-            let hasher: Aes128Z2Hash = Hash::new(AesBlock::from_slice(&right.nonce));
-            let hashes = hasher.hash_all(&mut ro_keys);
-
-            // FIXME: force casting to u8 from usize could cause a panic
-            for (j, h) in hashes.iter().enumerate() {
-                let jstar = prp.invert(j as u8)?;
-                let indicator = cmp(jstar, x[n]);
-                right.data[n].set_bit(j, indicator ^ h);
-            }
-
-            // Zeroize / reset the RO keys before the next loop iteration
-            ro_keys.clone_from_slice(&*ZEROED_RO_KEYS);
+            let hashes = hasher.hash_all(work.as_mut_slice());
+            encode_right_block::<Bit8>(&mut right.data[n], &prp, x[n], &hashes)?;
         }
 
         self.prf1.encrypt_all(&mut left.f);
+
+        for entry in template.iter_mut() {
+            entry.zeroize();
+        }
+        for entry in work.as_mut_slice() {
+            entry.zeroize();
+        }
 
         Ok(CipherText { left, right })
     }
