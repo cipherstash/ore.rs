@@ -32,15 +32,18 @@ impl Hash for Aes128Z2Hash {
     }
 
     fn hash_all_into(&self, data: &mut [AesBlock], out: &mut [u8]) {
+        debug_assert_eq!(out.len() * 8, data.len());
         self.cipher.encrypt_blocks(data);
-        // Pack the Z2 (1-bit) outputs LSB-first, eight blocks per byte (assign
-        // into a fresh block); see `pack_bits_lsb_first` for the convention.
-        crate::primitives::pack_bits_lsb_first(
-            out,
-            data,
-            |block| block[0],
-            |slot, byte| *slot = byte,
-        );
+
+        // Pack the Z2 (1-bit) outputs LSB-first, eight blocks per byte —
+        // the same bit order as `RightBitVec::set_bit`. The 256-block case
+        // (Bit8's per-block RO output) has a vectorised gather; other sizes
+        // use the scalar pack.
+        if data.len() == 256 {
+            crate::primitives::simd::lsb_mask_256(data, out);
+        } else {
+            crate::primitives::simd::scalar::lsb_mask(data, out);
+        }
     }
 }
 
