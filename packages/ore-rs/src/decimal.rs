@@ -9,21 +9,23 @@
 
 use crate::ciphertext::{CipherText, Left};
 use crate::encrypt::OreEncrypt;
+use crate::scheme::bit2::OreAes128;
 use crate::{OreCipher, OreError};
 use orderable_bytes::ToOrderableBytes;
+use rand::{Rng, SeedableRng};
 use rust_decimal::Decimal;
 
 const ENCODED_LEN: usize = <Decimal as ToOrderableBytes>::ENCODED_LEN;
 
-impl<T: OreCipher> OreEncrypt<T> for Decimal {
-    type LeftOutput = Left<T, ENCODED_LEN>;
-    type FullOutput = CipherText<T, ENCODED_LEN>;
+impl<T_: Rng + SeedableRng> OreEncrypt<OreAes128<T_>> for Decimal {
+    type LeftOutput = Left<OreAes128<T_>, ENCODED_LEN>;
+    type FullOutput = CipherText<OreAes128<T_>, ENCODED_LEN>;
 
-    fn encrypt_left(&self, cipher: &T) -> Result<Self::LeftOutput, OreError> {
+    fn encrypt_left(&self, cipher: &OreAes128<T_>) -> Result<Self::LeftOutput, OreError> {
         cipher.encrypt_left(&self.to_orderable_bytes())
     }
 
-    fn encrypt(&self, cipher: &T) -> Result<Self::FullOutput, OreError> {
+    fn encrypt(&self, cipher: &OreAes128<T_>) -> Result<Self::FullOutput, OreError> {
         cipher.encrypt(&self.to_orderable_bytes())
     }
 }
