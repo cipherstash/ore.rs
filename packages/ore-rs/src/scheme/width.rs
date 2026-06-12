@@ -13,11 +13,14 @@
 use crate::ciphertext::CipherTextBlock;
 use crate::primitives::{AesBlock, Prp};
 use crate::scheme::bit2::block_types::RightBlock32;
+use crate::scheme::bit2_w6::block_types::RightBlock8;
 
 mod sealed {
     pub trait Sealed {}
     impl Sealed for super::Bit8 {}
+    impl Sealed for super::Bit6 {}
     impl Sealed for [super::AesBlock; 256] {}
+    impl Sealed for [super::AesBlock; 64] {}
 }
 
 /// A domain-sized buffer of AES blocks used for per-block random-oracle
@@ -35,17 +38,24 @@ pub trait AesBlockBuf: sealed::Sealed {
     fn copy_from(&mut self, other: &Self);
 }
 
-impl AesBlockBuf for [AesBlock; 256] {
-    fn zeroed() -> Self {
-        [AesBlock::default(); 256]
-    }
-    fn as_mut_slice(&mut self) -> &mut [AesBlock] {
-        self
-    }
-    fn copy_from(&mut self, other: &Self) {
-        self.clone_from_slice(other);
-    }
+macro_rules! impl_aes_block_buf {
+    ($n:literal) => {
+        impl AesBlockBuf for [AesBlock; $n] {
+            fn zeroed() -> Self {
+                [AesBlock::default(); $n]
+            }
+            fn as_mut_slice(&mut self) -> &mut [AesBlock] {
+                self
+            }
+            fn copy_from(&mut self, other: &Self) {
+                self.clone_from_slice(other);
+            }
+        }
+    };
 }
+
+impl_aes_block_buf!(256);
+impl_aes_block_buf!(64);
 
 /// Per-block bitvector operations on a Right ciphertext block, one bit per
 /// value in the block domain.
@@ -101,4 +111,18 @@ impl BlockWidth for Bit8 {
     type RightBlock = RightBlock32;
     type Prp = crate::primitives::prp::KnuthShufflePRP<u8, 256>;
     type RoKeyBuf = [AesBlock; 256];
+}
+
+/// The 6-bit block width used by [`crate::scheme::bit2_w6`]: six plaintext
+/// bits per block, domain 64. Right blocks are 8 bytes (vs 32) and each
+/// block costs 64 RO evaluations (vs 256).
+#[derive(Debug)]
+pub struct Bit6;
+
+impl BlockWidth for Bit6 {
+    const BITS: usize = 6;
+    const DOMAIN: usize = 64;
+    type RightBlock = RightBlock8;
+    type Prp = crate::primitives::prp::KnuthShufflePRP<u8, 64>;
+    type RoKeyBuf = [AesBlock; 64];
 }

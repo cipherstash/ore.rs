@@ -42,6 +42,7 @@ pub(crate) fn gt_mask_xor_256(table: &[u8; 256], x: u8, out: &mut [u8]) {
     // SAFETY: NEON is baseline on aarch64; `out` length asserted above.
     unsafe {
         neon::gt_mask_xor_256(table, x, out);
+        return;
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -53,10 +54,26 @@ pub(crate) fn gt_mask_xor_256(table: &[u8; 256], x: u8, out: &mut [u8]) {
         }
     }
 
-    // Scalar fallback; excluded on aarch64 (the NEON path above always handles
-    // it) so the dead tail needs no blanket `#[allow(unreachable_code)]`.
-    #[cfg(not(target_arch = "aarch64"))]
-    scalar::gt_mask_xor_256(table, x, out);
+    #[allow(unreachable_code)]
+    scalar::gt_mask_xor(table, x, out);
+}
+
+/// 64-lane variant of [`gt_mask_xor_256`] for the Bit6 block domain.
+/// AVX2 gains little at this size (two 32-lane compares vs the scalar
+/// loop's ~9 ns); only NEON is dispatched.
+#[inline]
+pub(crate) fn gt_mask_xor_64(table: &[u8; 64], x: u8, out: &mut [u8]) {
+    debug_assert_eq!(out.len(), 8);
+
+    #[cfg(target_arch = "aarch64")]
+    // SAFETY: NEON is baseline on aarch64; `out` length asserted above.
+    unsafe {
+        neon::gt_mask_xor_64(table, x, out);
+        return;
+    }
+
+    #[allow(unreachable_code)]
+    scalar::gt_mask_xor(table, x, out);
 }
 
 /// Pack the LSB of byte 0 of each of 256 AES blocks into `out`:
@@ -64,34 +81,26 @@ pub(crate) fn gt_mask_xor_256(table: &[u8; 256], x: u8, out: &mut [u8]) {
 /// (callers pass `out` slots they own; bits are assigned, not accumulated).
 #[inline]
 pub(crate) fn lsb_mask_256(blocks: &[AesBlock], out: &mut [u8]) {
-    // Real asserts (not debug_assert): the NEON path gathers `blocks` via raw
-    // pointers assuming exactly 256 blocks, so a shorter slice would read out
-    // of bounds (UB) in a release build without this check.
-    assert_eq!(blocks.len(), 256);
-    assert_eq!(out.len(), 32);
+    debug_assert_eq!(blocks.len(), 256);
+    debug_assert_eq!(out.len(), 32);
 
     #[cfg(target_arch = "aarch64")]
     // SAFETY: NEON is baseline on aarch64; lengths asserted above.
     unsafe {
         neon::lsb_mask_256(blocks, out);
+        return;
     }
 
-    // Scalar fallback; excluded on aarch64 (the NEON path above always handles
-    // it) so the dead tail needs no blanket `#[allow(unreachable_code)]`.
-    #[cfg(not(target_arch = "aarch64"))]
+    #[allow(unreachable_code)]
     scalar::lsb_mask(blocks, out);
 }
 
 pub(crate) mod scalar {
     use super::AesBlock;
 
-    // Used by the non-aarch64 `gt_mask_xor_256` dispatcher and as the test
-    // oracle; on aarch64 the lib always reaches NEON, so outside `cfg(test)`
-    // this fn is unreferenced there. Compiling it exactly where it's used keeps
-    // it from being dead code without an `allow`. (`lsb_mask` below stays
-    // always compiled — `hash.rs` calls it directly for non-256 inputs.)
-    #[cfg(any(not(target_arch = "aarch64"), test))]
-    pub(crate) fn gt_mask_xor_256(table: &[u8; 256], x: u8, out: &mut [u8]) {
+    /// Length-generic scalar indicator pack: `table.len()` must be a
+    /// multiple of 8 and equal to `out.len() * 8`.
+    pub(crate) fn gt_mask_xor(table: &[u8], x: u8, out: &mut [u8]) {
         for (slot, chunk) in out.iter_mut().zip(table.chunks_exact(8)) {
             let mut byte = 0u8;
             for (bit, &p) in chunk.iter().enumerate() {
@@ -135,6 +144,17 @@ mod neon {
     pub(super) unsafe fn gt_mask_xor_256(table: &[u8; 256], x: u8, out: &mut [u8]) {
         let xv = vdupq_n_u8(x);
         for i in 0..16 {
+            let t = vld1q_u8(table.as_ptr().add(i * 16));
+            let (lo, hi) = pack_addv(vcgtq_u8(t, xv));
+            out[2 * i] ^= lo;
+            out[2 * i + 1] ^= hi;
+        }
+    }
+
+    #[target_feature(enable = "neon")]
+    pub(super) unsafe fn gt_mask_xor_64(table: &[u8; 64], x: u8, out: &mut [u8]) {
+        let xv = vdupq_n_u8(x);
+        for i in 0..4 {
             let t = vld1q_u8(table.as_ptr().add(i * 16));
             let (lo, hi) = pack_addv(vcgtq_u8(t, xv));
             out[2 * i] ^= lo;
@@ -230,7 +250,26 @@ mod tests {
             let mut b = a;
 
             gt_mask_xor_256(&table, x, &mut a);
-            scalar::gt_mask_xor_256(&table, x, &mut b);
+            scalar::gt_mask_xor(&table, x, &mut b);
+            assert_eq!(a, b);
+        }
+    }
+
+    #[test]
+    fn gt_mask_64_dispatched_matches_scalar() {
+        let mut rng = ChaCha20Rng::seed_from_u64(13);
+        for _ in 0..5_000 {
+            let mut table = [0u8; 64];
+            rng.fill(&mut table[..]);
+            // Block values and table entries are < 64 in real use, but the
+            // kernels must agree on all byte values.
+            let x: u8 = rng.gen();
+            let mut a = [0u8; 8];
+            rng.fill(&mut a[..]);
+            let mut b = a;
+
+            gt_mask_xor_64(&table, x, &mut a);
+            scalar::gt_mask_xor(&table, x, &mut b);
             assert_eq!(a, b);
         }
     }

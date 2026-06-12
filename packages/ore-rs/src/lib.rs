@@ -190,6 +190,11 @@ pub trait OreCipher: Sized {
     /// truth-table row).
     type RightBlockType: CipherTextBlock;
 
+    /// Wire-format header for this scheme's serialised artifacts, or
+    /// `None` for the legacy headerless format. Schemes introduced from
+    /// ORE v2 onwards must set this; see [`WireHeader`].
+    const WIRE_HEADER: Option<WireHeader> = None;
+
     /// Initialise the cipher from two 16-byte keys: `k1` for the
     /// per-block-tag PRF and `k2` for the per-block PRP seed PRF.
     fn init(k1: &[u8; 16], k2: &[u8; 16]) -> Result<Self, OreError>;
