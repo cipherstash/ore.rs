@@ -56,7 +56,21 @@ Example benchmark results below (from December 2021):
 
 ## ARMv8 and Apple Silicon support
 
-Hardware AES is provided by the [`aes`](https://crates.io/crates/aes) crate, which uses runtime CPU-feature detection on both `x86_64` (AES-NI) and ARMv8 (NEON AES intrinsics) — on stable Rust, with no special configuration required.
+ARMv8 and Apple Silicon Macs work out of the box but will default to AES in
+software, which is dramatically slower than the hardware backend (~60x per
+AES block on an M1 Max). To use the ARMv8 Cryptography Extensions, enable
+the `aes` crate's cfg flag — stable Rust is fine (1.61+):
+
+```toml
+# .cargo/config.toml in your project
+[target.'cfg(target_arch = "aarch64")']
+rustflags = ["--cfg", "aes_armv8"]
+```
+
+This repository's own workspace sets this already (tests, benches and
+examples get hardware AES); the flag is per-final-binary, so downstream
+projects need it in their own build configuration. x86_64 AES-NI is
+auto-detected and needs no flag.
 
 ## Security
 
