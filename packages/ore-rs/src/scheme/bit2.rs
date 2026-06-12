@@ -46,10 +46,6 @@ pub type OreAes128ChaCha20 = OreAes128<ChaCha20Rng>;
 type EncryptLeftResult<R, const N: usize> = Result<Left<OreAes128<R>, N>, OreError>;
 type EncryptResult<R, const N: usize> = Result<CipherText<OreAes128<R>, N>, OreError>;
 
-fn cmp(a: u8, b: u8) -> u8 {
-    u8::from(a > b)
-}
-
 /// Derive the per-block PRP seeds for `x` under `prf2`: seed `n` is
 /// `PRF₂(x[0..n] ‖ 0…)`. The seeds are **key-equivalent material** — anyone
 /// holding seed `n` can rebuild that block's permutation and invert `xt[n]`
@@ -80,22 +76,22 @@ fn derive_prp_seeds<const N: usize>(prf2: &Aes128Prf, x: &PlainText<N>) -> SeedB
 /// Build the right-ciphertext bitvector for one block: for every candidate
 /// value `j`, bit `j` is `(π⁻¹(j) > x) ⊕ h[j]`.
 ///
-/// This is the naive per-bit form, retained in this refactor for risk
-/// staging; the permutation-direct bulk form replaces it in the next PR
-/// (v2 plan §2) without changing the output bytes.
+/// Bulk form (v2 plan §2): the hash bits are packed straight into the
+/// block's bitvector, then the PRP XORs its indicator mask over the top in
+/// one linear pass of its inverse table — no per-bit `invert` lookups, no
+/// heap allocation. `ro_blocks` holds the PRF₁-encrypted RO keys and is
+/// trashed by the hash pass.
 fn encode_right_block<W: BlockWidth>(
     block: &mut W::RightBlock,
     prp: &W::Prp,
     x: u8,
-    hashes: &[u8],
-) -> Result<(), OreError> {
-    debug_assert_eq!(hashes.len(), W::DOMAIN);
-    for (j, h) in hashes.iter().enumerate() {
-        let jstar = prp.invert(j as u8)?;
-        let indicator = cmp(jstar, x);
-        block.set_bit(j, indicator ^ h);
-    }
-    Ok(())
+    hasher: &Aes128Z2Hash,
+    ro_blocks: &mut [AesBlock],
+) {
+    debug_assert_eq!(ro_blocks.len(), W::DOMAIN);
+    let out = block.as_mut_bytes();
+    hasher.hash_all_into(ro_blocks, out);
+    prp.indicator_mask_xor(x, out);
 }
 
 impl<R: Rng + SeedableRng> OreAes128<R> {
@@ -203,8 +199,7 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
             work.copy_from(&template);
             self.prf1.encrypt_all(work.as_mut_slice());
 
-            let hashes = hasher.hash_all(work.as_mut_slice());
-            encode_right_block::<Bit8>(&mut right.data[n], &prp, x[n], &hashes)?;
+            encode_right_block::<Bit8>(&mut right.data[n], &prp, x[n], &hasher, &mut work);
         }
 
         self.prf1.encrypt_all(&mut left.f);

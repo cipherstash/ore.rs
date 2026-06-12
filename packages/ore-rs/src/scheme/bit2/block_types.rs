@@ -28,6 +28,13 @@ impl RightBlock32 {
         self.data[byte_index] |= v;
     }
 
+    /// The raw bitvector bytes, LSB-first within each byte — the bit order
+    /// used by [`Self::set_bit`] / [`Self::get_bit`].
+    #[inline]
+    pub(crate) fn bytes_mut(&mut self) -> &mut [u8] {
+        &mut self.data
+    }
+
     /// Read bit `bit` (in `0..256`); returns `0` or `1`. Panics in debug if
     /// `bit >= 256`.
     #[inline]

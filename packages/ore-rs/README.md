@@ -47,17 +47,23 @@ Example benchmark results below:
 
 ![Benchmark](https://user-images.githubusercontent.com/12306/145158987-9846bd94-24c7-4163-b655-1cb3ad686dd9.png)
 
-## ARMv8 and M1 Support
+## ARMv8 and Apple Silicon Support
 
-ARMv8 and M1 Macs work out of the box but will default to AES in software which is around 4x slower than AES-NI (at least on the test machine using an Intel i7 8700K).
+ARMv8 and Apple Silicon Macs work out of the box but will default to AES in
+software, which is dramatically slower than the hardware backend (~60x per
+AES block on an M1 Max). To use the ARMv8 Cryptography Extensions, enable
+the `aes` crate's cfg flag — stable Rust is fine (1.61+):
 
-To take advantage of hardware AES using NEON Intrinsics on ARM, you need to use Rust nightly.
-
+```toml
+# .cargo/config.toml in your project
+[target.'cfg(target_arch = "aarch64")']
+rustflags = ["--cfg", "aes_armv8"]
 ```
-asdf install rust nightly
-asdf local rust nightly
-cargo +nightly bench
-```
+
+This repository's own workspace sets this already (tests, benches and
+examples get hardware AES); the flag is per-final-binary, so downstream
+projects need it in their own build configuration. x86_64 AES-NI is
+auto-detected and needs no flag.
 
 ## Security Warning
 
