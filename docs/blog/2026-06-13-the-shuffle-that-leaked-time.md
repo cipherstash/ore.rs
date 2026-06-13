@@ -1,187 +1,101 @@
-# A timing channel in a random shuffle — and how we made ORE faster by removing it
+<!-- Draft for the CipherStash research blog. Written to .claude/skills/blog-writing-voice
+     (Dan Draper profile) from cipherstash-js-suite@main. Meta description (153 chars):
+     "I set out to make our order-revealing encryption faster and found it leaking timing
+      from a random shuffle. The fix was constant-time and 9x faster." -->
 
-*Draft for the CipherStash research blog — 2026-06-13. Follows
-`cipherstash-js-suite/prompts/_shared/writing-guidelines.md`. Code samples are Rust
-(the library is `ore-rs`), not the TypeScript default — this is an engine-internals
-post, so the product-doc conventions for TS examples and CTAs are adapted accordingly.*
+# The shuffle that told the time
 
-**Title options**
-1. A timing channel in a random shuffle — and how we made ORE faster by removing it
-2. Rejection sampling leaks time: a constant-time fix for our ORE permutation
-3. Faster *and* safer: replacing rejection sampling in order-revealing encryption
+Years ago I wrote a little function to shuffle 64 numbers into a secret order. It was part of the first real Rust I ever shipped, the order-revealing encryption that lets CipherStash compare encrypted values without decrypting them. I was proud of it. It was textbook correct.
 
-**Meta description** (152 chars)
-> A rejection-sampling shuffle in our order-revealing encryption leaked timing. The fix — fixed-count wide draws — is constant-time and ~9× faster. Here's how.
+Last week I set out to make it faster, and discovered it had been quietly telling anyone who cared to measure roughly how long it took to encrypt your data. Which, it turns out, is a function of your data.
 
----
+This is the story of that bug, the surprisingly elegant fix, and a second surprise that was costing us 60x on half our hardware. There's a moral at the end about reading your own old code.
 
-## What this is about
+## The secret reshuffle at the heart of ORE
 
-We rewrote `ore-rs`, the order-revealing encryption (ORE) library behind CipherStash's
-searchable encryption, for speed. While benchmarking we found a small **timing
-side-channel inside a random shuffle**, and a build setting that was running our AES in
-software — **60× slower** than the hardware path — without warning.
+Quick orientation, then we'll get to the crime scene.
 
-This post covers the shuffle. The fix is a good reminder that the textbook "correct"
-way to draw an unbiased random number (rejection sampling) can be both slower *and*
-less safe than a slightly smarter one — and that the smarter one has a cleaner security
-proof.
+Order-revealing encryption lets you ask "is A less than B?" on ciphertexts, without ever holding the plaintext. We use the Lewi-Wu construction. It chops a value into small blocks and, for each block, scrambles its possible values into a secret keyed order. That scramble is a pseudo-random permutation, a PRP, and we build it with a Fisher-Yates shuffle. It's the same shuffle Knuth taught a generation of us: walk down the array, and at each spot `i` pick a random index `j` somewhere at or below it, then swap.
 
-> **Note:** The cryptographic constructions here are under internal review before
-> release. This is an engineering write-up, not a security advisory — we have no
-> evidence of a practical attack, and we fixed the channel as a matter of discipline.
+So the whole edifice rests on one humble operation. Pick a uniform random number in a range. That's where the leak was hiding.
 
-## Background: the shuffle inside ORE
+## ...wait, what's wrong with picking a random number?
 
-ORE lets you compare encrypted values — "is A < B?" — without decrypting them. We use
-the Lewi–Wu construction: it splits a plaintext into small blocks and, per block,
-applies a **pseudo-random permutation (PRP)** — a keyed, secret reordering of the
-block's value space.
+Your randomness arrives as uniform *bits*. A byte is a number from 0 to 255. But the range you want, say 0 to 62, almost never divides 256 evenly, so if you just take `byte % 63` some answers come up slightly more often than others. That skew is called modulo bias, and for a permutation it's poison. It makes some orderings more likely than others, and a secret shuffle that prefers certain orders isn't very secret.
 
-We build that PRP with a **Fisher–Yates shuffle** (what Knuth popularized as
-Algorithm P). To shuffle `n` items you walk from the top down and, at each position `i`,
-draw a uniform index `j` in `0..=i` and swap. So the whole construction depends on one
-operation: **draw a uniform integer in a range.**
+The proper fix, the one every textbook teaches, is rejection sampling. Draw a byte. If it landed in the biased tail, throw it away and draw another. Keep going until you get a clean one. It's correct, it's unbiased, and I used it without a second thought.
 
-## Why it matters: drawing a bounded integer can leak time
+The counterintuitive part kept me up at night. Rejection sampling, the proper unbiased method, was the bug.
 
-Your randomness gives you uniform *bits*. But `i+1` is rarely a power of two, so folding,
-say, 256 equally likely bytes into 3 equally likely outcomes doesn't divide evenly —
-`byte % 3` is biased. For a permutation, that bias makes some orderings more likely than
-others, which a PRP must not do.
+## What the timing whispered
 
-The standard fix is **rejection sampling**: draw, and if the value lands in the biased
-tail, throw it away and draw again. It's unbiased and correct. It also draws a
-**variable** number of values — and how many depends on the bytes you happen to get.
+Think about what "keep going until you get a clean one" actually does. It draws a *variable* number of times. Sometimes one draw, sometimes five, depending entirely on the random bytes it happens to see.
 
-Here is the problem. Those bytes come from a seed, and the seed is derived from the
-**plaintext**. So the time the shuffle takes depends, weakly, on the secret being
-encrypted.
+And where do those bytes come from? A seed. And the seed is derived from the plaintext you're encrypting.
 
-> **Warning:** A loop whose iteration count depends on secret-derived data is a timing
-> side-channel. The leak here is tiny and noisy, and we know of no practical attack —
-> but constant-time execution is a discipline, not a cost-benefit call. Timing channels
-> have a habit of going from "theoretical" to "exploited" once someone finds the right
-> amplification.
+Follow the thread. The number of loops depends on the bytes, the bytes depend on the seed, the seed depends on your data. So the *time* the shuffle takes depends, faintly, on the secret it's meant to protect. That is the textbook definition of a timing side-channel: secret data steering how long the code runs.
 
-## How the fix works: wide draws + Lemire reduction
+How exploitable is it really? Barely. The wobble is tens of nanoseconds, smeared across many blocks and buried in noise, and I know of no practical attack against it. But "I couldn't break it" is not the bar. Constant-time execution is a discipline you keep precisely because timing leaks have a long history of looking harmless right up until someone finds the lever. A shuffle whose duration tracks the plaintext breaks that discipline. So it had to go.
 
-Two ideas, both about *how you draw the index* — the shuffle itself doesn't change.
+The lovely thing is that closing the channel also made it nearly nine times faster.
 
-**1. Draw wide.** Use a full 64-bit value instead of a byte. The leftover bias from
-splitting a power-of-two range into `n` buckets is always "at most one bucket is one
-element larger." What matters is that ±1 *relative to bucket size*:
+## Drawing dice from a firehose
 
-- A byte (256 values) into 63 buckets: 4 buckets over-represented → bias ≈ **1.5%**.
-- A 64-bit value into 63 buckets: ~63 buckets over-represented out of 2⁶⁴ → bias ≈ **2⁻⁵⁸**.
+The fix is two ideas, and neither one touches the shuffle. They change only how it draws a number.
 
-The wide draw doesn't remove the bias; it shrinks it to a rounding error — small enough
-that you no longer need rejection to hide it. Drop the retry loop, and the draw count
-becomes **fixed**.
+**First, draw wide.** Instead of a single byte, take a full 64-bit value. The leftover bias from squeezing a power-of-two range into 63 buckets is always at most "one bucket is one item bigger than the rest". What matters is how big that one item is *relative* to the bucket:
 
-**2. Reduce with Lemire's multiply-high.** Map a 64-bit `x` into `0..range` with one
-widening multiply and a shift — no division, no branch:
+- A byte into 63 buckets: about a 1.5% lean toward some values.
+- A 64-bit value into 63 buckets: about a 2⁻⁵⁸ lean. A rounding error.
+
+The wide draw doesn't erase the bias. It shrinks it until it's too small to bother hiding, which means you can throw away the rejection loop entirely. No loop, no variable timing.
+
+**Second, reduce with a multiply, not a modulo.** Daniel Lemire's trick maps a 64-bit `x` into a range with one widening multiply and a shift. Picture `x` as how far along the number line you landed, then scale that fraction up into your range:
 
 ```rust
-// uniform index in [0, range): no rejection loop, no modulo
+// uniform in [0, range): no loop, no modulo, no branch
 let j = ((x as u128 * range as u128) >> 64) as u64;
 ```
 
-Together: a fixed sequence of wide draws, each reduced with a multiply-high, replaces a
-variable-length rejection loop.
+Put together, a fixed run of wide draws each reduced by a multiply replaces a ragged loop of byte draws and retries. Same shuffle. Fixed timing. Faster.
 
 ```rust
-// Before: variable draw count — leaks time
+// Before: the number of iterations depends on the seed, which depends on the plaintext
 let mut v = rng.next_u32() % cap;
-while v > max { v = rng.next_u32() % cap; }   // retries depend on the seed
+while v > max { v = rng.next_u32() % cap; }
 
-// After: exactly one draw per index — constant-time
+// After: exactly one draw, every time, whatever the data
 let j = ((rng.next_u64() as u128 * (i as u128 + 1)) >> 64) as usize;
 ```
 
-**Expected outcome:** identical shuffle, seed-independent runtime, branch-free, and no
-division.
+## Giving up "perfect" to gain "constant"
 
-## The security trade is in our favour
+A cryptographer reading this just flinched. Rejection sampling gives you an *exactly* uniform shuffle. My version is only uniform to within about 2⁻⁵⁵ of perfect. Did I just trade away rigor for speed?
 
-Rejection sampling gives an *exactly* uniform permutation. The wide-draw version is
-uniform to within a **statistical distance of ~2⁻⁵⁵** of perfect.
+No, and this is the part I find genuinely satisfying. The Lewi-Wu security proof already models each block's permutation as a uniformly random one. My shuffle *is* that object, give or take 2⁻⁵⁵. So the change adds a single tiny number to a bound that was already there. No new assumption, no new model, nothing to argue about in review. For a draw that touches secret data, "uniform to 2⁻⁵⁵ in constant time" is a better thing to own than "exactly uniform, in variable time".
 
-That's not a loss, because the Lewi–Wu analysis already models each block's permutation
-as a uniformly random permutation. Our construction instantiates exactly that object, up
-to a 2⁻⁵⁵ term — so the change adds **one small number to the existing security bound**:
-no new assumption, no new model, nothing to argue about.
+## The fancy option I threw away
 
-> **Tip:** For secret-dependent draws, "uniform to 2⁻⁵⁵ in constant time" is a better
-> property than "exactly uniform in variable time." Reach for a fixed-count method
-> whenever you draw bounded random integers near secret data.
+I'll admit I wanted to use something cleverer. There's a beautiful constant-time PRP for small domains called swap-or-not. It vectorizes like a dream and looks like the *proper* cryptographic answer. I built it.
 
-## We tried the fancy option and rejected it
+Then I read its security proof more carefully and threw it away. Swap-or-not is strong only when an attacker can see a small slice of the value space. But in ORE a block's ciphertext effectively hands over the *whole* permutation, so the honest assumption is that the attacker sees everything, and at that point the proof gives you nothing on a 64-element domain at any practical setting. The known patch reintroduces data-dependent branching, the very timing channel I was trying to kill. A humble shuffle with a one-line proof beat the elegant primitive with a vacuous one. There's a lesson in that I keep relearning.
 
-For small domains there's an elegant constant-time PRP, **swap-or-not**. It vectorizes
-beautifully and looks like the "right" primitive. We prototyped it — and rejected it on
-the *proof*, not on speed (our shuffle was faster anyway).
+## Your AES might be asleep
 
-Swap-or-not's security bound is strong only when an attacker can query a small fraction
-of the value space. But in ORE, a block's ciphertext effectively exposes its **entire**
-permutation, so the honest assumption is "the attacker sees everything" — and there the
-bound becomes meaningless on a 64-element domain at any practical setting. The known fix
-reintroduces data-dependent control flow (a timing channel), defeating the point. A
-humble shuffle with a one-line proof beat the sophisticated primitive.
+While I had the profiler open, a second thing nagged at me. AES was crawling on Apple Silicon and our ARM servers.
 
-## The other finding: check that your AES is hardware AES
+The cause was almost insulting in its simplicity. The Rust `aes` crate doesn't switch on the ARMv8 hardware crypto instructions unless you ask, with a build flag. Leave it off, and you silently get a software fallback that runs about 60x slower per block, with nothing to warn you. Setting one flag took a `u64` encryption from 381µs to 39µs, before I'd improved a single line of algorithm. If you ship crypto onto ARM, go and check this today. It's the cheapest 60x you'll ever find. 🎉
 
-While benchmarking we found the Rust `aes` crate (v0.8) does **not** auto-enable the
-ARMv8 crypto extensions — you opt in with `RUSTFLAGS="--cfg aes_armv8"`. Without it you
-silently get software AES, ~60× slower per block. Setting the flag alone took a `u64`
-encryption from 381 µs to 39 µs.
+## Where it landed
 
-> **Tip:** If you ship cryptography on ARM servers (Graviton, Apple CI), confirm your
-> AES is hardware-accelerated. It's an easy 60× to leave on the table.
+Stack it all up, the hardware AES, an allocation-free rewrite, SIMD, and the constant-time shuffle, and a `u64` encryption went from 381µs to 8.6µs on an M1 Max. The shuffle alone dropped from roughly 1.36µs to 153ns, about nine times quicker, while *losing* a side-channel rather than gaining a risk.
 
-## Results
+## Then I went looking in our own house
 
-| Change | `u64` encrypt (M1 Max) |
-|---|---:|
-| Starting point (software AES) | 381 µs |
-| Hardware AES enabled | 39 µs |
-| Full v2 rewrite + constant-time PRP | **8.6 µs** |
+Once you've named a pattern you start seeing it everywhere. So I went hunting through our other Rust crates, and found the same rejection-sampling shape in vitaminc, our cryptography toolkit, feeding both a permutation generator and a password generator. Same root cause. The audit turned up two more bugs riding alongside it for free, including a draw that could index one past the end of an array and panic. Same fix closes all of it, and it's filed.
 
-The PRP construction alone dropped from ~1.36 µs to 153 ns — about **9× faster** —
-while *removing* a timing channel rather than adding risk.
+That's the bit I'd underline. The original shuffle was correct by the textbook, written by someone (me) who cared, and it still carried a quiet flaw for years. Speeding it up was the accident that made me look closely enough to see it. Performance work and security work are far more often the same work than we pretend, and the code most worth re-reading with fresh eyes is usually your own.
 
-## We found the same pattern in our own code
+*Go back and read the thing you were proud of. It has more to teach you than you think.*
 
-Once we'd named it, we went looking. The same rejection-sampling shape lives in
-`vitaminc`, our Rust cryptography toolkit, in its bounded-random helper (which feeds a
-permutation-key generator and a password generator). Same root cause, same fix — plus
-two correctness bugs the audit surfaced along the way. We've filed an issue and are
-fixing it.
-
-## Why this matters for CipherStash
-
-Constant-time discipline is part of what "searchable encryption you can trust" means.
-This work makes ORE measurably faster — helping searchable-encryption queries meet
-real-time performance needs — and removes a side-channel before it can ever matter.
-Finding and fixing the same class of issue across two of our libraries is the kind of
-continuous, proactive security posture our customers are buying, not a point-in-time
-checkbox.
-
-## Related
-
-- `ore-rs` (the ORE library) and its v2 architecture plan
-- CipherStash searchable encryption: [cipherstash.com](https://cipherstash.com)
-- Daniel Lemire, "Fast Random Integer Generation in an Interval" (2019)
-- Lewi–Wu, "Order-Revealing Encryption: New Constructions, Applications, and Lower
-  Bounds" (2016)
-
-## Takeaways
-
-1. **Rejection sampling is a timing channel** when the rejection count depends on
-   secret-derived randomness.
-2. **Wide draws + Lemire multiply-high** give fixed-count, branch-free, bounded integers
-   biased only to ~2⁻⁵⁵ — negligible, and a clean term in a proof.
-3. **"Exact via rejection" isn't automatically safer** for secret-dependent draws.
-4. **The most sophisticated primitive isn't always right** — swap-or-not's proof didn't
-   fit our threat model.
-5. **Check that your AES is hardware AES.** A build flag can be worth 60×.
+:wq
