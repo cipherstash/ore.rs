@@ -436,10 +436,34 @@ PR 2's trait change, which should be called out in the changelog).
 
 ## Open questions
 
-1. **Cheaper PRP for new schemes:** for Bit6's 64-element domain, a small-domain
-   constant-time PRP (e.g. swap-or-not or a sorting network) could beat the Knuth
-   shuffle and be SIMD-friendly. New schemes have no compatibility constraint — worth a
-   spike during PR 5, not a blocker.
+1. **Cheaper PRP for new schemes — RESOLVED by spike (2026-06-13, M1 Max, hw AES;
+   code at `/tmp/ore-prp-spike`, full analysis in its RESULTS.md):**
+   - **Winner: fixed-draw Fisher–Yates with pre-scheduled stream derivation** —
+     63 Lemire-reduced 64-bit draws (fixed 32 AES-CTR blocks, zero rejection
+     sampling, branch-free), with the stream produced under an already-scheduled
+     cipher instead of keying AES per block. **153 ns per block** (construction +
+     permute + indicator mask) vs ~1.36 µs for a port of today's Knuth-64.
+     Projected Bit6 u64 encrypt: **≈3.3 µs** (vs 11.5 µs in PR 5). Security story:
+     exact statistical distance ≤ 2⁻⁵⁵ from a uniformly random permutation — the
+     object Lewi-Wu already models — so it adds a pure statistical term, no new
+     assumption. One review item: secret-indexed swaps, defended by the
+     one-cache-line argument (64-byte `#[repr(align(64))]` table).
+   - **Swap-or-not is REJECTED for this setting**, not on speed but on proof: the
+     right ciphertext exposes a block PRP's full codebook across encryptions
+     sharing a prefix, so the honest query budget is q = N, where the HMR bound
+     `8N^{3/2}/(r+4)` is vacuous for any practical round count at N = 64. The
+     full-security fix (Morris–Rogaway 2014 sometimes-recurse) introduces
+     key-dependent recursion depth (a timing channel) and plain r=64 was 3×
+     slower than the winner anyway. Kept in the spike as the strictly
+     constant-time fallback if review rejects the cache-line argument.
+   - **Status-quo deficiency found:** the current rejection-sampled PRNG's draw
+     count is seed-dependent, and seeds derive from the plaintext prefix — an
+     encrypt-side plaintext-dependent timing channel in the legacy scheme (wire-
+     frozen, so document rather than fix there; the new PRP eliminates it).
+   - The pre-scheduled stream shape saves ~140–165 ns/block for *every* variant
+     and composes with §5(b): the CMAC accumulator can emit the fixed-count PRP
+     stream as one more branch family. Adopt in a PR 5 follow-up (Bit6 wire is
+     not frozen) pending the same crypto review as §6.
 2. **`u16` vs `u8` block count in the v2 header:** u16 chosen for strings; confirm no
    need for >65 535 blocks (≈48 KiB plaintext at Bit6).
 3. **Should Bit6 become the default scheme** recommended in the README once shipped, with
