@@ -462,8 +462,21 @@ PR 2's trait change, which should be called out in the changelog).
      frozen, so document rather than fix there; the new PRP eliminates it).
    - The pre-scheduled stream shape saves ~140–165 ns/block for *every* variant
      and composes with §5(b): the CMAC accumulator can emit the fixed-count PRP
-     stream as one more branch family. Adopt in a PR 5 follow-up (Bit6 wire is
-     not frozen) pending the same crypto review as §6.
+     stream as one more branch family.
+   - **SHIPPED in PR 5 (`LemireFyPrp<64>`, Bit6 only — Bit8 stays wire-frozen on
+     the Knuth shuffle):** the **seed-keyed shape (i)** is in, because it is a
+     drop-in for the existing `Prp::new(seed)` signature and its security story is
+     "identical key-usage structure, rejection sampling → fixed-count Lemire
+     draws." This already closes the timing channel, removes the bias, and takes
+     Bit6 u64 encrypt **11.5 µs → 8.6 µs** (benchmarks:
+     `docs/benchmarks/2026-06-13-bit6-prp-results.md`).
+   - **DEFERRED to PR 6:** the **pre-scheduled shape (ii)** — deriving the PRP
+     keystream under an already-scheduled cipher (no per-block AES key schedule;
+     the ~1.9 µs that separates 8.6 µs from the projected ≈3.3 µs). It needs the
+     PRP stream to come from a PRF/branch family rather than a fresh per-seed key
+     schedule, which is exactly what the §5(b) CMAC accumulator provides — so it
+     lands there, under the same crypto review, rather than as a bespoke
+     key-reuse pattern bolted onto PR 5.
 2. **`u16` vs `u8` block count in the v2 header:** u16 chosen for strings; confirm no
    need for >65 535 blocks (≈48 KiB plaintext at Bit6).
 3. **Should Bit6 become the default scheme** recommended in the README once shipped, with
