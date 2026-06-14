@@ -332,10 +332,29 @@ instance, so right-encryption throughput stays comparable to the packed scheme.
 
 **String semantics and leakage.** Strings are encoded as their UTF-8 bytes (optionally
 case-folded/normalised upstream — out of scope here), decomposed by the chosen width.
-Lewi-Wu leaks the index of the first differing block; for strings that is **the length
-of the common prefix**, which is materially more revealing than for fixed-width numerics.
-This must be documented prominently on the string API, and is a product-level decision
-about acceptable leakage, not something the library can engineer away.
+A comparison reveals the index of the first differing block; for strings that is **the
+length of the common prefix**, which is materially more revealing than for fixed-width
+numerics. But this leakage is scoped to the **comparison operation**, not to stored
+data, because Lewi-Wu is a left/right scheme: a comparison is only ever evaluated
+between a left ciphertext and a right ciphertext, and a right ciphertext in isolation
+reveals nothing about order. Three threat tiers follow:
+
+- **Offline / at rest (right-only storage, the default deployment):** an attacker who
+  exfiltrates the database holds only right ciphertexts, has no left ciphertext to
+  compare against, and recovers nothing — not order, and a fortiori not common-prefix
+  length. The offline case is clean.
+- **Query time (legitimate operator):** running a query emits a left ciphertext, and
+  each comparison against the stored rights reveals first-differing-block (=
+  common-prefix length for strings) for exactly the pairs that query touches.
+- **Online adversary observing queries:** an attacker who can watch enough query
+  traffic accumulates those per-comparison leakages and can reconstruct prefix
+  structure across the touched set.
+
+So the common-prefix disclosure is bounded to the **in-use / online** setting and never
+applies to data at rest. This must still be documented prominently on the string API,
+and the residual query-time/online leakage is a product-level decision about acceptable
+leakage — but it is a narrower decision than the unscoped framing suggests, and not
+something the library can engineer away.
 
 ### 6. Random-oracle instantiation (the 1-bit hash H)
 
@@ -411,7 +430,8 @@ PR 2's trait change, which should be called out in the changelog).
 - [ ] Accumulator chain state treated as key material: zeroized, never serialized,
       never reachable from `Left`/`Right` types (PR 6).
 - [ ] GF(2^128) doubling constant-time, if Candidate C is chosen (PR 6).
-- [ ] String leakage profile documented and acknowledged at product level (PR 6).
+- [ ] String leakage profile documented and acknowledged at product level — scoped to
+      query-time/online (right-only-at-rest reveals nothing); see §5(b) (PR 6).
 
 ## Decisions taken (revisit if needed)
 
