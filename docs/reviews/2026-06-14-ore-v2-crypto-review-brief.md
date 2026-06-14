@@ -18,12 +18,13 @@ Four crypto decisions gate the v2 work. Two block a PR that is already open
 | **A1** | 1-bit hash `H` instantiation | random-permutation (option 3) / ideal-cipher (option 2 fallback) | **shipped as default in #82** (`FixedPiZ2Hash`) | #82 merge + Bit6 vector pinning |
 | **A2** | Chained-prefix accumulator = AES-CMAC cached-state | CMAC PRF (standard) + 3 auditable claims | designed, not yet coded | PR 6 (variable-length / strings) |
 | **A3** | PRP keystream from the accumulator (shape ii) | statistical (≤2⁻⁵⁵) + branch-family soundness | shape (i) shipped; (ii) deferred | PR 6 perf; couples to A2 |
-| **A4** | Secret-indexed swap in PRP key-gen — accept the one-cache-line argument? | constant-time / cache-line | shipped **without** the claimed `repr(align(64))` mitigation | Bit6 vector pinning (a CT-PRP swap changes outputs) |
+| **A4** | Secret-indexed swap in PRP key-gen — ratify alignment + MemJam posture? | constant-time / cache-line (sub-line = oblivious tier) | `#[repr(C, align(64))]` + oblivious compare read + `N≤64` guard **applied** (uncommitted) | nothing — fixes are byte-stable; A1 alone gates vectors |
 
-**Recommended sequencing:** do **A1 + A4 first** (they gate freezing Bit6 and
-its test vectors), then **A2 + A3 as one pass** (they gate PR 6 and A3 only
-exists inside A2's accumulator). A1 and A4 are both coupled to vector pinning,
-so resolve them before any Bit6 byte vectors are committed.
+**Recommended sequencing:** do **A1 first** — it is now the sole gate on freezing
+Bit6 and its test vectors. **A4 is a ratification** of changes already applied
+(none of which alter ciphertexts), plus a posture call on MemJam; it no longer
+couples to vector pinning. Then **A2 + A3 as one pass** (they gate PR 6, and A3
+only exists inside A2's accumulator).
 
 **What is explicitly *not* in scope:** the legacy Bit8 scheme is wire-frozen and
 byte-identical to v1 (`tests/compat_vectors`); it keeps all status-quo
@@ -251,46 +252,152 @@ written* is secret. Do we accept the **one-cache-line argument** (the whole
 permutation table fits in a single cache line, so the access pattern leaks
 nothing through the cache), or require the strictly-constant-time fallback?
 
-### ⚠️ Discrepancy found in the shipped code
-The plan (Open Q1) states the mitigation is a **64-byte `#[repr(align(64))]`
-table** so the table provably occupies one cache line. **The shipped struct has
-no such alignment** (`prp.rs:135-139`):
+### Discrepancy found, now fixed (pending scrutiny)
+The plan (Open Q1) stated the mitigation is a **64-byte cache-line-aligned
+table**, but the originally shipped struct had **no alignment** (default
+alignment 1), so the 64-byte `permutation` array could straddle two lines —
+weakening, not establishing, the one-cache-line argument. There are in fact
+**two** secret-indexed writes during key generation that the argument must
+cover, not one:
+- the Fisher–Yates `permutation.swap(i, j)` — secret `j` (`prp.rs:195`);
+- the inverse fill `inverse[val] = …` — secret `val` (`prp.rs:198-200`).
 
-```rust
-#[derive(Zeroize)]
-pub struct LemireFyPrp<const N: usize> {
-    permutation: [u8; N],   // 64 bytes for Bit6, but NOT cache-line aligned
-    inverse:     [u8; N],
-}
-```
-
-With default alignment (1), the 64-byte `permutation` array can **straddle two
-cache lines**, which weakens — does not establish — the one-cache-line argument.
-**Action regardless of the verdict:** either add `#[repr(align(64))]` (and ensure
-`permutation` sits first / isolated within its own line) so the claimed
-mitigation actually holds, or the argument must be re-derived for an unaligned
-table.
+**Fix applied** (uncommitted, pending this review): `#[repr(C, align(64))]` on
+`LemireFyPrp` (`prp.rs:135-139`). `repr(C)` pins field order so `permutation` is
+at offset 0; `align(64)` puts the struct on a line boundary. At `N = 64` each
+`[u8; 64]` table is exactly one line — `permutation` → line 0, `inverse` →
+line 1 — so both secret-indexed writes are line-uniform. The argument holds only
+for **N ≤ 64**; the sole instantiation is `LemireFyPrp<64>`. A `const _ =
+assert!(N <= 64)` guard is proposed to make a larger instantiation a compile
+error.
 
 ### Context
 - The **read** paths are already constant-time: `permute`/`invert` are table
   lookups returning the value, and `indicator_mask_xor` scans the *entire*
   permutation table via a branch-free `gt_mask` kernel (`prp.rs:225-228`). Only
-  the **key-generation swap** is secret-indexed.
+  the **key-generation writes** (above) are secret-indexed.
 - Same class of issue exists in **vitaminc** (filed cipherstash/vitaminc#198)
   and in the legacy Bit8 Knuth path (wire-frozen — documented, not fixed).
-- The **strictly-constant-time fallback** (a swap-or-not / oblivious-swap form)
-  is preserved in the PRP spike if the cache-line argument is rejected.
+- **Two fallback forms, only one is wire-compatible** (this matters — see "MemJam
+  & the oblivious tier" below): an **oblivious-swap Fisher–Yates** (same FY, same
+  Lemire draws, constant-time `swap`/inverse-fill via full-scan conditional
+  select) produces the **identical permutation** → identical ciphertext →
+  drop-in, vectors unchanged, ~O(N²) swap cost. A **different construction**
+  (swap-or-not) produces a *different* permutation → incompatible wire format,
+  and was rejected on the q=N proof anyway. The oblivious-swap form is the one to
+  reach for.
+- **MemJam caveat (full analysis below):** cache-line alignment defends only at
+  *line* granularity; the sub-line (4-byte) MemJam channel on SMT-enabled Intel
+  is closed only by an oblivious construction.
 
-### Why this couples to vector pinning
-If review rejects the cache-line argument and mandates a different
-constant-time PRP construction, the *permutation it produces changes*, hence
-every Bit6 right ciphertext changes. So A4 must be settled **before Bit6 byte
-vectors are pinned** — same gate as A1.
+### Block-width asymmetry — the one-cache-line property is Bit6-only
+The construction-time argument does **not** scale to a hypothetical
+`LemireFyPrp<256>` (8-bit width), and the asymmetry is a positive argument for
+Bit6 as the default (open question 3):
+- **Construction (encryptor host) — strictly worse at D = 256.** The table is
+  256 bytes = **4 cache lines**, so each swap leaks ~2 bits (which-of-4-lines).
+  And there are more swaps per block (D−1 = **255 vs 63**): a u64 is **8 blocks ×
+  255 = 2040** secret-indexed swaps at Bit8 vs **11 × 63 = 693** at Bit6. Larger
+  domain grows swaps faster than it shrinks block count, so the "fewer blocks"
+  intuition inverts. No offsetting benefit on this axis.
+- **Comparison (comparator host) — tied.** The compare-side secret-indexed
+  access is `get_bit(target_block, a[l])` (next subsection). The right block is
+  256 bits = **32 bytes** at Bit8 and 64 bits = **8 bytes** at Bit6; both are
+  ≤ 64, so both fit within one cache line given alignment. Bit8 is **not** better
+  here — both widths are line-uniform.
+- These two leaks are on **different machines** (encryptor vs comparator) and
+  different trust domains, so neither offsets the other; each is evaluated
+  per-host. Net: 8-bit would be worse on construction and tied on compare — Bit6
+  has the stronger constant-time story end to end.
+
+### Compare-side: oblivious `get_bit` — FIXED (uncommitted, pending review)
+Comparison has its own secret-indexed access on the comparator host. After the
+constant-time scan finds the first differing block `l` (`bit2.rs:235-242`, done
+with `Choice`/`conditional_assign`), it reads byte `a[l] / 8` of the right block,
+where `a[l]` (the permuted symbol) is sensitive. The block base was at an
+arbitrary buffer offset, so the read could straddle a line.
+
+**Fix applied:** all four `get_bit` sites (`bit2.rs`, `bit2_w6.rs`, and the
+`RightBlock32`/`RightBlock8` inherent methods) now route the byte read through a
+new oblivious helper `width::ct_select_byte`, which scans the *entire* block and
+constant-time-selects the target byte, so the access address is independent of
+`a[l]`. This was chosen over mere alignment deliberately: an aligned direct index
+still leaks at sub-line (MemJam) granularity, whereas the full scan closes both
+line and sub-line channels. Cost is ≤ 32 byte-ops per comparison — negligible
+beside the per-comparison AES hash. Results are unchanged (compat + comparison
+vectors pass), so it does **not** touch the wire format. The block-*selection*
+index `l` is left as a direct index because `l` (first-differing-block) is leaked
+by ORE's definition anyway.
+- **Severity it addressed was low** (both `l` and `a[l]` are already in the
+  ciphertexts the comparator holds; the channel only matters to an attacker who
+  can time the comparator's cache but not read its memory), but the oblivious
+  read is cheap and removes the question entirely.
+- **Scope note:** production comparison runs in the Postgres extension / proxy
+  (separate codebase) and must adopt the same oblivious read (or `ore.rs`'s
+  comparator) — tracked separately; this repo's `compare_raw_slices` and typed
+  `cmp` are now fixed.
+
+### MemJam & the oblivious tier — risk, CPU scope, and wire compatibility
+This is the one open judgement call on the construction-side (encryptor) swap.
+The shipped `#[repr(C, align(64))]` fix makes the swap **line-uniform**, which
+closes the broad cache-line channel for everyone (AMD, ARM, and non-SMT Intel).
+It does **not** close MemJam.
+
+**What MemJam is.** 4K aliasing: Intel's memory disambiguation predicts
+store→load dependencies from only the low address bits, so an attacker who writes
+to an aliasing address forces a false read-after-write dependency and times the
+victim's load at **4-byte granularity within a cache line**. That is exactly why
+alignment (a 64-byte property) is insufficient.
+
+**CPU scope.**
+- **Intel x86 — effectively all generations, incl. modern parts and SGX.** The
+  MemJam paper's headline is that it applies to "all major Intel processors
+  including the latest generations," unlike its predecessor.
+- **Older Intel (pre-Haswell)** also fall to **CacheBleed** (cache-bank
+  conflicts, sub-line). Between the two, treat "intra-line is safe on Intel" as
+  false across the line.
+- **AMD** — not the MemJam target; no demonstrated equivalent, but not provably
+  immune.
+- **ARM (Apple Silicon, AWS Graviton)** — this mechanism does not apply.
+  Relevant: our benchmarks (M1 Max) and likely Graviton production are unaffected.
+
+**Threat model — co-residence required.** MemJam is **not remote**: the spy must
+run on the **sibling hyperthread (same physical core, SMT enabled)** of the
+victim, hammering the aliasing address throughout the computation. So the surface
+is: Intel **+** SMT on **+** attacker code on the same core as the *encryptor*
+**+** an attacker who cannot already read the victim's memory. Disabling SMT or
+core-isolation neutralizes it with no code change; running the encryptor on ARM
+sidesteps it entirely. Marginal leakage is small regardless — the swap addresses
+reveal partial info about a permutation whose codebook the ciphertext already
+largely exposes (the same fact that sank swap-or-not).
+
+**Recommendation.**
+1. **Default:** ship the `#[repr(C, align(64))]` fix; document that the
+   constant-time guarantee is at **cache-line granularity**, and that sub-line
+   (MemJam/CacheBleed) resistance on SMT-enabled Intel needs either SMT-off /
+   core-isolation **or** the oblivious build.
+2. **High-assurance tier:** offer the **oblivious-swap Fisher–Yates** builder
+   (~3× slower, already spiked) for threat models that include a malicious
+   co-tenant on Intel with SMT.
+
+This matches field practice — aligned-constant-time is the standard bar,
+oblivious is the paranoid tier — and lets the deployment, not the library, pay
+the 3× only when it needs to.
+
+### Relationship to vector pinning (revised)
+The MemJam tier does **not** gate Bit6 vector pinning, *provided the oblivious
+fallback is the oblivious-swap FY form* (recommended): it yields the identical
+permutation, so ciphertexts are byte-stable whether or not it is enabled. Vectors
+can be pinned after the A1/H decision, and the oblivious builder added later as a
+build option with no re-pin. (Only a *different-construction* fallback such as
+swap-or-not would change ciphertexts and force a re-pin — another reason to
+prefer oblivious-swap FY.)
 
 ### Decision & what it unblocks
-Either: (a) accept the one-cache-line argument **and** require the
-`#[repr(align(64))]` fix so it's true; or (b) mandate the CT fallback (and
-re-pin vectors against it). Settle before freezing Bit6 vectors.
+Ratify: (a) `#[repr(C, align(64))]` as the default construction-side fix; (b) the
+oblivious compare-side read; (c) the `N≤64` compile guard; and (d) the MemJam
+posture (document scope + offer oblivious-swap FY as the high-assurance build).
+None of (a)–(d) changes ciphertexts, so Bit6 vectors are gated only by A1.
 
 ---
 
@@ -299,10 +406,17 @@ re-pin vectors against it). Settle before freezing Bit6 vectors.
 **Gate 1 — before #82 merges / Bit6 vectors pinned:**
 - [ ] **A1** H construction selected (default option 3 ratified, or fall back to
       2 / escalate to 4); fixed-key-AES tweaking pitfalls (GKWY20) cleared for
-      our setting.
-- [ ] **A4** swap verdict given; if cache-line argument accepted,
-      `#[repr(align(64))]` fix landed; if rejected, CT-fallback PRP chosen.
-- [ ] Bit6 byte vectors regenerated and pinned **after** A1 + A4.
+      our setting. **This is the sole gate on Bit6 vector pinning.**
+- [ ] **A4** ratify the applied construction-side fix `#[repr(C, align(64))]`
+      (covers both secret-indexed writes; line-uniform at N ≤ 64).
+- [ ] **A4** ratify the `const _ = assert!(N <= 64)` compile guard (applied).
+- [ ] **A4** ratify the oblivious compare-side read `width::ct_select_byte`
+      (applied; all four `get_bit` sites; results unchanged).
+- [ ] **A4** MemJam posture: accept "default = line-granularity CT; sub-line
+      resistance via SMT-off / core-isolation or the oblivious-swap-FY build."
+      Decide whether to build the oblivious-swap-FY tier now or on demand.
+- [ ] Bit6 byte vectors regenerated and pinned **after A1** (all A4 fixes are
+      byte-stable; production comparator adopts `ct_select_byte` separately).
 
 **Gate 2 — before PR 6 is written:**
 - [ ] **A2** CMAC encoding fully specified and checked injective; many-outputs
@@ -321,4 +435,5 @@ re-pin vectors against it). Settle before freezing Bit6 vectors.
 - Benchmarks: `docs/benchmarks/2026-06-13-*.md`.
 - Lit: Lewi-Wu 2016 (BlockORE); BHKR13 / GKWY20 (fixed-key AES hashing);
   NIST SP 800-38B (CMAC); HMR12 + Morris-Rogaway 2014 (swap-or-not); Lemire 2019
-  (nearly-divisionless bounded random).
+  (nearly-divisionless bounded random); Moghimi et al. CT-RSA 2018 (MemJam,
+  arXiv:1711.08002) + Yarom et al. 2016 (CacheBleed) for the sub-line channels.

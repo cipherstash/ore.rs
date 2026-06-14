@@ -57,6 +57,34 @@ macro_rules! impl_aes_block_buf {
 impl_aes_block_buf!(256);
 impl_aes_block_buf!(64);
 
+/// Oblivious byte read: returns `block[idx]` while touching **every** byte of
+/// `block`, so the memory-access address is independent of `idx`.
+///
+/// The comparators read the right-ciphertext block at `bit / 8` where `bit` is
+/// the secret permuted symbol (`a[l]`, the left ciphertext's permuted index at
+/// the first differing block). A direct `block[bit / 8]` index makes the
+/// touched address secret-dependent, which is a cache-line timing channel — and
+/// because the block fits within a line, even an aligned direct index would
+/// still leak at sub-line (4-byte) granularity to a MemJam-class attacker on
+/// SMT-enabled Intel. Scanning the whole block removes the data-dependent
+/// address entirely, closing both. The block is ≤ 32 bytes, so the scan is
+/// cheap relative to the per-comparison AES hash.
+///
+/// See `docs/reviews/2026-06-14-ore-v2-crypto-review-brief.md` (A4, compare
+/// side). The bit-position shift (`>> (bit % 8)`) is a register shift, not a
+/// memory access, so it is not a cache channel and is left as-is.
+#[inline]
+pub(crate) fn ct_select_byte(block: &[u8], idx: usize) -> u8 {
+    use subtle_ng::{ConditionallySelectable, ConstantTimeEq};
+    let mut acc = 0u8;
+    for (i, &b) in block.iter().enumerate() {
+        // `i` is the public loop counter; `idx` is secret. Both index a block
+        // of ≤ 32 bytes, so the u8 cast is lossless.
+        acc.conditional_assign(&b, (i as u8).ct_eq(&(idx as u8)));
+    }
+    acc
+}
+
 /// Per-block bitvector operations on a Right ciphertext block, one bit per
 /// value in the block domain.
 pub trait RightBitVec {

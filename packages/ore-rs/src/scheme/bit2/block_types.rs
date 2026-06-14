@@ -40,11 +40,10 @@ impl RightBlock32 {
     #[inline]
     pub fn get_bit(&self, bit: usize) -> u8 {
         debug_assert!(bit < 256);
-        let byte_index = bit / 8;
-        let position = bit % 8;
-        let v = 1 << position;
-
-        (self.data[byte_index] & v) >> position
+        // `bit` is the secret permuted symbol; read the byte obliviously so the
+        // access address does not depend on it. See `width::ct_select_byte`.
+        let byte = crate::scheme::width::ct_select_byte(&self.data, bit / 8);
+        (byte >> (bit % 8)) & 1
     }
 }
 
