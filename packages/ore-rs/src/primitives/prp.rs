@@ -132,7 +132,23 @@ impl_knuth_shuffle_prp!(256, crate::primitives::simd::gt_mask_xor_256);
 /// new assumption, no new idealised model.
 ///
 /// New (non-wire-frozen) schemes only.
+///
+/// Layout note (constant-time): key generation performs two secret-indexed
+/// writes — the Fisher–Yates `permutation.swap(i, j)` (secret `j`) and the
+/// `inverse[val] = …` fill (secret `val`). The one-cache-line argument that
+/// defends these (any access within a single 64-byte line leaks nothing
+/// through the cache) requires each table to occupy exactly one line. At
+/// `N = 64` each `[u8; N]` is 64 bytes, so `#[repr(C, align(64))]` places
+/// `permutation` at offset 0 (line 0) and `inverse` at offset 64 (line 1):
+/// `repr(C)` pins field order (default `repr(Rust)` may reorder), `align(64)`
+/// puts the struct on a cache-line boundary. The argument only holds for
+/// `N ≤ 64`; the sole instantiation is `LemireFyPrp<64>`.
+///
+/// **Under review** — see `docs/reviews/2026-06-14-ore-v2-crypto-review-brief.md`
+/// (A4). If the cache-line argument is rejected, this is replaced by a strictly
+/// constant-time (oblivious-swap) construction.
 #[derive(Zeroize)]
+#[repr(C, align(64))]
 pub struct LemireFyPrp<const N: usize> {
     permutation: [u8; N],
     inverse: [u8; N],
@@ -152,6 +168,16 @@ impl<const N: usize> ZeroizeOnDrop for LemireFyPrp<N> {}
 /// bulk indicator kernel for the domain.
 macro_rules! impl_lemire_fy_prp {
     ($domain:literal, $stream_blocks:literal, $gt_mask:path) => {
+        // The one-cache-line constant-time argument for the secret-indexed
+        // key-generation writes (see the struct docs / review brief A4) holds
+        // only when each `[u8; N]` table fits a single 64-byte cache line. A
+        // larger domain silently spans multiple lines and loses the property,
+        // so make it a compile error rather than a comment.
+        const _: () = assert!(
+            $domain <= 64,
+            "LemireFyPrp: the one-cache-line constant-time argument requires domain <= 64"
+        );
+
         impl Prp<u8> for LemireFyPrp<$domain> {
             fn new(key: &[u8]) -> PrpResult<Self> {
                 if key.len() < 16 {

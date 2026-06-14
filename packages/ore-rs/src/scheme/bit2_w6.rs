@@ -289,11 +289,10 @@ fn right_block(input: &[u8], n: usize) -> &[u8] {
 fn get_bit(block: &[u8], bit: usize) -> u8 {
     debug_assert!(block.len() == RightBlock8::BLOCK_SIZE);
     debug_assert!(bit < 64);
-    let byte_index = bit / 8;
-    let position = bit % 8;
-    let v = 1 << position;
-
-    (block[byte_index] & v) >> position
+    // `bit` is the secret permuted symbol; read the byte obliviously so the
+    // access address does not depend on it. See `width::ct_select_byte`.
+    let byte = crate::scheme::width::ct_select_byte(block, bit / 8);
+    (byte >> (bit % 8)) & 1
 }
 
 impl<const N: usize> PartialEq for CipherText<OreAes128Bit6ChaCha20, N> {
