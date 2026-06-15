@@ -281,7 +281,8 @@ software on aarch64 (no key-schedule instruction); estimated 5–20% overhead ag
 Bit6's ~130 batched AES ops per block. **Benchmark gate:** measure NEON key-expansion
 overhead before committing.
 
-**Candidate B — CMAC with cached prefix state.** Every published value is a *bona
+**Candidate B — CMAC with cached prefix state.** *(SELECTED; full design spec:
+`docs/plans/2026-06-15-ore-v2-cmac-accumulator-spec.md`.)* Every published value is a *bona
 fide* AES-CMAC (NIST SP 800-38B) tag of an injectively encoded message — for block
 `i`: `enc(x₀‖0) ‖ … ‖ enc(x_{i-1}‖i−1) ‖ final_block(branch, value, i)` — and the
 per-prefix chaining-state cache is purely an implementation optimization (CMAC is CBC
