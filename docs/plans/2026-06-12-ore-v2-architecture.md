@@ -391,6 +391,46 @@ Default numerics to Bit8 (lower leakage, and it is the wire-frozen compatible sc
 strings pick width per the size/leakage trade in the PR 6 design. This supersedes the
 earlier lean toward "Bit6 as the default" (Open Q3).
 
+**Numeric encodings: fixed-point vs log/scientific (an encoding-layer option, not a
+low-entropy mitigation).** Block ORE is parameterised by *how* a value maps to blocks,
+not just by block width. For **wide-dynamic-range numerics** — currency, scientific /
+sensor measurements, high-range decimals — a **mantissa+exponent (a.k.a. log-domain)
+encoding** is a good fit: write `x ≈ f · base^e`, lay the exponent in the high-order
+blocks and the mantissa in the low-order blocks (order-preserving), then encode as
+usual. This is the same family as the "scientific notation" encoding used with CLWW ORE
+and as `round(scale · log_base(x))`. Benefits, all of which compose with the §5
+variable-block machinery:
+
+- **Bounds block count over a wide range** (cents-to-billions becomes exponent + a
+  fixed-width mantissa, not a 60-bit fixed-point integer).
+- **Uniform relative precision** — small and large values get the same significant-figure
+  blocks. (IEEE-754 already has this shape; the existing `f64` path exploits the
+  exponent-first layout.)
+- **Makes prefix leakage a deliberate choice** — "magnitude band + N significant
+  figures" rather than an accident of fixed-point width.
+
+Caveats to design in:
+- **Benford's law:** leading significant digits of natural numeric data are non-uniform
+  (1 ≈ 30%, 9 ≈ 5%), so the mantissa's top block stays skewed and inference-exposed.
+  Log encoding makes leakage *relative*, not *flat*.
+- **You are electing to leak the magnitude band** — usually acceptable, but a conscious
+  leakage decision.
+- **Parameters are a leakage surface:** per *Parameter-Hiding ORE* (Cash–Liu–O'Neill–
+  Zhang, ASIACRYPT 2018), the base/precision/scale leak distribution info if chosen
+  per value or per dataset. Fix them **per domain**, treat them as public constants, and
+  document them.
+
+**Explicit scope — do not conflate with the width/leakage decision above.** This encoding
+solves *dynamic range + relative precision + block count*. It is **order-preserving**, so
+it does **not** touch the order-leakage floor and is **not** a mitigation for low-entropy /
+narrow-domain fields (DOB, names, etc.). Those fail because their *high-order bits are
+skewed and ORE exposes them first*, plus the order floor (NKW sorting/cumulative); an
+order-preserving re-encoding — log or otherwise — cannot help, and for a narrow domain like
+DOB the exponent is near-constant (it *increases* high-order skew). The only lever there is
+coarsening the plaintext to the granularity actually queried (year / age-band). Keep the
+two ideas distinct: log/scientific encoding is for *wide-range numerics*; plaintext
+coarsening is for *low-entropy narrow domains*.
+
 ### 6. Random-oracle instantiation (the 1-bit hash H)
 
 Lewi-Wu models the right-ciphertext mask as a random oracle `H(ro_key, nonce) → Z₂`.
