@@ -86,22 +86,30 @@ fn pi() -> &'static Aes128 {
     PI.get_or_init(|| Aes128::new(GenericArray::from_slice(&PI_KEY)))
 }
 
-/// In-place GF(2^128) doubling `b ← 2·b` — the BHKR/Zahur orthomorphism `σ`
-/// (the same "multiply by x" used for CMAC subkey derivation; reduction
-/// polynomial x^128 + x^7 + x^2 + x + 1, constant `0x87`). Constant-time:
-/// fixed trip count, branch-free reduction, no secret-dependent control flow.
-/// `b` must be exactly 16 bytes (big-endian field element).
+/// GF(2^128) doubling `2·x` on a big-endian field element packed in a `u128`
+/// — the BHKR/Zahur orthomorphism `σ` ("multiply by x"; reduction polynomial
+/// x^128 + x^7 + x^2 + x + 1, constant `0x87`). A single shift plus a
+/// branch-free conditional XOR, replacing the per-byte carry loop that
+/// dominated the σ-MMO hot path (≈704 doublings per Bit6 u64 encrypt).
+/// Constant-time: no secret-dependent control flow.
+#[inline]
+fn gf128_double_u128(x: u128) -> u128 {
+    // `x << 1` discards the top bit (the GF reduction trigger); fold 0x87 into
+    // the low byte iff that bit was set. `x >> 127` is 0 or 1.
+    (x << 1) ^ ((x >> 127) * 0x87)
+}
+
+/// In-place GF(2^128) doubling `b ← 2·b`; `b` must be exactly 16 bytes
+/// (big-endian field element). Used by the scalar comparator path; the bulk
+/// encrypt path folds the doubling and nonce XOR into one `u128` pass (see
+/// `hash_all_into`).
 #[inline]
 fn gf128_double(b: &mut [u8]) {
     debug_assert_eq!(b.len(), 16);
-    let msb = b[0] >> 7; // bit shifted out of the top; capture before mutating
-    let mut carry = 0u8;
-    for i in (0..16).rev() {
-        let next = (b[i] << 1) | carry;
-        carry = b[i] >> 7;
-        b[i] = next;
-    }
-    b[15] ^= msb.wrapping_mul(0x87); // conditional reduction, branch-free
+    let mut arr = [0u8; 16];
+    arr.copy_from_slice(b);
+    let doubled = gf128_double_u128(u128::from_be_bytes(arr));
+    b.copy_from_slice(&doubled.to_be_bytes());
 }
 
 impl Hash for FixedPiZ2Hash {
@@ -129,12 +137,16 @@ impl Hash for FixedPiZ2Hash {
 
         // BHKR σ-MMO: m = σ(x) ⊕ r, then out = lsb(m) ^ lsb(π(m)), with
         // σ(x) = 2x in GF(2^128). Form m in place first so the feedforward
-        // captures lsb(m) rather than lsb(x).
+        // captures lsb(m) rather than lsb(x). Doubling and nonce XOR are fused
+        // into one u128 pass per block — this is the 704-evals/u64 hot loop.
+        let mut nonce_arr = [0u8; 16];
+        nonce_arr.copy_from_slice(self.nonce.as_slice());
+        let nonce = u128::from_be_bytes(nonce_arr);
         for block in data.iter_mut() {
-            gf128_double(block.as_mut_slice()); // σ(x)
-            for (slot, &r) in block.iter_mut().zip(self.nonce.iter()) {
-                *slot ^= r; // m = σ(x) ⊕ r
-            }
+            let mut arr = [0u8; 16];
+            arr.copy_from_slice(block.as_slice());
+            let m = gf128_double_u128(u128::from_be_bytes(arr)) ^ nonce;
+            block.copy_from_slice(&m.to_be_bytes());
         }
 
         // feedforward lsb(m)
