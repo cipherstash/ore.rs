@@ -438,4 +438,100 @@ mod tests {
         assert_eq!(cmp(&c, "", "a"), Ordering::Less);
         assert_eq!(cmp(&c, "", ""), Ordering::Equal);
     }
+
+    // --- Property tests --------------------------------------------------
+    //
+    // The contract under test is "the comparator reproduces the lexicographic
+    // order of the plaintext", over arbitrary inputs and (independent) lengths —
+    // not just the hand-picked words above. Lengths are capped so each case
+    // stays cheap (~97 AES ops/block) while still routinely exceeding the
+    // 14-block fixed-N packed-prefix cap.
+    const PROP_MAX_BLOCKS: usize = 32;
+
+    /// Map arbitrary bytes into the 6-bit block domain, length-capped.
+    fn to_domain(v: &[u8]) -> Vec<u8> {
+        v.iter().take(PROP_MAX_BLOCKS).map(|b| b & 0x3f).collect()
+    }
+
+    fn enc(c: &OreAes128Bit6ChainedChaCha20, x: &[u8]) -> Vec<u8> {
+        c.encrypt_var(x).unwrap().to_bytes()
+    }
+
+    quickcheck! {
+        /// Headline contract: the comparator reproduces the lexicographic order
+        /// of the underlying 6-bit block sequences, for arbitrary blocks and
+        /// arbitrary (independent) lengths — the full domain `0..64`, including
+        /// values that string inputs never produce.
+        fn prop_block_order_matches_lex(a: Vec<u8>, b: Vec<u8>) -> bool {
+            let c = ore();
+            let (a, b) = (to_domain(&a), to_domain(&b));
+            let (ea, eb) = (enc(&c, &a), enc(&c, &b));
+            OreAes128Bit6ChainedChaCha20::compare_raw_slices(&ea, &eb) == Some(a.cmp(&b))
+        }
+
+        /// Same, with a forced shared prefix — exercises the constant-time
+        /// prefix scan and first-differing-block selection at controlled common
+        /// lengths (independent random inputs almost never share a prefix).
+        fn prop_shared_prefix_order(prefix: Vec<u8>, sa: Vec<u8>, sb: Vec<u8>) -> bool {
+            let c = ore();
+            let p = to_domain(&prefix);
+            let mut a = p.clone();
+            a.extend(to_domain(&sa));
+            a.truncate(PROP_MAX_BLOCKS);
+            let mut b = p;
+            b.extend(to_domain(&sb));
+            b.truncate(PROP_MAX_BLOCKS);
+            let (ea, eb) = (enc(&c, &a), enc(&c, &b));
+            OreAes128Bit6ChainedChaCha20::compare_raw_slices(&ea, &eb) == Some(a.cmp(&b))
+        }
+
+        /// String comparison matches `str::cmp` across arbitrary Unicode and
+        /// independent lengths: the MSB-first 6-bit packing is order-preserving
+        /// even with tail zero-padding (cross-length prefix case included).
+        fn prop_string_order_matches_str(a: String, b: String) -> bool {
+            let c = ore();
+            let a: String = a.chars().take(12).collect();
+            let b: String = b.chars().take(12).collect();
+            let ea = c.encrypt_str(&a).unwrap().to_bytes();
+            let eb = c.encrypt_str(&b).unwrap().to_bytes();
+            OreAes128Bit6ChainedChaCha20::compare_raw_slices(&ea, &eb) == Some(a.cmp(&b))
+        }
+
+        /// Two encryptions of one plaintext (fresh nonces each) compare Equal,
+        /// and never produce identical bytes (the nonce streams differ).
+        fn prop_equality_across_nonces(x: Vec<u8>) -> bool {
+            let c = ore();
+            let x = to_domain(&x);
+            let (a, b) = (enc(&c, &x), enc(&c, &x));
+            let equal = OreAes128Bit6ChainedChaCha20::compare_raw_slices(&a, &b)
+                == Some(Ordering::Equal);
+            // Empty plaintexts have no right blocks, so their bytes can collide;
+            // only require nonce divergence when there is masked material.
+            let distinct = x.is_empty() || a != b;
+            equal && distinct
+        }
+
+        /// The left ciphertext is deterministic (it has no nonce) and is
+        /// byte-identical to the left half embedded in a full ciphertext — the
+        /// two encrypt paths must not drift.
+        fn prop_left_deterministic_and_consistent(x: Vec<u8>) -> bool {
+            let c = ore();
+            let x = to_domain(&x);
+            let l1 = c.encrypt_left_var(&x).unwrap().to_bytes();
+            let l2 = c.encrypt_left_var(&x).unwrap().to_bytes();
+            let full = c.encrypt_var(&x).unwrap();
+            l1 == l2 && full.left.to_bytes() == l1
+        }
+
+        /// Serialised full ciphertexts round-trip through `from_slice`.
+        fn prop_serialize_roundtrip(x: Vec<u8>) -> bool {
+            let c = ore();
+            let x = to_domain(&x);
+            let bytes = enc(&c, &x);
+            match VarCipherText::from_slice(&bytes) {
+                Ok(ct) => ct.to_bytes() == bytes,
+                Err(_) => false,
+            }
+        }
+    }
 }
