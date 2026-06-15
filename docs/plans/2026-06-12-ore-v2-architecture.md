@@ -356,6 +356,41 @@ and the residual query-time/online leakage is a product-level decision about acc
 leakage — but it is a narrower decision than the unscoped framing suggests, and not
 something the library can engineer away.
 
+**Block width is a leakage decision, not just a size/perf one.** In Lewi-Wu, the
+comparison leaks the index of the first differing block, so **larger blocks leak less**:
+Bit8 (8-bit) < Bit6 (6-bit) < CLWW (1-bit, the full first-differing-*bit*). For a u64,
+the first differing bit is localised to an **8-bit window** under Bit8 (8 blocks) but a
+**6-bit window** under Bit6 (11 blocks) — Bit6 sharpens an online inference adversary's
+divergence-point/density estimation by ~1.33×. It is an incremental sharpening, not the
+categorical jump to CLWW, but it is real and it is the one axis the library cannot fix.
+This sits opposite the **encrypt-side** advantage of Bit6 (the one-cache-line PRP; see
+Open Q1 / the A4 review brief): cheap constant-time key generation that Bit8 cannot get
+for free. The two pull in opposite directions and live in different threat models:
+
+- They do **not** net out: the leakage axis is an *online/query-time* property against an
+  inference adversary; the encrypt-side axis is a *side-channel* property against an
+  attacker co-resident with the encryptor. At rest, the leakage axis is a **tie** (both
+  reveal nothing), so there Bit6's win is free.
+- The encrypt-side axis is a **cost** difference, not "constant-time vs not": full
+  oblivious constant-time is available at *both* widths via oblivious-swap Fisher–Yates,
+  just ~12× cheaper at Bit6 (≈44k ct-ops/u64 vs ≈522k at Bit8). The leakage axis is the
+  **fundamental, unfixable** one.
+
+Because leakage is unfixable and encrypt-side CT is purchasable at either width, the
+lower-leakage width (Bit8) is the conservative **default**, with Bit6 an explicit opt-in.
+Width is therefore a **per-domain / per-deployment policy** keyed on the target data and
+threat model, not a global default:
+
+| Dominant threat | Encryptor environment | Choose |
+|---|---|---|
+| At-rest exfiltration (right-only) | any | **Bit6** — leakage tie, take the smaller ciphertext + cheap CT |
+| Online inference on the plaintext distribution | trusted / dedicated | **Bit8** — encrypt-side moot, take the lower leakage |
+| Online inference | hostile / multi-tenant | **Bit8 + oblivious-swap-FY** (low leakage *and* CT, ~522k ct-ops), or Bit6 if perf-bound and 2 bits of resolution is acceptable |
+
+Default numerics to Bit8 (lower leakage, and it is the wire-frozen compatible scheme);
+strings pick width per the size/leakage trade in the PR 6 design. This supersedes the
+earlier lean toward "Bit6 as the default" (Open Q3).
+
 ### 6. Random-oracle instantiation (the 1-bit hash H)
 
 Lewi-Wu models the right-ciphertext mask as a random oracle `H(ro_key, nonce) → Z₂`.
@@ -499,8 +534,14 @@ PR 2's trait change, which should be called out in the changelog).
      key-reuse pattern bolted onto PR 5.
 2. **`u16` vs `u8` block count in the v2 header:** u16 chosen for strings; confirm no
    need for >65 535 blocks (≈48 KiB plaintext at Bit6).
-3. **Should Bit6 become the default scheme** recommended in the README once shipped, with
-   Bit8 positioned as the legacy/compat scheme? Affects docs tone in PR 7.
+3. **Block width is a per-domain / per-deployment choice, not a global default
+   (RESOLVED — see §5(b) "Block width is a leakage decision").** Earlier framing asked
+   "should Bit6 be the default"; the answer is no, because width trades online
+   prefix-leakage (Bit8 leaks less — the unfixable axis) against encrypt-side
+   constant-time cost (Bit6 cheaper — a fixable axis). Default numerics to **Bit8**
+   (lower leakage + wire-compat); position **Bit6** as an opt-in for at-rest-dominated,
+   size/perf-sensitive, or encryptor-hostile (with CT budget) deployments. PR 7 docs
+   present the decision rule (the §5(b) table), not a single recommended scheme.
 4. **Pending review outcomes:** the §5(b) accumulator and §6 H selections await the
    NEON benchmark spike (PR 5) and internal crypto review; decision rules and
    candidate write-ups are inline in those sections.
