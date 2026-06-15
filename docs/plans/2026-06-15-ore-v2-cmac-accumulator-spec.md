@@ -75,12 +75,23 @@ k = E_{k_master}( "ORE.v2.chain.acc\x00" )      # 16-byte ASCII label, single AE
 (`k_master` = one of the `init(k1, k2)` keys; concrete slot TBD in review.) A
 dedicated key makes the accumulator's PRF security self-contained: no cross-use
 collisions with the fixed-N schemes or with H. The chained scheme therefore
-**unifies the old `prf1` and `prf2`** into one key with branch separation
-(below) — PRF₂ is subsumed.
+**unifies the old `prf1` and `prf2`** into one key, domain-separated by the
+**branch tag** (the `RO_KEY` / `PRP_STREAM` output families defined in §4) —
+PRF₂ is subsumed.
 
 ---
 
 ## 4. Message encoding (injectivity-critical)
+
+A **branch** names which output family a `finalize` derives. There are two:
+
+- **`RO_KEY`** (tag `0x01`) — the right-vector mask values `ro(n, j)`, and the
+  left tag `f[n] = ro(n, xt[n])`;
+- **`PRP_STREAM`** (tag `0x02`) — the Fisher–Yates keystream that builds `π_n`.
+
+These replace the fixed-N scheme's separate `prf1` (ro/f) and `prf2` (PRP) keys
+(§3); the branch is carried as the **byte-0 branch tag** of the final block, and
+is the `branch` argument in `F(branch, n, s)` below.
 
 Every block is exactly 16 bytes. Two block types, distinguished by byte 0.
 
