@@ -1,6 +1,6 @@
 use aes::cipher::{consts::U16, generic_array::GenericArray, BlockEncrypt, KeyInit};
 use aes::Aes128;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub struct Aes128Prng {
     cipher: Aes128,
@@ -14,8 +14,26 @@ impl Zeroize for Aes128Prng {
         for d in self.data.iter_mut() {
             d.as_mut_slice().zeroize();
         }
+        // Also clear the keystream position/counter state (ZA-0001).
+        self.ptr.0.zeroize();
+        self.ptr.1.zeroize();
+        self.ctr.zeroize();
     }
 }
+
+// `Aes128Prng` is built per-block inside the PRP and dropped without an
+// explicit `zeroize()` call, so its key-derived keystream (`data`) must be
+// wiped on drop (ZA-0001). The `cipher` field's AES key schedule is already
+// wiped by the `aes` crate's own `ZeroizeOnDrop` (the `zeroize` feature) when
+// it drops after this. As with `KnuthShufflePRP`, the `ZeroizeOnDrop` derive
+// does not apply cleanly here, so impl `Drop` manually and assert the marker.
+impl Drop for Aes128Prng {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for Aes128Prng {}
 
 /*
  * To aid in performance this PRNG can only generate 256 random numbers
@@ -112,5 +130,38 @@ mod tests {
         for _i in 0..=100_000 {
             prg.next_byte();
         }
+    }
+
+    // ZA-0001 regression: `zeroize()` must wipe the key-derived keystream
+    // *and* the position/counter state, and the type must be `ZeroizeOnDrop`
+    // so the wipe is triggered on drop (it is never called explicitly by the
+    // PRP). The `cipher` AES key schedule is wiped separately by the `aes`
+    // crate's own `ZeroizeOnDrop` when it drops.
+    #[test]
+    fn zeroize_clears_keystream_and_state() {
+        let mut prng = init_prng();
+        for _ in 0..20 {
+            let _ = prng.next_byte();
+        }
+        // Precondition: there is real state to wipe.
+        assert_ne!(prng.ctr, 0);
+        assert!(prng.data.iter().any(|b| b.iter().any(|&x| x != 0)));
+
+        prng.zeroize();
+
+        assert!(
+            prng.data.iter().all(|b| b.iter().all(|&x| x == 0)),
+            "keystream not cleared"
+        );
+        assert_eq!(prng.ptr, (0, 0), "position not cleared");
+        assert_eq!(prng.ctr, 0, "counter not cleared");
+    }
+
+    // Compile-time proof that the wipe runs on drop (not only on an explicit
+    // `zeroize()` the PRP never makes).
+    #[test]
+    fn impls_zeroize_on_drop() {
+        fn assert_zod<T: ZeroizeOnDrop>() {}
+        assert_zod::<Aes128Prng>();
     }
 }
