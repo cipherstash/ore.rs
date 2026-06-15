@@ -128,6 +128,10 @@ the gate that was holding that, and it is now cleared.
 
 ## 3. A2 — chained-prefix accumulator = CMAC cached-state  (§5b; blocks PR 6)
 
+> **Full design spec (2026-06-15):** `docs/plans/2026-06-15-ore-v2-cmac-accumulator-spec.md`
+> — pins the injective message encoding, per-block algorithm, security argument,
+> and test plan that this section summarises.
+
 ### The question
 PR 6 (variable-length / strings) needs an accumulator that absorbs the prefix
 incrementally and, at each block position, derives the per-block secrets/outputs
