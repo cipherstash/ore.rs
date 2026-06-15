@@ -79,6 +79,22 @@ collisions with the fixed-N schemes or with H. The chained scheme therefore
 **branch tag** (the `RO_KEY` / `PRP_STREAM` output families defined in §4) —
 PRF₂ is subsumed.
 
+**Key inventory.** The chained scheme has exactly **one secret key — `k`** —
+which produces *both* branches. Branch-tag domain separation under a good PRF is
+equivalent to independent per-branch keys (the injectivity argument of §4 + the
+CMAC-PRF reduction of §8), and is cheaper: one AES key schedule and one CMAC
+subkey pair (`L, K1, K2`) rather than two. The only other key-shaped material is
+**public** (H's fixed `π` constant `K₀`) or non-key (the per-ciphertext nonce).
+Two consequences for review:
+
+- **vs fixed-N (#82):** that scheme keeps two secret keys (`prf1`/`prf2`); the
+  unification is a *chained-scheme* choice, not retroactive.
+- **vs the `init(k1, k2)` API:** `k` is KDF-derived, so a single master input
+  suffices here — `k2` is redundant for this scheme unless retained for API
+  compatibility (open question 1). The alternative design — two keys, one per
+  branch, no branch tag — is equivalent in security but costs a second key
+  schedule/subkey pair; the single-key choice should be explicitly blessed.
+
 ---
 
 ## 4. Message encoding (injectivity-critical)
