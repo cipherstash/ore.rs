@@ -24,7 +24,7 @@ use crate::{
     primitives::{
         hash::FixedPiZ2Hash, prf::Aes128Prf, AesBlock, Hash, HashKey, Prf, Prp, NONCE_SIZE,
     },
-    scheme::width::{AesBlockBuf, Bit6, BlockWidth},
+    scheme::width::{AesBlockBuf, Bit6, BlockWidth, RightBitVec},
     OreCipher, OreError, PlainText,
 };
 
@@ -51,19 +51,12 @@ pub const MAX_BLOCKS: usize = 14;
 
 /// AES-128 BlockORE cipher over 6-bit blocks, generic over the RNG used
 /// for per-encryption nonces. Keys are zeroised on drop.
-#[derive(ZeroizeOnDrop)]
+#[derive(Debug, ZeroizeOnDrop)]
 pub struct OreAes128Bit6<R: Rng + SeedableRng> {
     prf1: Aes128Prf,
     prf2: Aes128Prf,
     #[zeroize(skip)]
     rng: RefCell<R>,
-}
-
-// Opaque Debug: never render key material (OpaqueDebug discipline).
-impl<R: Rng + SeedableRng> std::fmt::Debug for OreAes128Bit6<R> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OreAes128Bit6").finish_non_exhaustive()
-    }
 }
 
 /// Convenience alias for [`OreAes128Bit6`] backed by `ChaCha20Rng`.
@@ -109,8 +102,18 @@ impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
     }
 }
 
-// Right-block encoding is the width-/hash-generic helper shared with the
-// legacy scheme: `crate::scheme::bit2::encode_right_block::<Bit6, Z2Hash>`.
+fn encode_right_block(
+    block: &mut <Bit6 as BlockWidth>::RightBlock,
+    prp: &<Bit6 as BlockWidth>::Prp,
+    x: u8,
+    hasher: &Z2Hash,
+    ro_blocks: &mut [AesBlock],
+) {
+    debug_assert_eq!(ro_blocks.len(), <Bit6 as BlockWidth>::DOMAIN);
+    let out = block.as_mut_bytes();
+    hasher.hash_all_into(ro_blocks, out);
+    prp.indicator_mask_xor(x, out);
+}
 
 impl<R: Rng + SeedableRng> OreCipher for OreAes128Bit6<R> {
     type LeftBlockType = LeftBlock16;
@@ -198,13 +201,7 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128Bit6<R> {
             work.copy_from(&template);
             self.prf1.encrypt_all(work.as_mut_slice());
 
-            crate::scheme::bit2::encode_right_block::<Bit6, _>(
-                &mut right.data[n],
-                &prp,
-                x[n],
-                &hasher,
-                &mut work,
-            );
+            encode_right_block(&mut right.data[n], &prp, x[n], &hasher, &mut work);
         }
 
         self.prf1.encrypt_all(&mut left.f);
@@ -229,10 +226,7 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128Bit6<R> {
             return None;
         }
         let num_blocks = header_a.2;
-        // Reject a degenerate count=0 header: no OreEncrypt path produces zero
-        // blocks, and an empty scan would otherwise return Equal for any pair
-        // of crafted 0-block ciphertexts.
-        if num_blocks == 0 || num_blocks > MAX_BLOCKS {
+        if num_blocks > MAX_BLOCKS {
             return None;
         }
 
@@ -298,7 +292,7 @@ fn get_bit(block: &[u8], bit: usize) -> u8 {
     // `bit` is the secret permuted symbol; read the byte obliviously so the
     // access address does not depend on it. See `width::ct_select_byte`.
     let byte = crate::scheme::width::ct_select_byte(block, bit / 8);
-    crate::scheme::width::ct_bit(byte, (bit % 8) as u8)
+    (byte >> (bit % 8)) & 1
 }
 
 impl<const N: usize> PartialEq for CipherText<OreAes128Bit6ChaCha20, N> {

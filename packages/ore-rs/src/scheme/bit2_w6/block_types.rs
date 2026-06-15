@@ -21,7 +21,7 @@ impl RightBlock8 {
         // `bit` is the secret permuted symbol; read the byte obliviously so the
         // access address does not depend on it. See `width::ct_select_byte`.
         let byte = crate::scheme::width::ct_select_byte(&self.data, bit / 8);
-        crate::scheme::width::ct_bit(byte, (bit % 8) as u8)
+        (byte >> (bit % 8)) & 1
     }
 }
 
