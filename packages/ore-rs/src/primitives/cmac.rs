@@ -78,7 +78,8 @@ impl CmacAccumulator {
 
     #[inline]
     fn encrypt(&self, mut b: [u8; 16]) -> [u8; 16] {
-        self.cipher.encrypt_block(GenericArray::from_mut_slice(&mut b));
+        self.cipher
+            .encrypt_block(GenericArray::from_mut_slice(&mut b));
         b
     }
 
@@ -119,6 +120,7 @@ impl Drop for CmacAccumulator {
 mod tests {
     use super::*;
     use hex_literal::hex;
+    use quickcheck::TestResult;
 
     // NIST SP 800-38B, AES-128 CMAC examples (Appendix D.1). Validates that
     // this is real CMAC: the K1 subkey, the single-full-block tag, and the
@@ -172,5 +174,75 @@ mod tests {
         let _ = acc.finalize(&final_block(BRANCH_PRP_STREAM, 1, 0, WIDTH_BIT6));
         let a_again = acc.finalize(&final_block(BRANCH_RO_KEY, 1, 0, WIDTH_BIT6));
         assert_eq!(a, a_again);
+    }
+
+    /// Independent from-scratch CMAC of a whole-block message: CBC-MAC chain
+    /// over all but the last block, then `E_k(state ⊕ last ⊕ K1)`. Mirrors the
+    /// NIST construction without reusing the accumulator's state threading, so
+    /// it can validate that threading for any block count (not just t∈{1,4}).
+    fn reference_cmac(key: &[u8; 16], blocks: &[[u8; 16]]) -> [u8; 16] {
+        let cipher = Aes128::new(GenericArray::from_slice(key));
+        let enc = |mut b: [u8; 16]| {
+            cipher.encrypt_block(GenericArray::from_mut_slice(&mut b));
+            b
+        };
+        let k1 = gf128_double_u128(u128::from_be_bytes(enc([0u8; 16]))).to_be_bytes();
+        let (last, prefix) = blocks.split_last().expect("at least one block");
+        let mut state = 0u128;
+        for blk in prefix {
+            state = u128::from_be_bytes(enc((state ^ u128::from_be_bytes(*blk)).to_be_bytes()));
+        }
+        enc((state ^ u128::from_be_bytes(*last) ^ u128::from_be_bytes(k1)).to_be_bytes())
+    }
+
+    quickcheck! {
+        /// Incremental absorb-then-finalize over an arbitrary number of full
+        /// blocks equals a from-scratch CMAC. Validates the chain threading and
+        /// subkey use for every block count, well beyond the two fixed vectors.
+        fn prop_incremental_matches_reference(key: Vec<u8>, msg: Vec<u8>) -> TestResult {
+            if key.len() < 16 {
+                return TestResult::discard();
+            }
+            let mut k = [0u8; 16];
+            k.copy_from_slice(&key[..16]);
+
+            // 1..=8 full blocks, derived from `msg` (deterministic, never empty).
+            let nblocks = 1 + (msg.len() % 8);
+            let mut blocks = Vec::with_capacity(nblocks);
+            for i in 0..nblocks {
+                let mut b = [0u8; 16];
+                for (j, slot) in b.iter_mut().enumerate() {
+                    *slot = msg
+                        .get(i * 16 + j)
+                        .copied()
+                        .unwrap_or((i as u8).wrapping_mul(31).wrapping_add(j as u8));
+                }
+                blocks.push(b);
+            }
+
+            let mut acc = CmacAccumulator::new(&k);
+            let (last, prefix) = blocks.split_last().unwrap();
+            for blk in prefix {
+                acc.absorb(blk);
+            }
+            TestResult::from_bool(acc.finalize(last) == reference_cmac(&k, &blocks))
+        }
+
+        /// Final blocks injectively encode `(branch, n, s, width)`: the tuple is
+        /// recoverable from the bytes, so distinct inputs give distinct blocks.
+        fn prop_final_block_injective(branch: u8, n: u16, s: u16, width: u8) -> bool {
+            let fb = final_block(branch, n, s, width);
+            fb[0] == branch
+                && u16::from_be_bytes([fb[1], fb[2]]) == n
+                && u16::from_be_bytes([fb[3], fb[4]]) == s
+                && fb[5] == width
+        }
+
+        /// Prefix blocks carry byte0 == 0x00 (never colliding with a final
+        /// block) and injectively encode `(pos, sym)`.
+        fn prop_prefix_block_injective(pos: u16, sym: u8) -> bool {
+            let pb = prefix_block(pos, sym);
+            pb[0] == 0x00 && u16::from_be_bytes([pb[1], pb[2]]) == pos && pb[3] == sym
+        }
     }
 }
