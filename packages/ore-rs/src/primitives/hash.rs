@@ -47,18 +47,28 @@ impl Hash for Aes128Z2Hash {
     }
 }
 
-/// Z2 hash instantiated as `LSB(π(x ⊕ r) ⊕ x)` with `π` a *fixed public*
-/// AES-128 permutation and `r` the per-ciphertext nonce — the
-/// fixed-key-AES MMO construction proposed in the v2 plan §6 (option 3),
-/// analysed in the random-permutation model (cf. BHKR13 / GKWY20).
+/// Z2 hash instantiated as the BHKR fixed-key-AES **σ-MMO** construction:
+/// `H(x, r) = LSB(π(σ(x) ⊕ r) ⊕ σ(x) ⊕ r)`, where `π` is a *fixed public*
+/// AES-128 permutation (public key [`PI_KEY`]), `r` is the per-ciphertext
+/// nonce, and `σ(x) = 2·x` is the GF(2^128) doubling orthomorphism (the
+/// BHKR/Zahur linear orthomorphism; both `σ` and `σ ⊕ id` are permutations).
+/// v2 plan §6 option 3 — **A1 resolved 2026-06-15** — analysed in the
+/// random-permutation model (BHKR13; GKWY20; Guo–Katz–Wang–Weng–Yu, eprint
+/// 2019/1168).
 ///
-/// The `Hash::new` "key" parameter carries the **nonce** (same calling
-/// convention as [`Aes128Z2Hash`], which uses the nonce as an AES key);
-/// the AES key here is the public constant [`PI_KEY`] and is expanded
-/// once per process.
+/// The orthomorphism `σ` is the only departure from plain MMO and is adopted
+/// as cheap defense-in-depth, not to fix a present weakness: the known attacks
+/// on fixed-key MMO (GKWY; the half-gates attack of eprint 2019/1168) require
+/// *known, Free-XOR-correlated* hash inputs plus a recoverable global offset —
+/// neither of which ORE has, since its `H` inputs are independent **secret**
+/// PRF outputs and there is no global offset. `σ` makes the construction
+/// secure by matching the named BHKR/Zahur hash rather than by a usage
+/// argument. The cryptanalysis of round-reduced AES hashing (eprint 2025/792)
+/// targets collision/preimage/one-wayness — properties this 1-bit hash does
+/// not rely on — and never reaches full-round AES-128.
 ///
-/// **Status: pending crypto review** (v2 plan §6) — used only by post-v2
-/// schemes whose wire format is not yet frozen.
+/// The `Hash::new` "key" parameter carries the **nonce** `r`; the AES key is
+/// the public constant [`PI_KEY`], expanded once per process.
 pub struct FixedPiZ2Hash {
     nonce: AesBlock,
 }
@@ -76,6 +86,24 @@ fn pi() -> &'static Aes128 {
     PI.get_or_init(|| Aes128::new(GenericArray::from_slice(&PI_KEY)))
 }
 
+/// In-place GF(2^128) doubling `b ← 2·b` — the BHKR/Zahur orthomorphism `σ`
+/// (the same "multiply by x" used for CMAC subkey derivation; reduction
+/// polynomial x^128 + x^7 + x^2 + x + 1, constant `0x87`). Constant-time:
+/// fixed trip count, branch-free reduction, no secret-dependent control flow.
+/// `b` must be exactly 16 bytes (big-endian field element).
+#[inline]
+fn gf128_double(b: &mut [u8]) {
+    debug_assert_eq!(b.len(), 16);
+    let msb = b[0] >> 7; // bit shifted out of the top; capture before mutating
+    let mut carry = 0u8;
+    for i in (0..16).rev() {
+        let next = (b[i] << 1) | carry;
+        carry = b[i] >> 7;
+        b[i] = next;
+    }
+    b[15] ^= msb.wrapping_mul(0x87); // conditional reduction, branch-free
+}
+
 impl Hash for FixedPiZ2Hash {
     fn new(nonce: &HashKey) -> Self {
         Self { nonce: *nonce }
@@ -83,33 +111,40 @@ impl Hash for FixedPiZ2Hash {
 
     fn hash(&self, data: &[u8]) -> u8 {
         assert_eq!(data.len(), 16);
-        let x_lsb = data[0] & 1u8;
+        // BHKR σ-MMO: m = σ(x) ⊕ r; return lsb(π(m) ⊕ m).
         let mut block = [0u8; 16];
-        for (slot, (&x, &r)) in block.iter_mut().zip(data.iter().zip(self.nonce.iter())) {
-            *slot = x ^ r;
+        block.copy_from_slice(data);
+        gf128_double(&mut block); // σ(x) = 2x
+        for (slot, &r) in block.iter_mut().zip(self.nonce.iter()) {
+            *slot ^= r; // m = σ(x) ⊕ r
         }
+        let m_lsb = block[0] & 1u8;
         let block = GenericArray::from_mut_slice(&mut block);
         pi().encrypt_block(block);
-        (block[0] & 1u8) ^ x_lsb
+        (block[0] & 1u8) ^ m_lsb
     }
 
     fn hash_all_into(&self, data: &mut [AesBlock], out: &mut [u8]) {
         debug_assert_eq!(out.len() * 8, data.len());
 
-        // Feedforward: capture the x LSBs before overwriting, then
-        // out = lsb(x) ^ lsb(π(x ⊕ r)).
+        // BHKR σ-MMO: m = σ(x) ⊕ r, then out = lsb(m) ^ lsb(π(m)), with
+        // σ(x) = 2x in GF(2^128). Form m in place first so the feedforward
+        // captures lsb(m) rather than lsb(x).
+        for block in data.iter_mut() {
+            gf128_double(block.as_mut_slice()); // σ(x)
+            for (slot, &r) in block.iter_mut().zip(self.nonce.iter()) {
+                *slot ^= r; // m = σ(x) ⊕ r
+            }
+        }
+
+        // feedforward lsb(m)
         if data.len() == 256 {
             crate::primitives::simd::lsb_mask_256(data, out);
         } else {
             crate::primitives::simd::scalar::lsb_mask(data, out);
         }
 
-        for block in data.iter_mut() {
-            for (slot, &r) in block.iter_mut().zip(self.nonce.iter()) {
-                *slot ^= r;
-            }
-        }
-        pi().encrypt_blocks(data);
+        pi().encrypt_blocks(data); // π(m)
 
         let mut pi_mask = [0u8; 32];
         let pi_mask = &mut pi_mask[..out.len()];
@@ -167,5 +202,57 @@ mod tests {
         let input: [u8; 24] = hex!("00010203 04050607 ffffffff bbbbbbbb cccccccc abababab");
 
         hash.hash(&input);
+    }
+
+    // The comparator uses the scalar `hash`; encryption uses the bulk
+    // `hash_all_into`. For the BHKR σ-MMO they must agree bit-for-bit, over
+    // both the scalar (n=64, the Bit6 domain) and SIMD (n=256) `lsb_mask`
+    // backends.
+    #[test]
+    fn fixed_pi_scalar_matches_bulk() {
+        let nonce: [u8; 16] = hex!("0f0e0d0c 0b0a0908 07060504 03020100");
+        let h: FixedPiZ2Hash = Hash::new(GenericArray::from_slice(&nonce));
+
+        for &n in &[64usize, 256usize] {
+            let mut blocks: Vec<AesBlock> = (0..n)
+                .map(|i| {
+                    let mut b = [0u8; 16];
+                    for (j, slot) in b.iter_mut().enumerate() {
+                        *slot = (i.wrapping_mul(31).wrapping_add(j)) as u8;
+                    }
+                    *GenericArray::from_slice(&b)
+                })
+                .collect();
+
+            let mut expected = vec![0u8; n / 8];
+            for (i, b) in blocks.iter().enumerate() {
+                expected[i / 8] |= h.hash(b.as_slice()) << (i % 8);
+            }
+
+            let mut out = vec![0u8; n / 8];
+            h.hash_all_into(&mut blocks, &mut out);
+            assert_eq!(out, expected, "scalar vs bulk mismatch for n={}", n);
+        }
+    }
+
+    // σ(x) = 2x must be an orthomorphism: both σ and σ⊕id are permutations.
+    // Spot-check the GF(2^128) doubling against the textbook shift/0x87 rule.
+    #[test]
+    fn gf128_double_reduction() {
+        // High bit clear: pure left shift.
+        let mut b = [0u8; 16];
+        b[15] = 0x01;
+        gf128_double(&mut b);
+        let mut want = [0u8; 16];
+        want[15] = 0x02;
+        assert_eq!(b, want);
+
+        // High bit set: shift then XOR 0x87 into the low byte.
+        let mut b = [0u8; 16];
+        b[0] = 0x80;
+        gf128_double(&mut b);
+        let mut want = [0u8; 16];
+        want[15] = 0x87;
+        assert_eq!(b, want);
     }
 }

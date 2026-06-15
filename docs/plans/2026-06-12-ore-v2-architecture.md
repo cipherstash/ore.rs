@@ -433,6 +433,14 @@ coarsening is for *low-entropy narrow domains*.
 
 ### 6. Random-oracle instantiation (the 1-bit hash H)
 
+> **RESOLVED 2026-06-15 (A1).** Keep the fixed public-key AES construction
+> (option 3), upgraded with the BHKR orthomorphism: `H(x, r) = LSB(π(σ(x) ⊕ r) ⊕
+> σ(x) ⊕ r)` with `π = AES_{K₀}` (public `K₀`) and `σ(x) = 2x` in GF(2^128) (the
+> BHKR/Zahur σ-MMO). Rationale below; full write-up in the crypto review brief
+> A1 (`docs/reviews/2026-06-14-ore-v2-crypto-review-brief.md`). Tweak-as-key
+> (eprint 2019/1168 Thm 2) was **declined** (rekeying breaks the keyless/fast
+> requirement, and fixes a multi-instance degradation ORE doesn't suffer).
+
 Lewi-Wu models the right-ciphertext mask as a random oracle `H(ro_key, nonce) → Z₂`.
 Today it is instantiated as `LSB(AES_nonce(ro_key))` — the **nonce as the AES key** —
 and the code has carried a TODO questioning that construction since the beginning
@@ -451,14 +459,25 @@ key / left tag, `r` = nonce):
 |---|---|---|---|---|
 | 1 | `LSB(AES_r(x))` — status quo | ideal cipher | — | key is public, so AES's standard PRP assumption gives nothing; security is an ideal-cipher assertion |
 | 2 | `LSB(AES_r(x) ⊕ x)` — MMO feedforward | ideal cipher | +1 XOR | matches the analyzed blockcipher-hashing shape; feedforward removes the invertible-public-permutation structure; the minimal upgrade |
-| 3 | `LSB(π(x ⊕ r) ⊕ x)`, `π = AES_{K₀}`, K₀ public constant | random permutation | **faster** — zero key schedules ever | fixed-key-AES hashing (BHKR13); mine GKWY20 for known `x ⊕ r` tweaking pitfalls (our requirements are weaker than garbling's — no circularity, no correlated keys) |
+| 3 | **SELECTED:** `LSB(π(σ(x) ⊕ r) ⊕ σ(x) ⊕ r)`, `π = AES_{K₀}`, `σ(x)=2x` | random permutation | **faster** — zero key schedules ever | BHKR/Zahur σ-MMO. GKWY/half-gates attacks (eprint 2019/1168) need *known* inputs + a global offset; ORE has independent *secret* PRF inputs and no offset, so they don't port. σ is cheap defense-in-depth. 2025/792 attacks (collision/preimage) target unused properties and are round-reduced |
 | 4 | `LSB(AES_x(r))` — RO key as AES key | **standard model** (PRF) | ~2–4× right-encryption: one key schedule per `(i, j)` | what the old TODO was reaching for; the honest price of standard-model security; composes poorly with accumulator Candidate A (both pay per-block schedules) |
 | 5 | SHA-256 (HW) / Blake3 over `x ‖ r` | random oracle | 2–5× encrypt path | comparator computes H once per comparison, so query latency is unaffected — only encryption throughput pays |
 
-Proposal into review: **#3, with #2 as the conservative fallback**, and #4 written up
-with its *measured* cost so the standard-model option is accepted or declined with the
-price visible. The 1-bit truncation (LSB of a pseudorandom block) is uncontroversial
-in every model.
+Decision (2026-06-15): **#3 with the BHKR orthomorphism `σ(x)=2x`** — `H(x,r) =
+LSB(π(σ(x)⊕r) ⊕ σ(x)⊕r)`. The known fixed-key-MMO attacks (GKWY; the half-gates
+multi-instance attack of eprint 2019/1168) require the adversary to know the hash
+inputs and recover a global Free-XOR offset — ORE's inputs are independent *secret*
+PRF outputs and there is no global offset, so neither precondition holds and the
+`O(p·C/2^k)` degradation does not arise. The orthomorphism is not strictly needed
+in this setting; it is adopted as nearly-free defense-in-depth so security holds by
+matching the named BHKR/Zahur construction rather than by a usage argument. The
+tight tweak-as-key variant (2019/1168 Thm 2) is declined: rekeying per evaluation
+conflicts with the keyless-comparator / performance requirement and addresses a
+degradation absent here. AES-hashing cryptanalysis (eprint 2025/792) targets
+collision/preimage/one-wayness — not the 1-bit correlation-robustness we rely on —
+and reaches only round-reduced AES (7/10 collision), leaving full AES-128's margin.
+The 1-bit truncation is uncontroversial in every model. Options #2/#4/#5 remain in
+the table as the considered alternatives.
 
 ## PR roadmap
 
@@ -499,8 +518,8 @@ PR 2's trait change, which should be called out in the changelog).
 - [ ] PRP seeds (PRF₂ outputs) structurally separated from serializable `Left` state;
       no code path can write seed material into a ciphertext (PR 2).
 - [ ] Domain separation between Bit8/Bit6/chained schemes under shared keys (PR 5, 6).
-- [ ] H instantiation (§6) selected and signed off, with its security model
-      (ideal-cipher / random-permutation / standard) recorded (before PR 5).
+- [x] H instantiation (§6) selected and signed off (2026-06-15): BHKR σ-MMO,
+      random-permutation model; see §6 and review brief A1.
 - [ ] Selected §5(b) accumulator candidate reviewed and signed off (before PR 6).
 - [ ] Accumulator chain state treated as key material: zeroized, never serialized,
       never reachable from `Left`/`Right` types (PR 6).
@@ -521,10 +540,11 @@ PR 2's trait change, which should be called out in the changelog).
    `u128`/`Decimal` on Bit6 arrive with PR 6 if wanted.
 5. **Strings use the chained-prefix variable-length scheme regardless of width**; width
    choice (6 vs 8) for strings is a ciphertext-size trade-off left to the PR 6 design.
-6. **H decision is pulled forward to before PR 5** (not PR 6): Bit6 is a new scheme and
-   should ship with the chosen H rather than inherit nonce-as-key for compatibility's
-   sake. Proposal: fixed-public-permutation MMO (§6 option 3), conservative fallback
-   MMO-with-nonce-key (option 2).
+6. **H = BHKR σ-MMO with fixed public AES key (§6, A1 RESOLVED 2026-06-15):**
+   `LSB(π(σ(x)⊕r) ⊕ σ(x)⊕r)`, `σ(x)=2x`. Bit6 ships with this rather than inheriting
+   nonce-as-key. GKWY/half-gates attacks don't port (secret independent inputs, no
+   global offset); tweak-as-key declined (rekeying); 2025/792 hits only unused
+   properties on round-reduced AES. Legacy Bit8 keeps the status quo forever.
 7. **Accumulator choice is a decision rule, not a fixed pick:** cascade/GGM if NEON
    key-expansion overhead measures under ~10–15% on Bit6 strings, else CMAC with
    cached state; XE only if profiling eliminates both (§5(b)).
