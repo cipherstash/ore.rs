@@ -15,16 +15,16 @@ Four crypto decisions gate the v2 work. Two block a PR that is already open
 
 | # | Decision | Model claimed | Status in code | Blocks |
 |---|----------|---------------|----------------|--------|
-| **A1** | 1-bit hash `H` instantiation | random-permutation (option 3) / ideal-cipher (option 2 fallback) | **shipped as default in #82** (`FixedPiZ2Hash`) | #82 merge + Bit6 vector pinning |
+| **A1** | 1-bit hash `H` instantiation | random-permutation (BHKR σ-MMO) | ✅ **RESOLVED** — `FixedPiZ2Hash` = `LSB(π(σ(x)⊕r)⊕σ(x)⊕r)`, σ(x)=2x | — (was the Bit6-vector gate; now cleared) |
 | **A2** | Chained-prefix accumulator = AES-CMAC cached-state | CMAC PRF (standard) + 3 auditable claims | designed, not yet coded | PR 6 (variable-length / strings) |
 | **A3** | PRP keystream from the accumulator (shape ii) | statistical (≤2⁻⁵⁵) + branch-family soundness | shape (i) shipped; (ii) deferred | PR 6 perf; couples to A2 |
 | **A4** | Secret-indexed swap in PRP key-gen — ratify alignment + MemJam posture? | constant-time / cache-line (sub-line = oblivious tier) | `#[repr(C, align(64))]` + oblivious compare read + `N≤64` guard **applied** (uncommitted) | nothing — fixes are byte-stable; A1 alone gates vectors |
 
-**Recommended sequencing:** do **A1 first** — it is now the sole gate on freezing
-Bit6 and its test vectors. **A4 is a ratification** of changes already applied
-(none of which alter ciphertexts), plus a posture call on MemJam; it no longer
-couples to vector pinning. Then **A2 + A3 as one pass** (they gate PR 6, and A3
-only exists inside A2's accumulator).
+**Recommended sequencing:** **A1 is resolved** (BHKR σ-MMO) — Bit6 vectors can now
+be generated and pinned against it. **A4 is a ratification** of changes already
+applied (none of which alter ciphertexts), plus a posture call on MemJam. Then
+**A2 + A3 as one pass** (they gate PR 6, and A3 only exists inside A2's
+accumulator).
 
 **What is explicitly *not* in scope:** the legacy Bit8 scheme is wire-frozen and
 byte-identical to v1 (`tests/compat_vectors`); it keeps all status-quo
@@ -62,63 +62,67 @@ leakage").
 
 ---
 
-## 2. A1 — the 1-bit hash `H`  (§6; blocks #82)
+## 2. A1 — the 1-bit hash `H`  (§6) — ✅ RESOLVED 2026-06-15
 
 ### The question
-`H(x, r) → Z₂` where `x` = RO key / left tag (public), `r` = per-ciphertext
-nonce (public). It must be computable by a keyless comparator from public
-ciphertext material. Which construction?
+`H(x, r) → Z₂` where `x` = RO key / left tag, `r` = per-ciphertext nonce. It must
+be computable by a **keyless** comparator from public ciphertext material (no
+long-term secret), so any "PRF under a third key" design is out.
 
-### What is shipped (the default to ratify or change)
-`packages/ore-rs/src/primitives/hash.rs:50-124`, `FixedPiZ2Hash`:
+### Resolution
+**Keep option 3 (fixed public-key AES), upgraded with the BHKR orthomorphism.**
+Shipped construction (`packages/ore-rs/src/primitives/hash.rs`, `FixedPiZ2Hash`):
 
 ```
-H(x, r) = LSB( π(x ⊕ r) ⊕ x ),   π = AES-128_{K₀},  K₀ public constant
+H(x, r) = LSB( π(σ(x) ⊕ r) ⊕ σ(x) ⊕ r ),   π = AES-128_{K₀},  σ(x) = 2·x in GF(2^128)
 ```
 
-- `K₀ = PI_KEY = b"ORE-rs.v2.H-pi.1"` — nothing-up-my-sleeve, **deliberately
-  public**; security rests on AES being a good *public random permutation*, not
-  on key secrecy (`hash.rs:66-71`). Expanded once per process.
-- This is **§6 option 3**: fixed-key-AES MMO hashing, analysed in the
-  **random-permutation model** (cf. BHKR13; GKWY20).
-- The feedforward `⊕ x` is implemented as: capture `LSB(x)` before overwriting,
-  then XOR with `LSB(π(x⊕r))` (`hash.rs:96-123`; SIMD `lsb_mask` path verified
-  equivalent to scalar).
-- A conservative fallback is also coded — **§6 option 2**, `Aes128Z2Hash` =
-  `LSB(AES_r(x) ⊕ x)` (MMO with nonce-as-key, **ideal-cipher model**). Switching
-  is a one-line `type Z2Hash = …` flip in the Bit6 scheme.
+i.e. the **BHKR/Zahur fixed-key σ-MMO** with output truncated to 1 bit.
 
-### The candidate menu (full table, plan §6)
-| # | Construction | Model | Cost vs today |
-|---|---|---|---|
-| 1 | `LSB(AES_r(x))` (status quo, Bit8) | ideal cipher | — |
-| 2 | `LSB(AES_r(x) ⊕ x)` MMO feedforward (**fallback**) | ideal cipher | +1 XOR |
-| 3 | `LSB(π(x⊕r) ⊕ x)`, fixed public `π` (**shipped default**) | random permutation | **faster — zero key schedules** |
-| 4 | `LSB(AES_x(r))` RO-key-as-key | **standard model (PRF)** | ~2–4× right-encryption |
-| 5 | SHA-256/Blake3 over `x‖r` | random oracle | 2–5× encrypt path |
+- `K₀ = PI_KEY = b"ORE-rs.v2.H-pi.1"` — nothing-up-my-sleeve, deliberately
+  public; security rests on AES as a good *public random permutation*, not key
+  secrecy. Expanded once per process.
+- `σ(x) = 2x` is the GF(2^128) doubling orthomorphism (same "multiply by x" as
+  CMAC subkeys; constant `0x87`), constant-time, branch-free (`gf128_double`).
+  Both `σ` and `σ⊕id` are permutations.
+- `hash` (comparator) and `hash_all_into` (encryptor, scalar + SIMD `lsb_mask`)
+  verified equivalent (`fixed_pi_scalar_matches_bulk`); doubling checked against
+  the textbook shift/0x87 rule (`gf128_double_reduction`).
 
-### What needs scrutiny
-1. **The fixed-key-AES-hashing argument in *our* setting.** Mine GKWY20 for the
-   known `x ⊕ r` tweaking pitfalls. The claim to confirm: our requirements are
-   *weaker* than garbling's (no circularity, no correlated keys), so the
-   construction is sound here. Is that right, and are there ORE-specific
-   correlations between `x` (RO keys / left tags) and `r` (nonce) that break the
-   random-permutation reduction?
-2. **Is option 3 worth it over option 2?** Option 3 is faster (no key schedule)
-   but assumes a random *permutation*; option 2 is the "minimal upgrade" in the
-   ideal-cipher model. If the random-permutation argument is shaky, fall back.
-3. **Standard-model alternative (option 4):** do we want to pay 2–4× for
-   standard-model PRF security instead of an idealised-model assertion? Cost is
-   measured and on the table by design.
-4. **The 1-bit LSB truncation** (LSB of a pseudorandom block) — believed
-   uncontroversial in every model; confirm.
-5. **Nothing-up-my-sleeve constant** `K₀` — acceptable as-is?
+### Why this is sound for ORE (the core justification)
+The known attacks on fixed-key MMO **do not port to ORE**, and we now have the
+exact reason from the literature:
 
-### Decision & what it unblocks
-Pick the H for new schemes (default option 3, or fall back to 2, or escalate to
-4). **#82 must not merge and Bit6 byte vectors must not be pinned until this is
-signed off** — the choice changes every Bit6 right ciphertext. Implementation is
-already a one-line type flip either way.
+- **eprint 2019/1168** (Guo–Katz–Wang–Weng–Yu, *Better Concrete Security for
+  Half-Gates*) attacks the fixed-key construction `π(2x⊕i)⊕2x⊕i` in the
+  multi-instance garbling setting with success `O(p·C/2^k)` — but the attack
+  works by **recovering a global Free-XOR offset `R` from *known* hash inputs**
+  (the evaluator holds wire labels `Wa` and gate ids `j`, learns
+  `H(Wa⊕R, j)`, then meet-in-the-middles over `π`). **ORE has neither
+  precondition:** its `H` inputs are independent **secret** PRF outputs (the
+  adversary never learns them, sees only 1-bit masks), and there is **no global
+  offset**. So the multi-instance degradation mechanism is structurally absent.
+- Their tight fix (Theorem 2, `E(i, σ(x))⊕σ(x)` — tweak as the AES *key*) is
+  **deliberately not adopted**: it requires rekeying per evaluation, which breaks
+  the keyless-comparator/performance requirement, and it fixes a degradation ORE
+  doesn't suffer. **Do not chase Theorem 2.**
+- **eprint 2025/792** (Chen–Guo–List–Shi–Zhang, *Scrutinizing AES-based Hashing*)
+  is cryptanalysis of **collision / preimage / one-wayness** — properties this
+  1-bit hash does not rely on — and its best AES-128 results are **round-reduced**
+  (7/10 collision on AES-MMO/MP at 2⁶⁰, 4/10 on AES-DM), never reaching full AES.
+  Mild evidence *for* the random-permutation assumption at full rounds.
+
+### Why the orthomorphism (the only change from the original draft)
+Plain MMO (`σ = id`) would already be fine for ORE's independent-secret-input
+setting. `σ(x)=2x` is adopted as **cheap defense-in-depth** (a few branch-free
+ops) so security holds **by matching the named BHKR/Zahur construction** rather
+than by a usage argument about input independence — robust-by-construction vs
+robust-by-argument. The 1-bit truncation is uncontroversial in every model.
+
+### Status
+Resolved. `FixedPiZ2Hash` updated. This **changes Bit6 right ciphertexts**, so
+Bit6 byte vectors are (re)generated against this construction when pinned — A1 is
+the gate that was holding that, and it is now cleared.
 
 ---
 
@@ -404,9 +408,11 @@ None of (a)–(d) changes ciphertexts, so Bit6 vectors are gated only by A1.
 ## 6. Sign-off checklist
 
 **Gate 1 — before #82 merges / Bit6 vectors pinned:**
-- [ ] **A1** H construction selected (default option 3 ratified, or fall back to
-      2 / escalate to 4); fixed-key-AES tweaking pitfalls (GKWY20) cleared for
-      our setting. **This is the sole gate on Bit6 vector pinning.**
+- [x] **A1** H construction resolved (2026-06-15): keep fixed public-key AES,
+      upgraded to the BHKR σ-MMO `LSB(π(σ(x)⊕r)⊕σ(x)⊕r)`, σ(x)=2x. GKWY/half-gates
+      attacks shown not to port (secret independent inputs, no global offset);
+      tweak-as-key (2019/1168 Thm 2) explicitly declined; 2025/792 targets
+      properties we don't use and is round-reduced.
 - [ ] **A4** ratify the applied construction-side fix `#[repr(C, align(64))]`
       (covers both secret-indexed writes; line-uniform at N ≤ 64).
 - [ ] **A4** ratify the `const _ = assert!(N <= 64)` compile guard (applied).
