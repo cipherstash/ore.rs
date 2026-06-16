@@ -30,12 +30,20 @@ pub use self::block_types::*;
 /// nonces. The two PRF instances are keyed at construction; the RNG is held
 /// in a `RefCell` so encryption can take `&self` while still drawing fresh
 /// randomness. Keys are zeroised on drop.
-#[derive(Debug, ZeroizeOnDrop)]
+#[derive(ZeroizeOnDrop)]
 pub struct OreAes128<R: Rng + SeedableRng> {
     prf1: Aes128Prf,
     prf2: Aes128Prf,
     #[zeroize(skip)]
     rng: RefCell<R>,
+}
+
+// Opaque Debug: never render key material. (`Aes128`'s own Debug is already
+// opaque, but spell it out so the guarantee can't regress.)
+impl<R: Rng + SeedableRng> std::fmt::Debug for OreAes128<R> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OreAes128").finish_non_exhaustive()
+    }
 }
 
 /// Convenience alias for [`OreAes128`] backed by `ChaCha20Rng` — the RNG
@@ -81,11 +89,11 @@ fn derive_prp_seeds<const N: usize>(prf2: &Aes128Prf, x: &PlainText<N>) -> SeedB
 /// one linear pass of its inverse table — no per-bit `invert` lookups, no
 /// heap allocation. `ro_blocks` holds the PRF₁-encrypted RO keys and is
 /// trashed by the hash pass.
-fn encode_right_block<W: BlockWidth>(
+pub(crate) fn encode_right_block<W: BlockWidth, H: Hash>(
     block: &mut W::RightBlock,
     prp: &W::Prp,
     x: u8,
-    hasher: &Aes128Z2Hash,
+    hasher: &H,
     ro_blocks: &mut [AesBlock],
 ) {
     debug_assert_eq!(ro_blocks.len(), W::DOMAIN);
@@ -199,7 +207,7 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
             work.copy_from(&template);
             self.prf1.encrypt_all(work.as_mut_slice());
 
-            encode_right_block::<Bit8>(&mut right.data[n], &prp, x[n], &hasher, &mut work);
+            encode_right_block::<Bit8, _>(&mut right.data[n], &prp, x[n], &hasher, &mut work);
         }
 
         self.prf1.encrypt_all(&mut left.f);
@@ -283,7 +291,7 @@ fn get_bit(block: &[u8], bit: usize) -> u8 {
     // `bit` is the secret permuted symbol; read the byte obliviously so the
     // access address does not depend on it. See `width::ct_select_byte`.
     let byte = crate::scheme::width::ct_select_byte(block, bit / 8);
-    (byte >> (bit % 8)) & 1
+    crate::scheme::width::ct_bit(byte, (bit % 8) as u8)
 }
 
 impl<const N: usize> PartialEq for CipherText<OreAes128ChaCha20, N> {
