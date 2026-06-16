@@ -45,8 +45,9 @@ const _: fn() = || {
 };
 
 /*
- * To aid in performance this PRNG can only generate 256 random numbers
- * before it panics. Should _only_ be used inside the PRP.
+ * Buffers 256 AES-CTR keystream bytes at a time and regenerates a fresh batch
+ * when the buffer is exhausted (see `next_byte`). Should _only_ be used inside
+ * the PRP.
  */
 impl Aes128Prng {
     pub fn init(key: &[u8]) -> Self {
