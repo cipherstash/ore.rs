@@ -35,6 +35,16 @@ impl Drop for Aes128Prng {
 
 impl ZeroizeOnDrop for Aes128Prng {}
 
+// The drop-time wipe of `cipher` (the AES key schedule) relies entirely on
+// `aes::Aes128: ZeroizeOnDrop`, which is gated behind the `aes` crate's
+// `zeroize` feature. Assert it at compile time so the build fails fast if that
+// feature is ever lost — otherwise the key-schedule wipe would silently vanish
+// while this type still (falsely) claims `ZeroizeOnDrop`.
+const _: fn() = || {
+    fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
+    assert_zeroize_on_drop::<Aes128>();
+};
+
 /*
  * To aid in performance this PRNG can only generate 256 random numbers
  * before it panics. Should _only_ be used inside the PRP.
@@ -157,11 +167,47 @@ mod tests {
         assert_eq!(prng.ctr, 0, "counter not cleared");
     }
 
-    // Compile-time proof that the wipe runs on drop (not only on an explicit
-    // `zeroize()` the PRP never makes).
+    // Compile-time check that the `ZeroizeOnDrop` *marker* is present (so
+    // downstream `T: ZeroizeOnDrop` bounds hold). This does NOT prove the wipe
+    // actually runs — `drop_zeroizes_keystream` below covers the runtime path.
     #[test]
     fn impls_zeroize_on_drop() {
         fn assert_zod<T: ZeroizeOnDrop>() {}
         assert_zod::<Aes128Prng>();
+    }
+
+    // Exercises the real `Drop -> zeroize()` path (the only path the PRP uses;
+    // it never calls `zeroize()` explicitly). Runs the synthesised destructor
+    // in place on storage we still own (never freed, via `ManuallyDrop`), then
+    // volatile-reads the keystream — the technique the ZA-0001 audit PoC was
+    // verified against. Catches deletion of `impl Drop` even if the marker is
+    // kept (which `impls_zeroize_on_drop` and the explicit-`zeroize` test miss).
+    #[test]
+    fn drop_zeroizes_keystream() {
+        use core::mem::{size_of, ManuallyDrop};
+        use core::ptr;
+
+        let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
+        let mut prng = ManuallyDrop::new(Aes128Prng::init(&key));
+        let _ = prng.next_byte(); // ensure `data` holds real keystream
+
+        // Raw pointers (via `addr_of!`, no intermediate references) so running
+        // the destructor and reading the bytes stays provenance-clean.
+        let p: *mut Aes128Prng = &mut *prng as *mut Aes128Prng;
+        let data_ptr = unsafe { ptr::addr_of!((*p).data) as *const u8 };
+        let data_len = size_of::<[GenericArray<u8, U16>; 16]>();
+
+        let survived = unsafe {
+            ptr::drop_in_place(p); // runs Drop -> zeroize(); storage stays owned
+            (0..data_len)
+                .filter(|&i| ptr::read_volatile(data_ptr.add(i)) != 0)
+                .count()
+        };
+        // `prng` is `ManuallyDrop`, so it is not dropped again here.
+
+        assert_eq!(
+            survived, 0,
+            "Drop did not zeroize keystream: {survived}/{data_len} bytes survived"
+        );
     }
 }
