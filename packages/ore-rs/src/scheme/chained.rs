@@ -30,9 +30,7 @@ use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
 use aes::Aes128;
 
 use crate::ciphertext::{parse_header, ParseError};
-use crate::primitives::cmac::{
-    final_block, prefix_block, CmacAccumulator, BRANCH_PRP_STREAM, BRANCH_RO_KEY, WIDTH_BIT6,
-};
+use crate::primitives::cmac::{final_block, prefix_block, Branch, CmacAccumulator, WIDTH_BIT6};
 use crate::primitives::hash::FixedPiZ2Hash;
 use crate::primitives::prp::LemireFyPrp;
 use crate::primitives::{AesBlock, Hash, HashKey, Prp};
@@ -57,6 +55,13 @@ const ACC_KEY_LABEL: [u8; 16] = *b"ORE.v2.chain.acc";
 #[inline]
 fn total_len(count: usize) -> usize {
     HEADER_LEN + count + count * F_LEN + NONCE_LEN + count * RIGHT_LEN
+}
+
+/// Serialised length of a left-only ciphertext (`header ‖ xt ‖ f`) — the prefix
+/// of a full ciphertext, with no nonce/right half. Matches `VarLeft::to_bytes`.
+#[inline]
+fn left_len(count: usize) -> usize {
+    HEADER_LEN + count + count * F_LEN
 }
 
 // Raw-byte accessors into a serialised full ciphertext (see `to_bytes`).
@@ -176,10 +181,12 @@ pub struct OreAes128Bit6Chained<R: Rng + SeedableRng> {
 pub type OreAes128Bit6ChainedChaCha20 = OreAes128Bit6Chained<ChaCha20Rng>;
 
 impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
-    /// Initialise from two 16-byte keys. The accumulator key is derived from
-    /// `k1` by a labelled AES call (spec §3 open question 1: `k2` is currently
-    /// unused for this scheme).
-    pub fn init(k1: &[u8; 16], _k2: &[u8; 16]) -> Result<Self, OreError> {
+    /// Initialise from a single 16-byte key. Unlike the fixed-N schemes (which
+    /// key two PRFs), the chained scheme is **single-key by design**: the CMAC
+    /// accumulator derives every per-block secret from one key via branch tags
+    /// (spec §3), so there is no second key. The accumulator key is `k1` run
+    /// through a labelled AES call for domain separation.
+    pub fn init(k1: &[u8; 16]) -> Result<Self, OreError> {
         let cipher = Aes128::new(GenericArray::from_slice(k1));
         let mut k_acc = ACC_KEY_LABEL;
         cipher.encrypt_block(GenericArray::from_mut_slice(&mut k_acc));
@@ -194,7 +201,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         let mut stream = [0u8; STREAM_BLOCKS * 16];
         for (c, chunk) in stream.chunks_mut(16).enumerate() {
             chunk.copy_from_slice(&acc.finalize(&final_block(
-                BRANCH_PRP_STREAM,
+                Branch::PrpStream,
                 n,
                 c as u16,
                 WIDTH_BIT6,
@@ -209,7 +216,9 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     pub fn encrypt_var(&self, x: &[u8]) -> Result<VarCipherText, OreError> {
         let count = x.len();
         debug_assert!(x.iter().all(|&b| (b as usize) < DOMAIN));
-        debug_assert!(count <= u16::MAX as usize);
+        if count > u16::MAX as usize {
+            return Err(OreError::TooManyBlocks);
+        }
 
         let mut acc = CmacAccumulator::new(&self.k_acc);
         let mut nonce = [0u8; NONCE_LEN];
@@ -230,7 +239,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
             let mut ro = [AesBlock::default(); DOMAIN];
             for (j, blk) in ro.iter_mut().enumerate() {
                 blk.copy_from_slice(&acc.finalize(&final_block(
-                    BRANCH_RO_KEY,
+                    Branch::RoKey,
                     n16,
                     j as u16,
                     WIDTH_BIT6,
@@ -246,6 +255,12 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
             prp.indicator_mask_xor(sym, &mut rb);
             blocks.push(rb);
 
+            // `ro` held the key-derived RO_KEY tags (then the H outputs); wipe
+            // it before the next block (matches the bit2_w6 scratch-buffer wipe).
+            for blk in ro.iter_mut() {
+                blk.as_mut_slice().zeroize();
+            }
+
             acc.absorb(&prefix_block(n16, sym));
         }
 
@@ -259,6 +274,9 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     pub fn encrypt_left_var(&self, x: &[u8]) -> Result<VarLeft, OreError> {
         let count = x.len();
         debug_assert!(x.iter().all(|&b| (b as usize) < DOMAIN));
+        if count > u16::MAX as usize {
+            return Err(OreError::TooManyBlocks);
+        }
 
         let mut acc = CmacAccumulator::new(&self.k_acc);
         let mut xt = Vec::with_capacity(count);
@@ -270,7 +288,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
             let permuted = prp.permute(sym)?;
             xt.push(permuted);
             f.push(acc.finalize(&final_block(
-                BRANCH_RO_KEY,
+                Branch::RoKey,
                 n16,
                 permuted as u16,
                 WIDTH_BIT6,
@@ -302,8 +320,40 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         if a.len() != total_len(ca) || b.len() != total_len(cb) {
             return None;
         }
+        // Only `a`'s left half and `b`'s right half are read (Lewi-Wu
+        // asymmetry); the left-only query path is `compare_left_to_full`.
+        Some(Self::compare_views(a, ca, b, cb))
+    }
 
-        // Constant-time scan of the shared prefix for the first differing block.
+    /// Compare a left-only (query) ciphertext `left` — produced by
+    /// [`Self::encrypt_left_var`]/[`Self::encrypt_left_str`] — against a stored
+    /// full ciphertext `full`. This is the Lewi-Wu query path: a comparison
+    /// needs only the query's left half (`xt`/`f`) and the stored ciphertext's
+    /// right half, so the smaller left-only artifact suffices and the stored
+    /// right half reveals nothing at rest. Returns `left`'s order relative to
+    /// `full` (`Less` ⇒ the query plaintext sorts before the stored one).
+    /// `None` if either input is malformed.
+    pub fn compare_left_to_full(left: &[u8], full: &[u8]) -> Option<Ordering> {
+        let ((vl, sl, cl), _) = parse_header(left).ok()?;
+        let ((vf, sf, cf), _) = parse_header(full).ok()?;
+        if vl != VERSION || sl != SCHEME_ID || vf != VERSION || sf != SCHEME_ID {
+            return None;
+        }
+        // `left` is `header ‖ xt ‖ f` (no nonce/right); `full` is complete.
+        if left.len() != left_len(cl) || full.len() != total_len(cf) {
+            return None;
+        }
+        Some(Self::compare_views(left, cl, full, cf))
+    }
+
+    /// Core comparator. `a` supplies the **left view** (`header ‖ xt ‖ f` — the
+    /// layout is identical for a `VarLeft` and the left prefix of a full
+    /// ciphertext, so the `xt_at`/`f_at` accessors work on either); `b` supplies
+    /// the **right half**. Constant-time scan of the shared prefix; if it
+    /// matches throughout, the shorter sorts first; otherwise the first
+    /// differing block is resolved via the random oracle against `b`'s right
+    /// block. `a` reads only `xt`/`f`, `b` reads `xt`/`f`/`nonce`/`right`.
+    fn compare_views(a: &[u8], ca: usize, b: &[u8], cb: usize) -> Ordering {
         let min_count = ca.min(cb);
         let mut is_equal = Choice::from(1u8);
         let mut l: u64 = 0;
@@ -315,7 +365,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
 
         if bool::from(is_equal) {
             // Shared prefix matches throughout — shorter sorts first.
-            return Some(ca.cmp(&cb));
+            return ca.cmp(&cb);
         }
 
         let l = l as usize;
@@ -324,11 +374,11 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         let permuted = xt_at(a, l);
         let byte = ct_select_byte(right_at(b, cb, l), (permuted / 8) as usize);
         let test = ((byte >> (permuted % 8)) & 1) ^ h;
-        Some(if test == 1 {
+        if test == 1 {
             Ordering::Greater
         } else {
             Ordering::Less
-        })
+        }
     }
 }
 
@@ -353,7 +403,7 @@ mod tests {
     use super::*;
 
     fn ore() -> OreAes128Bit6ChainedChaCha20 {
-        OreAes128Bit6Chained::init(&[0x11; 16], &[0x22; 16]).unwrap()
+        OreAes128Bit6Chained::init(&[0x11; 16]).unwrap()
     }
 
     fn cmp(c: &OreAes128Bit6ChainedChaCha20, a: &str, b: &str) -> Ordering {
@@ -433,6 +483,28 @@ mod tests {
     }
 
     #[test]
+    fn left_query_path_and_artifact_rejection() {
+        let c = ore();
+        let left = c.encrypt_left_str("hi").unwrap().to_bytes();
+        let full = c.encrypt_str("hi").unwrap().to_bytes();
+        // The query path accepts (left, full) and reports the order.
+        assert_eq!(
+            OreAes128Bit6ChainedChaCha20::compare_left_to_full(&left, &full),
+            Some(Ordering::Equal)
+        );
+        // A left-only artifact is not a full ciphertext, and vice versa, so the
+        // length checks reject the swapped/mismatched cases.
+        assert_eq!(
+            OreAes128Bit6ChainedChaCha20::compare_raw_slices(&left, &full),
+            None
+        );
+        assert_eq!(
+            OreAes128Bit6ChainedChaCha20::compare_left_to_full(&full, &full),
+            None
+        );
+    }
+
+    #[test]
     fn empty_string_sorts_first() {
         let c = ore();
         assert_eq!(cmp(&c, "", "a"), Ordering::Less);
@@ -467,6 +539,18 @@ mod tests {
             let (a, b) = (to_domain(&a), to_domain(&b));
             let (ea, eb) = (enc(&c, &a), enc(&c, &b));
             OreAes128Bit6ChainedChaCha20::compare_raw_slices(&ea, &eb) == Some(a.cmp(&b))
+        }
+
+        /// Lewi-Wu query path: a left-only (query) ciphertext compared against a
+        /// stored full ciphertext reproduces the plaintext order —
+        /// `compare_left_to_full(left(a), full(b)) == a.cmp(b)`.
+        fn prop_left_query_matches_full(a: Vec<u8>, b: Vec<u8>) -> bool {
+            let c = ore();
+            let (a, b) = (to_domain(&a), to_domain(&b));
+            let left_a = c.encrypt_left_var(&a).unwrap().to_bytes();
+            let full_b = enc(&c, &b);
+            OreAes128Bit6ChainedChaCha20::compare_left_to_full(&left_a, &full_b)
+                == Some(a.cmp(&b))
         }
 
         /// Same, with a forced shared prefix — exercises the constant-time

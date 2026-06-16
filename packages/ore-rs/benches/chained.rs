@@ -4,8 +4,7 @@ use ore_rs::scheme::chained::{OreAes128Bit6Chained, OreAes128Bit6ChainedChaCha20
 
 fn init_ore() -> OreAes128Bit6ChainedChaCha20 {
     let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-    let k2: [u8; 16] = hex!("d0d1d2d3 d4d5d6d7 d8d9dadb dcdddedf");
-    OreAes128Bit6Chained::init(&k1, &k2).unwrap()
+    OreAes128Bit6Chained::init(&k1).unwrap()
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
