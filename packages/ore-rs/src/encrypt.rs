@@ -1,7 +1,9 @@
 use crate::ciphertext::*;
+use crate::scheme::bit2::OreAes128;
 use crate::PlainText;
 use crate::{OreCipher, OreError};
 use orderable_bytes::ToOrderableBytes;
+use rand::{Rng, SeedableRng};
 
 /// Type-directed entry point for encrypting plaintext values with a given
 /// [`OreCipher`].
@@ -49,17 +51,24 @@ const CHAR_LEN: usize = <char as ToOrderableBytes>::ENCODED_LEN;
 const F32_LEN: usize = <f32 as ToOrderableBytes>::ENCODED_LEN;
 const F64_LEN: usize = <f64 as ToOrderableBytes>::ENCODED_LEN;
 
+// These impls are specific to the legacy byte-per-block scheme (one
+// plaintext byte = one ORE block, so the orderable-bytes encoding feeds
+// the cipher directly). The 6-bit scheme provides its own impls in
+// `scheme::bit2_w6`, which interpose the byte->block decomposition. They
+// were previously blanket impls over `T: OreCipher`; scheme-specific
+// impls keep coherence simple now that block count != byte count for
+// some schemes.
 macro_rules! impl_ore_encrypt_via_orderable_bytes {
     ($type:ty, $len_const:ident) => {
-        impl<T: OreCipher> OreEncrypt<T> for $type {
-            type LeftOutput = Left<T, $len_const>;
-            type FullOutput = CipherText<T, $len_const>;
+        impl<R: Rng + SeedableRng> OreEncrypt<OreAes128<R>> for $type {
+            type LeftOutput = Left<OreAes128<R>, $len_const>;
+            type FullOutput = CipherText<OreAes128<R>, $len_const>;
 
-            fn encrypt_left(&self, cipher: &T) -> Result<Self::LeftOutput, OreError> {
+            fn encrypt_left(&self, cipher: &OreAes128<R>) -> Result<Self::LeftOutput, OreError> {
                 cipher.encrypt_left(&self.to_orderable_bytes())
             }
 
-            fn encrypt(&self, cipher: &T) -> Result<Self::FullOutput, OreError> {
+            fn encrypt(&self, cipher: &OreAes128<R>) -> Result<Self::FullOutput, OreError> {
                 cipher.encrypt(&self.to_orderable_bytes())
             }
         }
@@ -81,15 +90,15 @@ impl_ore_encrypt_via_orderable_bytes!(char, CHAR_LEN);
 impl_ore_encrypt_via_orderable_bytes!(f32, F32_LEN);
 impl_ore_encrypt_via_orderable_bytes!(f64, F64_LEN);
 
-impl<T: OreCipher, const N: usize> OreEncrypt<T> for PlainText<N> {
-    type LeftOutput = Left<T, N>;
-    type FullOutput = CipherText<T, N>;
+impl<R: Rng + SeedableRng, const N: usize> OreEncrypt<OreAes128<R>> for PlainText<N> {
+    type LeftOutput = Left<OreAes128<R>, N>;
+    type FullOutput = CipherText<OreAes128<R>, N>;
 
-    fn encrypt_left(&self, cipher: &T) -> Result<Self::LeftOutput, OreError> {
+    fn encrypt_left(&self, cipher: &OreAes128<R>) -> Result<Self::LeftOutput, OreError> {
         cipher.encrypt_left(self)
     }
 
-    fn encrypt(&self, cipher: &T) -> Result<Self::FullOutput, OreError> {
+    fn encrypt(&self, cipher: &OreAes128<R>) -> Result<Self::FullOutput, OreError> {
         cipher.encrypt(self)
     }
 }

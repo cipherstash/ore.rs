@@ -47,6 +47,130 @@ impl Hash for Aes128Z2Hash {
     }
 }
 
+/// Z2 hash instantiated as the BHKR fixed-key-AES **σ-MMO** construction:
+/// `H(x, r) = LSB(π(σ(x) ⊕ r) ⊕ σ(x) ⊕ r)`, where `π` is a *fixed public*
+/// AES-128 permutation (public key [`PI_KEY`]), `r` is the per-ciphertext
+/// nonce, and `σ(x) = 2·x` is the GF(2^128) doubling orthomorphism (the
+/// BHKR/Zahur linear orthomorphism; both `σ` and `σ ⊕ id` are permutations).
+/// v2 plan §6 option 3 — **A1 resolved 2026-06-15** — analysed in the
+/// random-permutation model (BHKR13; GKWY20; Guo–Katz–Wang–Weng–Yu, eprint
+/// 2019/1168).
+///
+/// The orthomorphism `σ` is the only departure from plain MMO and is adopted
+/// as cheap defense-in-depth, not to fix a present weakness: the known attacks
+/// on fixed-key MMO (GKWY; the half-gates attack of eprint 2019/1168) require
+/// *known, Free-XOR-correlated* hash inputs plus a recoverable global offset —
+/// neither of which ORE has, since its `H` inputs are independent **secret**
+/// PRF outputs and there is no global offset. `σ` makes the construction
+/// secure by matching the named BHKR/Zahur hash rather than by a usage
+/// argument. The cryptanalysis of round-reduced AES hashing (eprint 2025/792)
+/// targets collision/preimage/one-wayness — properties this 1-bit hash does
+/// not rely on — and never reaches full-round AES-128.
+///
+/// The `Hash::new` "key" parameter carries the **nonce** `r`; the AES key is
+/// the public constant [`PI_KEY`], expanded once per process.
+pub struct FixedPiZ2Hash {
+    nonce: AesBlock,
+}
+
+/// The public, fixed AES key for `π`. Nothing-up-my-sleeve: the ASCII
+/// bytes of `"ORE-rs.v2.H-pi.1"`. This key is deliberately *not* secret —
+/// the construction's security rests on AES being a good public random
+/// permutation, not on key secrecy (the comparator must be able to
+/// evaluate H with no key material).
+pub const PI_KEY: [u8; 16] = *b"ORE-rs.v2.H-pi.1";
+
+fn pi() -> &'static Aes128 {
+    use std::sync::OnceLock;
+    static PI: OnceLock<Aes128> = OnceLock::new();
+    PI.get_or_init(|| Aes128::new(GenericArray::from_slice(&PI_KEY)))
+}
+
+/// GF(2^128) doubling `2·x` on a big-endian field element packed in a `u128`
+/// — the BHKR/Zahur orthomorphism `σ` ("multiply by x"; reduction polynomial
+/// x^128 + x^7 + x^2 + x + 1, constant `0x87`). A single shift plus a
+/// branch-free conditional XOR, replacing the per-byte carry loop that
+/// dominated the σ-MMO hot path (≈704 doublings per Bit6 u64 encrypt).
+/// Constant-time: no secret-dependent control flow.
+#[inline]
+fn gf128_double_u128(x: u128) -> u128 {
+    // `x << 1` discards the top bit (the GF reduction trigger); fold 0x87 into
+    // the low byte iff that bit was set. `x >> 127` is 0 or 1.
+    (x << 1) ^ ((x >> 127) * 0x87)
+}
+
+/// In-place GF(2^128) doubling `b ← 2·b`; `b` must be exactly 16 bytes
+/// (big-endian field element). Used by the scalar comparator path; the bulk
+/// encrypt path folds the doubling and nonce XOR into one `u128` pass (see
+/// `hash_all_into`).
+#[inline]
+fn gf128_double(b: &mut [u8]) {
+    debug_assert_eq!(b.len(), 16);
+    let mut arr = [0u8; 16];
+    arr.copy_from_slice(b);
+    let doubled = gf128_double_u128(u128::from_be_bytes(arr));
+    b.copy_from_slice(&doubled.to_be_bytes());
+}
+
+impl Hash for FixedPiZ2Hash {
+    fn new(nonce: &HashKey) -> Self {
+        Self { nonce: *nonce }
+    }
+
+    fn hash(&self, data: &[u8]) -> u8 {
+        assert_eq!(data.len(), 16);
+        // BHKR σ-MMO: m = σ(x) ⊕ r; return lsb(π(m) ⊕ m).
+        let mut block = [0u8; 16];
+        block.copy_from_slice(data);
+        gf128_double(&mut block); // σ(x) = 2x
+        for (slot, &r) in block.iter_mut().zip(self.nonce.iter()) {
+            *slot ^= r; // m = σ(x) ⊕ r
+        }
+        let m_lsb = block[0] & 1u8;
+        let block = GenericArray::from_mut_slice(&mut block);
+        pi().encrypt_block(block);
+        (block[0] & 1u8) ^ m_lsb
+    }
+
+    fn hash_all_into(&self, data: &mut [AesBlock], out: &mut [u8]) {
+        debug_assert_eq!(out.len() * 8, data.len());
+
+        // BHKR σ-MMO: m = σ(x) ⊕ r, then out = lsb(m) ^ lsb(π(m)), with
+        // σ(x) = 2x in GF(2^128). Form m in place first so the feedforward
+        // captures lsb(m) rather than lsb(x). Doubling and nonce XOR are fused
+        // into one u128 pass per block — this is the 704-evals/u64 hot loop.
+        let mut nonce_arr = [0u8; 16];
+        nonce_arr.copy_from_slice(self.nonce.as_slice());
+        let nonce = u128::from_be_bytes(nonce_arr);
+        for block in data.iter_mut() {
+            let mut arr = [0u8; 16];
+            arr.copy_from_slice(block.as_slice());
+            let m = gf128_double_u128(u128::from_be_bytes(arr)) ^ nonce;
+            block.copy_from_slice(&m.to_be_bytes());
+        }
+
+        // feedforward lsb(m)
+        if data.len() == 256 {
+            crate::primitives::simd::lsb_mask_256(data, out);
+        } else {
+            crate::primitives::simd::scalar::lsb_mask(data, out);
+        }
+
+        pi().encrypt_blocks(data); // π(m)
+
+        let mut pi_mask = [0u8; 32];
+        let pi_mask = &mut pi_mask[..out.len()];
+        if data.len() == 256 {
+            crate::primitives::simd::lsb_mask_256(data, pi_mask);
+        } else {
+            crate::primitives::simd::scalar::lsb_mask(data, pi_mask);
+        }
+        for (slot, &m) in out.iter_mut().zip(pi_mask.iter()) {
+            *slot ^= m;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,5 +214,57 @@ mod tests {
         let input: [u8; 24] = hex!("00010203 04050607 ffffffff bbbbbbbb cccccccc abababab");
 
         hash.hash(&input);
+    }
+
+    // The comparator uses the scalar `hash`; encryption uses the bulk
+    // `hash_all_into`. For the BHKR σ-MMO they must agree bit-for-bit, over
+    // both the scalar (n=64, the Bit6 domain) and SIMD (n=256) `lsb_mask`
+    // backends.
+    #[test]
+    fn fixed_pi_scalar_matches_bulk() {
+        let nonce: [u8; 16] = hex!("0f0e0d0c 0b0a0908 07060504 03020100");
+        let h: FixedPiZ2Hash = Hash::new(GenericArray::from_slice(&nonce));
+
+        for &n in &[64usize, 256usize] {
+            let mut blocks: Vec<AesBlock> = (0..n)
+                .map(|i| {
+                    let mut b = [0u8; 16];
+                    for (j, slot) in b.iter_mut().enumerate() {
+                        *slot = (i.wrapping_mul(31).wrapping_add(j)) as u8;
+                    }
+                    *GenericArray::from_slice(&b)
+                })
+                .collect();
+
+            let mut expected = vec![0u8; n / 8];
+            for (i, b) in blocks.iter().enumerate() {
+                expected[i / 8] |= h.hash(b.as_slice()) << (i % 8);
+            }
+
+            let mut out = vec![0u8; n / 8];
+            h.hash_all_into(&mut blocks, &mut out);
+            assert_eq!(out, expected, "scalar vs bulk mismatch for n={}", n);
+        }
+    }
+
+    // σ(x) = 2x must be an orthomorphism: both σ and σ⊕id are permutations.
+    // Spot-check the GF(2^128) doubling against the textbook shift/0x87 rule.
+    #[test]
+    fn gf128_double_reduction() {
+        // High bit clear: pure left shift.
+        let mut b = [0u8; 16];
+        b[15] = 0x01;
+        gf128_double(&mut b);
+        let mut want = [0u8; 16];
+        want[15] = 0x02;
+        assert_eq!(b, want);
+
+        // High bit set: shift then XOR 0x87 into the low byte.
+        let mut b = [0u8; 16];
+        b[0] = 0x80;
+        gf128_double(&mut b);
+        let mut want = [0u8; 16];
+        want[15] = 0x87;
+        assert_eq!(b, want);
     }
 }

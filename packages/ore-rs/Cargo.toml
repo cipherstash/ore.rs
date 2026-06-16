@@ -50,6 +50,10 @@ name = "oreaes128"
 harness = false
 
 [[bench]]
+name = "bit6"
+harness = false
+
+[[bench]]
 name = "decimal"
 harness = false
 required-features = ["decimal"]

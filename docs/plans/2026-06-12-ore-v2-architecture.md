@@ -281,7 +281,8 @@ software on aarch64 (no key-schedule instruction); estimated 5–20% overhead ag
 Bit6's ~130 batched AES ops per block. **Benchmark gate:** measure NEON key-expansion
 overhead before committing.
 
-**Candidate B — CMAC with cached prefix state.** Every published value is a *bona
+**Candidate B — CMAC with cached prefix state.** *(SELECTED; full design spec:
+`docs/plans/2026-06-15-ore-v2-cmac-accumulator-spec.md`.)* Every published value is a *bona
 fide* AES-CMAC (NIST SP 800-38B) tag of an injectively encoded message — for block
 `i`: `enc(x₀‖0) ‖ … ‖ enc(x_{i-1}‖i−1) ‖ final_block(branch, value, i)` — and the
 per-prefix chaining-state cache is purely an implementation optimization (CMAC is CBC
@@ -332,12 +333,114 @@ instance, so right-encryption throughput stays comparable to the packed scheme.
 
 **String semantics and leakage.** Strings are encoded as their UTF-8 bytes (optionally
 case-folded/normalised upstream — out of scope here), decomposed by the chosen width.
-Lewi-Wu leaks the index of the first differing block; for strings that is **the length
-of the common prefix**, which is materially more revealing than for fixed-width numerics.
-This must be documented prominently on the string API, and is a product-level decision
-about acceptable leakage, not something the library can engineer away.
+A comparison reveals the index of the first differing block; for strings that is **the
+length of the common prefix**, which is materially more revealing than for fixed-width
+numerics. But this leakage is scoped to the **comparison operation**, not to stored
+data, because Lewi-Wu is a left/right scheme: a comparison is only ever evaluated
+between a left ciphertext and a right ciphertext, and a right ciphertext in isolation
+reveals nothing about order. Three threat tiers follow:
+
+- **Offline / at rest (right-only storage, the default deployment):** an attacker who
+  exfiltrates the database holds only right ciphertexts, has no left ciphertext to
+  compare against, and recovers nothing — not order, and a fortiori not common-prefix
+  length. The offline case is clean.
+- **Query time (legitimate operator):** running a query emits a left ciphertext, and
+  each comparison against the stored rights reveals first-differing-block (=
+  common-prefix length for strings) for exactly the pairs that query touches.
+- **Online adversary observing queries:** an attacker who can watch enough query
+  traffic accumulates those per-comparison leakages and can reconstruct prefix
+  structure across the touched set.
+
+So the common-prefix disclosure is bounded to the **in-use / online** setting and never
+applies to data at rest. This must still be documented prominently on the string API,
+and the residual query-time/online leakage is a product-level decision about acceptable
+leakage — but it is a narrower decision than the unscoped framing suggests, and not
+something the library can engineer away.
+
+**Block width is a leakage decision, not just a size/perf one.** In Lewi-Wu, the
+comparison leaks the index of the first differing block, so **larger blocks leak less**:
+Bit8 (8-bit) < Bit6 (6-bit) < CLWW (1-bit, the full first-differing-*bit*). For a u64,
+the first differing bit is localised to an **8-bit window** under Bit8 (8 blocks) but a
+**6-bit window** under Bit6 (11 blocks) — Bit6 sharpens an online inference adversary's
+divergence-point/density estimation by ~1.33×. It is an incremental sharpening, not the
+categorical jump to CLWW, but it is real and it is the one axis the library cannot fix.
+This sits opposite the **encrypt-side** advantage of Bit6 (the one-cache-line PRP; see
+Open Q1 / the A4 review brief): cheap constant-time key generation that Bit8 cannot get
+for free. The two pull in opposite directions and live in different threat models:
+
+- They do **not** net out: the leakage axis is an *online/query-time* property against an
+  inference adversary; the encrypt-side axis is a *side-channel* property against an
+  attacker co-resident with the encryptor. At rest, the leakage axis is a **tie** (both
+  reveal nothing), so there Bit6's win is free.
+- The encrypt-side axis is a **cost** difference, not "constant-time vs not": full
+  oblivious constant-time is available at *both* widths via oblivious-swap Fisher–Yates,
+  just ~12× cheaper at Bit6 (≈44k ct-ops/u64 vs ≈522k at Bit8). The leakage axis is the
+  **fundamental, unfixable** one.
+
+Because leakage is unfixable and encrypt-side CT is purchasable at either width, the
+lower-leakage width (Bit8) is the conservative **default**, with Bit6 an explicit opt-in.
+Width is therefore a **per-domain / per-deployment policy** keyed on the target data and
+threat model, not a global default:
+
+| Dominant threat | Encryptor environment | Choose |
+|---|---|---|
+| At-rest exfiltration (right-only) | any | **Bit6** — leakage tie, take the smaller ciphertext + cheap CT |
+| Online inference on the plaintext distribution | trusted / dedicated | **Bit8** — encrypt-side moot, take the lower leakage |
+| Online inference | hostile / multi-tenant | **Bit8 + oblivious-swap-FY** (low leakage *and* CT, ~522k ct-ops), or Bit6 if perf-bound and 2 bits of resolution is acceptable |
+
+Default numerics to Bit8 (lower leakage, and it is the wire-frozen compatible scheme);
+strings pick width per the size/leakage trade in the PR 6 design. This supersedes the
+earlier lean toward "Bit6 as the default" (Open Q3).
+
+**Numeric encodings: fixed-point vs log/scientific (an encoding-layer option, not a
+low-entropy mitigation).** Block ORE is parameterised by *how* a value maps to blocks,
+not just by block width. For **wide-dynamic-range numerics** — currency, scientific /
+sensor measurements, high-range decimals — a **mantissa+exponent (a.k.a. log-domain)
+encoding** is a good fit: write `x ≈ f · base^e`, lay the exponent in the high-order
+blocks and the mantissa in the low-order blocks (order-preserving), then encode as
+usual. This is the same family as the "scientific notation" encoding used with CLWW ORE
+and as `round(scale · log_base(x))`. Benefits, all of which compose with the §5
+variable-block machinery:
+
+- **Bounds block count over a wide range** (cents-to-billions becomes exponent + a
+  fixed-width mantissa, not a 60-bit fixed-point integer).
+- **Uniform relative precision** — small and large values get the same significant-figure
+  blocks. (IEEE-754 already has this shape; the existing `f64` path exploits the
+  exponent-first layout.)
+- **Makes prefix leakage a deliberate choice** — "magnitude band + N significant
+  figures" rather than an accident of fixed-point width.
+
+Caveats to design in:
+- **Benford's law:** leading significant digits of natural numeric data are non-uniform
+  (1 ≈ 30%, 9 ≈ 5%), so the mantissa's top block stays skewed and inference-exposed.
+  Log encoding makes leakage *relative*, not *flat*.
+- **You are electing to leak the magnitude band** — usually acceptable, but a conscious
+  leakage decision.
+- **Parameters are a leakage surface:** per *Parameter-Hiding ORE* (Cash–Liu–O'Neill–
+  Zhang, ASIACRYPT 2018), the base/precision/scale leak distribution info if chosen
+  per value or per dataset. Fix them **per domain**, treat them as public constants, and
+  document them.
+
+**Explicit scope — do not conflate with the width/leakage decision above.** This encoding
+solves *dynamic range + relative precision + block count*. It is **order-preserving**, so
+it does **not** touch the order-leakage floor and is **not** a mitigation for low-entropy /
+narrow-domain fields (DOB, names, etc.). Those fail because their *high-order bits are
+skewed and ORE exposes them first*, plus the order floor (NKW sorting/cumulative); an
+order-preserving re-encoding — log or otherwise — cannot help, and for a narrow domain like
+DOB the exponent is near-constant (it *increases* high-order skew). The only lever there is
+coarsening the plaintext to the granularity actually queried (year / age-band). Keep the
+two ideas distinct: log/scientific encoding is for *wide-range numerics*; plaintext
+coarsening is for *low-entropy narrow domains*.
 
 ### 6. Random-oracle instantiation (the 1-bit hash H)
+
+> **RESOLVED 2026-06-15 (A1).** Keep the fixed public-key AES construction
+> (option 3), upgraded with the BHKR orthomorphism: `H(x, r) = LSB(π(σ(x) ⊕ r) ⊕
+> σ(x) ⊕ r)` with `π = AES_{K₀}` (public `K₀`) and `σ(x) = 2x` in GF(2^128) (the
+> BHKR/Zahur σ-MMO). Rationale below; full write-up in the crypto review brief
+> A1 (`docs/reviews/2026-06-14-ore-v2-crypto-review-brief.md`). Tweak-as-key
+> (eprint 2019/1168 Thm 2) was **declined** (rekeying breaks the keyless/fast
+> requirement, and fixes a multi-instance degradation ORE doesn't suffer).
 
 Lewi-Wu models the right-ciphertext mask as a random oracle `H(ro_key, nonce) → Z₂`.
 Today it is instantiated as `LSB(AES_nonce(ro_key))` — the **nonce as the AES key** —
@@ -357,14 +460,25 @@ key / left tag, `r` = nonce):
 |---|---|---|---|---|
 | 1 | `LSB(AES_r(x))` — status quo | ideal cipher | — | key is public, so AES's standard PRP assumption gives nothing; security is an ideal-cipher assertion |
 | 2 | `LSB(AES_r(x) ⊕ x)` — MMO feedforward | ideal cipher | +1 XOR | matches the analyzed blockcipher-hashing shape; feedforward removes the invertible-public-permutation structure; the minimal upgrade |
-| 3 | `LSB(π(x ⊕ r) ⊕ x)`, `π = AES_{K₀}`, K₀ public constant | random permutation | **faster** — zero key schedules ever | fixed-key-AES hashing (BHKR13); mine GKWY20 for known `x ⊕ r` tweaking pitfalls (our requirements are weaker than garbling's — no circularity, no correlated keys) |
+| 3 | **SELECTED:** `LSB(π(σ(x) ⊕ r) ⊕ σ(x) ⊕ r)`, `π = AES_{K₀}`, `σ(x)=2x` | random permutation | **faster** — zero key schedules ever | BHKR/Zahur σ-MMO. GKWY/half-gates attacks (eprint 2019/1168) need *known* inputs + a global offset; ORE has independent *secret* PRF inputs and no offset, so they don't port. σ is cheap defense-in-depth. 2025/792 attacks (collision/preimage) target unused properties and are round-reduced |
 | 4 | `LSB(AES_x(r))` — RO key as AES key | **standard model** (PRF) | ~2–4× right-encryption: one key schedule per `(i, j)` | what the old TODO was reaching for; the honest price of standard-model security; composes poorly with accumulator Candidate A (both pay per-block schedules) |
 | 5 | SHA-256 (HW) / Blake3 over `x ‖ r` | random oracle | 2–5× encrypt path | comparator computes H once per comparison, so query latency is unaffected — only encryption throughput pays |
 
-Proposal into review: **#3, with #2 as the conservative fallback**, and #4 written up
-with its *measured* cost so the standard-model option is accepted or declined with the
-price visible. The 1-bit truncation (LSB of a pseudorandom block) is uncontroversial
-in every model.
+Decision (2026-06-15): **#3 with the BHKR orthomorphism `σ(x)=2x`** — `H(x,r) =
+LSB(π(σ(x)⊕r) ⊕ σ(x)⊕r)`. The known fixed-key-MMO attacks (GKWY; the half-gates
+multi-instance attack of eprint 2019/1168) require the adversary to know the hash
+inputs and recover a global Free-XOR offset — ORE's inputs are independent *secret*
+PRF outputs and there is no global offset, so neither precondition holds and the
+`O(p·C/2^k)` degradation does not arise. The orthomorphism is not strictly needed
+in this setting; it is adopted as nearly-free defense-in-depth so security holds by
+matching the named BHKR/Zahur construction rather than by a usage argument. The
+tight tweak-as-key variant (2019/1168 Thm 2) is declined: rekeying per evaluation
+conflicts with the keyless-comparator / performance requirement and addresses a
+degradation absent here. AES-hashing cryptanalysis (eprint 2025/792) targets
+collision/preimage/one-wayness — not the 1-bit correlation-robustness we rely on —
+and reaches only round-reduced AES (7/10 collision), leaving full AES-128's margin.
+The 1-bit truncation is uncontroversial in every model. Options #2/#4/#5 remain in
+the table as the considered alternatives.
 
 ## PR roadmap
 
@@ -405,13 +519,14 @@ PR 2's trait change, which should be called out in the changelog).
 - [ ] PRP seeds (PRF₂ outputs) structurally separated from serializable `Left` state;
       no code path can write seed material into a ciphertext (PR 2).
 - [ ] Domain separation between Bit8/Bit6/chained schemes under shared keys (PR 5, 6).
-- [ ] H instantiation (§6) selected and signed off, with its security model
-      (ideal-cipher / random-permutation / standard) recorded (before PR 5).
+- [x] H instantiation (§6) selected and signed off (2026-06-15): BHKR σ-MMO,
+      random-permutation model; see §6 and review brief A1.
 - [ ] Selected §5(b) accumulator candidate reviewed and signed off (before PR 6).
 - [ ] Accumulator chain state treated as key material: zeroized, never serialized,
       never reachable from `Left`/`Right` types (PR 6).
 - [ ] GF(2^128) doubling constant-time, if Candidate C is chosen (PR 6).
-- [ ] String leakage profile documented and acknowledged at product level (PR 6).
+- [ ] String leakage profile documented and acknowledged at product level — scoped to
+      query-time/online (right-only-at-rest reveals nothing); see §5(b) (PR 6).
 
 ## Decisions taken (revisit if needed)
 
@@ -426,24 +541,68 @@ PR 2's trait change, which should be called out in the changelog).
    `u128`/`Decimal` on Bit6 arrive with PR 6 if wanted.
 5. **Strings use the chained-prefix variable-length scheme regardless of width**; width
    choice (6 vs 8) for strings is a ciphertext-size trade-off left to the PR 6 design.
-6. **H decision is pulled forward to before PR 5** (not PR 6): Bit6 is a new scheme and
-   should ship with the chosen H rather than inherit nonce-as-key for compatibility's
-   sake. Proposal: fixed-public-permutation MMO (§6 option 3), conservative fallback
-   MMO-with-nonce-key (option 2).
+6. **H = BHKR σ-MMO with fixed public AES key (§6, A1 RESOLVED 2026-06-15):**
+   `LSB(π(σ(x)⊕r) ⊕ σ(x)⊕r)`, `σ(x)=2x`. Bit6 ships with this rather than inheriting
+   nonce-as-key. GKWY/half-gates attacks don't port (secret independent inputs, no
+   global offset); tweak-as-key declined (rekeying); 2025/792 hits only unused
+   properties on round-reduced AES. Legacy Bit8 keeps the status quo forever.
 7. **Accumulator choice is a decision rule, not a fixed pick:** cascade/GGM if NEON
    key-expansion overhead measures under ~10–15% on Bit6 strings, else CMAC with
    cached state; XE only if profiling eliminates both (§5(b)).
 
 ## Open questions
 
-1. **Cheaper PRP for new schemes:** for Bit6's 64-element domain, a small-domain
-   constant-time PRP (e.g. swap-or-not or a sorting network) could beat the Knuth
-   shuffle and be SIMD-friendly. New schemes have no compatibility constraint — worth a
-   spike during PR 5, not a blocker.
+1. **Cheaper PRP for new schemes — RESOLVED by spike (2026-06-13, M1 Max, hw AES;
+   code at `/tmp/ore-prp-spike`, full analysis in its RESULTS.md):**
+   - **Winner: fixed-draw Fisher–Yates with pre-scheduled stream derivation** —
+     63 Lemire-reduced 64-bit draws (fixed 32 AES-CTR blocks, zero rejection
+     sampling, branch-free), with the stream produced under an already-scheduled
+     cipher instead of keying AES per block. **153 ns per block** (construction +
+     permute + indicator mask) vs ~1.36 µs for a port of today's Knuth-64.
+     Projected Bit6 u64 encrypt: **≈3.3 µs** (vs 11.5 µs in PR 5). Security story:
+     exact statistical distance ≤ 2⁻⁵⁵ from a uniformly random permutation — the
+     object Lewi-Wu already models — so it adds a pure statistical term, no new
+     assumption. One review item: secret-indexed swaps, defended by the
+     one-cache-line argument (64-byte `#[repr(align(64))]` table).
+   - **Swap-or-not is REJECTED for this setting**, not on speed but on proof: the
+     right ciphertext exposes a block PRP's full codebook across encryptions
+     sharing a prefix, so the honest query budget is q = N, where the HMR bound
+     `8N^{3/2}/(r+4)` is vacuous for any practical round count at N = 64. The
+     full-security fix (Morris–Rogaway 2014 sometimes-recurse) introduces
+     key-dependent recursion depth (a timing channel) and plain r=64 was 3×
+     slower than the winner anyway. Kept in the spike as the strictly
+     constant-time fallback if review rejects the cache-line argument.
+   - **Status-quo deficiency found:** the current rejection-sampled PRNG's draw
+     count is seed-dependent, and seeds derive from the plaintext prefix — an
+     encrypt-side plaintext-dependent timing channel in the legacy scheme (wire-
+     frozen, so document rather than fix there; the new PRP eliminates it).
+   - The pre-scheduled stream shape saves ~140–165 ns/block for *every* variant
+     and composes with §5(b): the CMAC accumulator can emit the fixed-count PRP
+     stream as one more branch family.
+   - **SHIPPED in PR 5 (`LemireFyPrp<64>`, Bit6 only — Bit8 stays wire-frozen on
+     the Knuth shuffle):** the **seed-keyed shape (i)** is in, because it is a
+     drop-in for the existing `Prp::new(seed)` signature and its security story is
+     "identical key-usage structure, rejection sampling → fixed-count Lemire
+     draws." This already closes the timing channel, removes the bias, and takes
+     Bit6 u64 encrypt **11.5 µs → 8.6 µs** (benchmarks:
+     `docs/benchmarks/2026-06-13-bit6-prp-results.md`).
+   - **DEFERRED to PR 6:** the **pre-scheduled shape (ii)** — deriving the PRP
+     keystream under an already-scheduled cipher (no per-block AES key schedule;
+     the ~1.9 µs that separates 8.6 µs from the projected ≈3.3 µs). It needs the
+     PRP stream to come from a PRF/branch family rather than a fresh per-seed key
+     schedule, which is exactly what the §5(b) CMAC accumulator provides — so it
+     lands there, under the same crypto review, rather than as a bespoke
+     key-reuse pattern bolted onto PR 5.
 2. **`u16` vs `u8` block count in the v2 header:** u16 chosen for strings; confirm no
    need for >65 535 blocks (≈48 KiB plaintext at Bit6).
-3. **Should Bit6 become the default scheme** recommended in the README once shipped, with
-   Bit8 positioned as the legacy/compat scheme? Affects docs tone in PR 7.
+3. **Block width is a per-domain / per-deployment choice, not a global default
+   (RESOLVED — see §5(b) "Block width is a leakage decision").** Earlier framing asked
+   "should Bit6 be the default"; the answer is no, because width trades online
+   prefix-leakage (Bit8 leaks less — the unfixable axis) against encrypt-side
+   constant-time cost (Bit6 cheaper — a fixable axis). Default numerics to **Bit8**
+   (lower leakage + wire-compat); position **Bit6** as an opt-in for at-rest-dominated,
+   size/perf-sensitive, or encryptor-hostile (with CT budget) deployments. PR 7 docs
+   present the decision rule (the §5(b) table), not a single recommended scheme.
 4. **Pending review outcomes:** the §5(b) accumulator and §6 H selections await the
    NEON benchmark spike (PR 5) and internal crypto review; decision rules and
    candidate write-ups are inline in those sections.
