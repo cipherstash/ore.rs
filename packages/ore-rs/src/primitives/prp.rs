@@ -82,17 +82,12 @@ impl Prp<u8> for KnuthShufflePRP<u8, 256> {
     }
 
     fn indicator_mask_xor(&self, data: u8, out: &mut [u8]) {
+        debug_assert_eq!(out.len() * 8, 256);
+
         // `invert(j)` is `self.permutation[j]` (see `invert` above), so the
-        // mask is one linear pass over the table: a bytewise `> data` compare,
-        // XORed over the hash bits. Branch-free with a fixed trip count — the
-        // scalar form of a SIMD compare-and-movemask (v2 plan §3). Bit order
-        // is shared with `hash_all_into` via `pack_bits_lsb_first`.
-        crate::primitives::pack_bits_lsb_first(
-            out,
-            &self.permutation,
-            |&p| u8::from(p > data),
-            |slot, byte| *slot ^= byte,
-        );
+        // mask is one pass over the table: a bytewise `> data` compare
+        // packed to bits — vectorised where the target supports it.
+        crate::primitives::simd::gt_mask_xor_256(&self.permutation, data, out);
     }
 }
 
