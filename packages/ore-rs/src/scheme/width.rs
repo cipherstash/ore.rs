@@ -71,8 +71,8 @@ impl_aes_block_buf!(64);
 /// cheap relative to the per-comparison AES hash.
 ///
 /// See `docs/reviews/2026-06-14-ore-v2-crypto-review-brief.md` (A4, compare
-/// side). The bit-position shift (`>> (bit % 8)`) is a register shift, not a
-/// memory access, so it is not a cache channel and is left as-is.
+/// side). The bit within the selected byte is then extracted with [`ct_bit`],
+/// which avoids a shift by the secret amount.
 #[inline]
 pub(crate) fn ct_select_byte(block: &[u8], idx: usize) -> u8 {
     use subtle_ng::{ConditionallySelectable, ConstantTimeEq};
@@ -83,6 +83,30 @@ pub(crate) fn ct_select_byte(block: &[u8], idx: usize) -> u8 {
         acc.conditional_assign(&b, (i as u8).ct_eq(&(idx as u8)));
     }
     acc
+}
+
+/// Oblivious extraction of bit `pos` (`0..8`) of `byte` — used right after
+/// [`ct_select_byte`] to read the target bit of the selected right-block byte.
+///
+/// `byte >> pos` would be a shift by a *secret* amount; that is constant-time
+/// on x86_64/aarch64 (the targets ore.rs ships to) but not guaranteed so on
+/// every architecture. Here every candidate shift is a compile-time constant
+/// and the result is chosen with a constant-time select, so the timing is
+/// data-independent on all targets — defence-in-depth matching the oblivious
+/// byte read above.
+#[inline]
+pub(crate) fn ct_bit(byte: u8, pos: u8) -> u8 {
+    use subtle_ng::{ConditionallySelectable, ConstantTimeEq};
+    let mut out = 0u8;
+    out.conditional_assign(&(byte & 1), pos.ct_eq(&0));
+    out.conditional_assign(&((byte >> 1) & 1), pos.ct_eq(&1));
+    out.conditional_assign(&((byte >> 2) & 1), pos.ct_eq(&2));
+    out.conditional_assign(&((byte >> 3) & 1), pos.ct_eq(&3));
+    out.conditional_assign(&((byte >> 4) & 1), pos.ct_eq(&4));
+    out.conditional_assign(&((byte >> 5) & 1), pos.ct_eq(&5));
+    out.conditional_assign(&((byte >> 6) & 1), pos.ct_eq(&6));
+    out.conditional_assign(&((byte >> 7) & 1), pos.ct_eq(&7));
+    out
 }
 
 /// Per-block bitvector operations on a Right ciphertext block, one bit per
