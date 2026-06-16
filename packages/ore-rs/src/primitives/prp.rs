@@ -178,25 +178,15 @@ macro_rules! impl_lemire_fy_prp {
             "LemireFyPrp: the one-cache-line constant-time argument requires domain <= 64"
         );
 
-        impl Prp<u8> for LemireFyPrp<$domain> {
-            fn new(key: &[u8]) -> PrpResult<Self> {
-                if key.len() < 16 {
+        impl LemireFyPrp<$domain> {
+            /// Build the permutation directly from a precomputed draw stream
+            /// (shape (ii)): `stream` must be at least `($domain - 1) * 8`
+            /// bytes, consumed as `$domain - 1` little-endian u64 draws and
+            /// Lemire-reduced. The chained scheme feeds the CMAC accumulator's
+            /// `PRP_STREAM` branch here, avoiding a per-block AES key schedule.
+            pub(crate) fn from_stream(stream: &[u8]) -> PrpResult<Self> {
+                if stream.len() < ($domain - 1) * 8 {
                     return Err(PrpError);
-                }
-
-                // Fixed-count AES-CTR keystream from the seed: counter in
-                // the first 4 bytes (big-endian), matching the existing
-                // PRNG's counter convention.
-                let cipher = Aes128::new(GenericArray::from_slice(&key[0..16]));
-                let mut blocks = [AesBlock::default(); $stream_blocks];
-                for (i, b) in blocks.iter_mut().enumerate() {
-                    b[0..4].copy_from_slice(&(i as u32).to_be_bytes());
-                }
-                cipher.encrypt_blocks(&mut blocks);
-
-                let mut stream = [0u8; $stream_blocks * 16];
-                for (i, b) in blocks.iter().enumerate() {
-                    stream[i * 16..(i + 1) * 16].copy_from_slice(b);
                 }
 
                 let mut perm = Self {
@@ -224,6 +214,34 @@ macro_rules! impl_lemire_fy_prp {
                 for (index, val) in perm.permutation.iter().enumerate() {
                     perm.inverse[*val as usize] = index as u8;
                 }
+
+                Ok(perm)
+            }
+        }
+
+        impl Prp<u8> for LemireFyPrp<$domain> {
+            fn new(key: &[u8]) -> PrpResult<Self> {
+                if key.len() < 16 {
+                    return Err(PrpError);
+                }
+
+                // Fixed-count AES-CTR keystream from the seed: counter in
+                // the first 4 bytes (big-endian), matching the existing
+                // PRNG's counter convention. Shape (i): a fresh key schedule
+                // per call. Shape (ii) skips this via `from_stream`.
+                let cipher = Aes128::new(GenericArray::from_slice(&key[0..16]));
+                let mut blocks = [AesBlock::default(); $stream_blocks];
+                for (i, b) in blocks.iter_mut().enumerate() {
+                    b[0..4].copy_from_slice(&(i as u32).to_be_bytes());
+                }
+                cipher.encrypt_blocks(&mut blocks);
+
+                let mut stream = [0u8; $stream_blocks * 16];
+                for (i, b) in blocks.iter().enumerate() {
+                    stream[i * 16..(i + 1) * 16].copy_from_slice(b);
+                }
+
+                let perm = Self::from_stream(&stream)?;
 
                 // The keystream determined the permutation — wipe it.
                 stream.zeroize();

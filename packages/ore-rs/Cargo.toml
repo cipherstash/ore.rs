@@ -63,5 +63,9 @@ name = "chrono"
 harness = false
 required-features = ["chrono"]
 
+[[bench]]
+name = "chained"
+harness = false
+
 [[example]]
 name = "encrypt"

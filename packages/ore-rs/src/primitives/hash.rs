@@ -93,9 +93,10 @@ fn pi() -> &'static Aes128 {
 /// dominated the σ-MMO hot path (≈704 doublings per Bit6 u64 encrypt).
 /// Constant-time: no secret-dependent control flow.
 #[inline]
-fn gf128_double_u128(x: u128) -> u128 {
+pub(crate) fn gf128_double_u128(x: u128) -> u128 {
     // `x << 1` discards the top bit (the GF reduction trigger); fold 0x87 into
-    // the low byte iff that bit was set. `x >> 127` is 0 or 1.
+    // the low byte iff that bit was set. `x >> 127` is 0 or 1. Also the CMAC
+    // subkey doubling (`crate::primitives::cmac`).
     (x << 1) ^ ((x >> 127) * 0x87)
 }
 

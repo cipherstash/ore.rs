@@ -496,6 +496,16 @@ PRs 3/4 and 5 are independent after PR 2, so they can proceed in parallel. Each 
 `main` releasable; release-plz handles version bumps (all semver-minor under 0.x except
 PR 2's trait change, which should be called out in the changelog).
 
+> **PR 6 status (2026-06-15): IMPLEMENTED** on `feat/ore-v2-chained` against the A2
+> design (preliminary crypto sign-off given; detailed review in progress). Ships the
+> AES-CMAC accumulator (`primitives/cmac.rs`, validated vs NIST SP 800-38B),
+> `LemireFyPrp::from_stream` (shape ii), and `OreAes128Bit6Chained` (`scheme/chained.rs`)
+> with variable-length `Var*` types and string encryption. Lexicographic cross-length
+> comparison, equality-across-nonces, and >14-block plaintexts are tested; perf
+> `docs/benchmarks/2026-06-15-chained-results.md` (~0.69 µs/block, below fixed-N's ~0.81).
+> Not yet in: `u128`/`Decimal` via the const-N + accumulator path; pinned wire vectors
+> (await final A2 sign-off, like Bit6 awaited A1).
+
 ## Testing strategy
 
 - **Vectors (PR 1) as the refactor contract:** every later PR runs them unchanged for

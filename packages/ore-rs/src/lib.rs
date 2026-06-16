@@ -170,6 +170,10 @@ pub enum OreError {
     /// per-ciphertext nonce).
     #[error("Randomness Error")]
     RandError(#[from] rand::Error),
+    /// The plaintext exceeds the maximum block count the wire format can
+    /// represent (the chained scheme encodes the block count as a `u16`).
+    #[error("Too many blocks")]
+    TooManyBlocks,
 }
 
 /// A BlockORE cipher: a key-bound object that can encrypt fixed-N plaintexts
