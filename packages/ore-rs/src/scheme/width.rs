@@ -50,20 +50,21 @@ impl AesBlockBuf for [AesBlock; 256] {
 /// Per-block bitvector operations on a Right ciphertext block, one bit per
 /// value in the block domain.
 pub trait RightBitVec {
-    /// Set bit `bit` to `value` (`0` or `1`).
-    fn set_bit(&mut self, bit: usize, value: u8);
     /// Read bit `bit`. (The width-generic comparator lands with the Bit6
     /// scheme; the legacy comparator calls the inherent method.)
     #[allow(dead_code)]
     fn get_bit(&self, bit: usize) -> u8;
+    /// The raw bitvector bytes, LSB-first within each byte (bit `j` lives in
+    /// byte `j / 8` at position `j % 8`), for bulk mask construction.
+    fn as_mut_bytes(&mut self) -> &mut [u8];
 }
 
 impl RightBitVec for RightBlock32 {
-    fn set_bit(&mut self, bit: usize, value: u8) {
-        RightBlock32::set_bit(self, bit, value)
-    }
     fn get_bit(&self, bit: usize) -> u8 {
         RightBlock32::get_bit(self, bit)
+    }
+    fn as_mut_bytes(&mut self) -> &mut [u8] {
+        self.bytes_mut()
     }
 }
 

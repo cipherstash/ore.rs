@@ -37,7 +37,12 @@ impl Prp<u8> for KnuthShufflePRP<u8, 256> {
             perm.permutation[i] = i as u8;
         }
 
-        (0..=255usize).rev().for_each(|i| {
+        // Iterations stop at i = 1: the i = 0 step always degenerates to
+        // `swap(0, 0)` after drawing rejection-sampled bytes until one is
+        // zero (expected 256 draws — a full PRNG regeneration), and the RNG
+        // is dropped right after this loop, so skipping it consumes no
+        // observable state and yields a byte-identical permutation.
+        (1..=255usize).rev().for_each(|i| {
             let j = rng.gen_range(i as u8);
             perm.permutation.swap(i, j as usize);
         });
@@ -75,6 +80,20 @@ impl Prp<u8> for KnuthShufflePRP<u8, 256> {
             None => Err(PrpError),
         }
     }
+
+    fn indicator_mask_xor(&self, data: u8, out: &mut [u8]) {
+        // `invert(j)` is `self.permutation[j]` (see `invert` above), so the
+        // mask is one linear pass over the table: a bytewise `> data` compare,
+        // XORed over the hash bits. Branch-free with a fixed trip count — the
+        // scalar form of a SIMD compare-and-movemask (v2 plan §3). Bit order
+        // is shared with `hash_all_into` via `pack_bits_lsb_first`.
+        crate::primitives::pack_bits_lsb_first(
+            out,
+            &self.permutation,
+            |&p| u8::from(p > data),
+            |slot, byte| *slot ^= byte,
+        );
+    }
 }
 
 #[cfg(test)]
@@ -85,6 +104,29 @@ mod tests {
     fn init_prp() -> PrpResult<KnuthShufflePRP<u8, 256>> {
         let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0eaa");
         Prp::new(&key)
+    }
+
+    quickcheck! {
+        /// The bulk indicator mask must agree with the naive per-bit
+        /// reference: bit j = (invert(j) > x). This is the regression guard
+        /// for `indicator_mask_xor` (and, later, its SIMD overrides).
+        fn indicator_mask_matches_reference(key: Vec<u8>, x: u8) -> quickcheck::TestResult {
+            if key.len() < 16 {
+                return quickcheck::TestResult::discard();
+            }
+            let prp: KnuthShufflePRP<u8, 256> = Prp::new(&key[0..16]).unwrap();
+
+            let mut mask = [0u8; 32];
+            prp.indicator_mask_xor(x, &mut mask);
+
+            let mut reference = [0u8; 32];
+            for j in 0..=255u8 {
+                let indicator = u8::from(prp.invert(j).unwrap() > x);
+                reference[(j / 8) as usize] |= indicator << (j % 8);
+            }
+
+            quickcheck::TestResult::from_bool(mask == reference)
+        }
     }
 
     #[test]

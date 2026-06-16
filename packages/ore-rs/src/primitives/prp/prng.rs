@@ -5,8 +5,8 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 pub struct Aes128Prng {
     cipher: Aes128,
     data: [GenericArray<u8, U16>; 16],
-    ptr: (usize, usize), // ptr to block and byte within block
-    ctr: u32,            // increments with each new encryption
+    ptr: usize, // flat index into the 256 buffered bytes (block = ptr >> 4)
+    ctr: u32,   // increments with each new encryption
 }
 
 impl Zeroize for Aes128Prng {
@@ -15,8 +15,7 @@ impl Zeroize for Aes128Prng {
             d.as_mut_slice().zeroize();
         }
         // Also clear the keystream position/counter state (ZA-0001).
-        self.ptr.0.zeroize();
-        self.ptr.1.zeroize();
+        self.ptr.zeroize();
         self.ctr.zeroize();
     }
 }
@@ -46,8 +45,9 @@ const _: fn() = || {
 };
 
 /*
- * To aid in performance this PRNG can only generate 256 random numbers
- * before it panics. Should _only_ be used inside the PRP.
+ * Buffers 256 AES-CTR keystream bytes at a time and regenerates a fresh batch
+ * when the buffer is exhausted (see `next_byte`). Should _only_ be used inside
+ * the PRP.
  */
 impl Aes128Prng {
     pub fn init(key: &[u8]) -> Self {
@@ -57,7 +57,7 @@ impl Aes128Prng {
             cipher,
             data: Default::default(),
             ctr: 0,
-            ptr: (0, 0),
+            ptr: 0,
         };
         prng.generate();
         prng
@@ -65,11 +65,21 @@ impl Aes128Prng {
 
     /*
      * Generates the next byte of the random number sequence.
+     *
+     * NOTE: when the buffer is exhausted, byte 0 of the regenerated buffer
+     * is skipped. This preserves the byte stream of the original
+     * tuple-pointer implementation (which regenerated *before* the
+     * post-read increment), and the byte stream is load-bearing: it
+     * determines the Knuth-shuffle PRP and therefore the ciphertext bytes.
      */
     pub fn next_byte(&mut self) -> u8 {
-        debug_assert!(self.ptr.0 < 16 && self.ptr.1 < 16);
-        let value: u8 = self.data[self.ptr.0][self.ptr.1];
-        self.inc_ptr();
+        let value: u8 = self.data[self.ptr >> 4][self.ptr & 15];
+        if self.ptr == 255 {
+            self.generate(); // resets ptr to 0
+            self.ptr = 1; // historical skip of byte 0 (see NOTE above)
+        } else {
+            self.ptr += 1;
+        }
         value
     }
 
@@ -86,26 +96,13 @@ impl Aes128Prng {
     }
 
     fn generate(&mut self) {
-        self.ptr = (0, 0);
+        self.ptr = 0;
         for i in 0..16 {
             // Counter
             self.data[i][0..4].copy_from_slice(&self.ctr.to_be_bytes());
             self.ctr += 1;
         }
         self.cipher.encrypt_blocks(&mut self.data);
-    }
-
-    #[inline]
-    fn inc_ptr(&mut self) {
-        if self.ptr == (15, 15) {
-            self.generate();
-        }
-        if self.ptr.1 < 15 {
-            self.ptr.1 += 1;
-        } else {
-            self.ptr.1 = 0;
-            self.ptr.0 += 1;
-        }
     }
 }
 
@@ -129,7 +126,7 @@ mod tests {
         for _i in 3..=255 {
             prg.next_byte();
         }
-        assert_eq!((15, 15), prg.ptr);
+        assert_eq!(255, prg.ptr);
     }
 
     #[test]
@@ -163,7 +160,7 @@ mod tests {
             prng.data.iter().all(|b| b.iter().all(|&x| x == 0)),
             "keystream not cleared"
         );
-        assert_eq!(prng.ptr, (0, 0), "position not cleared");
+        assert_eq!(prng.ptr, 0, "position not cleared");
         assert_eq!(prng.ctr, 0, "counter not cleared");
     }
 

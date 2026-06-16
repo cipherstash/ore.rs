@@ -31,17 +31,16 @@ impl Hash for Aes128Z2Hash {
         output[0] & 1u8
     }
 
-    // TODO: this mutates - see how much a copy effects performance (clone_from_slice)
-    fn hash_all(&self, data: &mut [AesBlock]) -> Vec<u8> {
+    fn hash_all_into(&self, data: &mut [AesBlock], out: &mut [u8]) {
         self.cipher.encrypt_blocks(data);
-
-        let mut vec = Vec::with_capacity(data.len());
-        for &mut block in data {
-            // Output is Z2 (1-bit)
-            vec.push(block[0] & 1u8);
-        }
-
-        vec
+        // Pack the Z2 (1-bit) outputs LSB-first, eight blocks per byte (assign
+        // into a fresh block); see `pack_bits_lsb_first` for the convention.
+        crate::primitives::pack_bits_lsb_first(
+            out,
+            data,
+            |block| block[0],
+            |slot, byte| *slot = byte,
+        );
     }
 }
 
