@@ -19,11 +19,17 @@ use zeroize::Zeroize;
 /// Block-width tag in the final block (domain separation; see the spec §4).
 pub(crate) const WIDTH_BIT6: u8 = 6;
 
-/// Output-family ("branch") tags carried in byte 0 of a final block. Prefix
-/// blocks use byte 0 = `0x00`, so prefix and final blocks never collide —
-/// the basis of the encoding's injectivity (spec §4).
-pub(crate) const BRANCH_RO_KEY: u8 = 0x01;
-pub(crate) const BRANCH_PRP_STREAM: u8 = 0x02;
+/// Output-family ("branch") tag carried in byte 0 of a final block. Encoded as
+/// a non-zero enum: prefix blocks use byte 0 = `0x00`, so making this a type
+/// (rather than a `u8`) removes any way to construct a final block whose byte 0
+/// is `0x00` and collides with a prefix block — the disjointness is the basis
+/// of the encoding's injectivity (spec §4), now guaranteed at compile time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum Branch {
+    RoKey = 0x01,
+    PrpStream = 0x02,
+}
 
 /// Prefix block `P_t` carrying symbol `sym` at position `pos` (spec §4):
 /// `[0x00 ‖ pos(u16 BE) ‖ sym ‖ 0…]`.
@@ -37,12 +43,13 @@ pub(crate) fn prefix_block(pos: u16, sym: u8) -> [u8; 16] {
 
 /// Final block `F(branch, n, s)` (spec §4):
 /// `[branch ‖ n(u16 BE) ‖ s(u16 BE) ‖ width ‖ 0…]`. `s` is the domain value
-/// `j` (or the permuted symbol `xt[n]` for the left tag) for `RO_KEY`, and the
-/// keystream counter `c` for `PRP_STREAM`.
+/// `j` (or the permuted symbol `xt[n]` for the left tag) for `RoKey`, and the
+/// keystream counter `c` for `PrpStream`. `branch` is a [`Branch`] (always
+/// non-zero), so byte 0 can never collide with a prefix block.
 #[inline]
-pub(crate) fn final_block(branch: u8, n: u16, s: u16, width: u8) -> [u8; 16] {
+pub(crate) fn final_block(branch: Branch, n: u16, s: u16, width: u8) -> [u8; 16] {
     let mut b = [0u8; 16];
-    b[0] = branch;
+    b[0] = branch as u8;
     b[1..3].copy_from_slice(&n.to_be_bytes());
     b[3..5].copy_from_slice(&s.to_be_bytes());
     b[5] = width;
@@ -71,8 +78,9 @@ impl CmacAccumulator {
             k1: [0u8; 16],
             state: [0u8; 16],
         };
-        let l = acc.encrypt([0u8; 16]); // L = E_k(0)
+        let mut l = acc.encrypt([0u8; 16]); // L = E_k(0)
         acc.k1 = gf128_double_u128(u128::from_be_bytes(l)).to_be_bytes();
+        l.zeroize(); // L is K1's source; don't leave it on the stack (spec §9)
         acc
     }
 
@@ -151,16 +159,16 @@ mod tests {
     fn encoding_is_injective_on_block_type() {
         // Prefix blocks have byte 0 == 0x00; final blocks have byte 0 != 0x00.
         assert_eq!(prefix_block(7, 0x3f)[0], 0x00);
-        assert_ne!(final_block(BRANCH_RO_KEY, 7, 9, WIDTH_BIT6)[0], 0x00);
-        assert_ne!(final_block(BRANCH_PRP_STREAM, 7, 9, WIDTH_BIT6)[0], 0x00);
+        assert_ne!(final_block(Branch::RoKey, 7, 9, WIDTH_BIT6)[0], 0x00);
+        assert_ne!(final_block(Branch::PrpStream, 7, 9, WIDTH_BIT6)[0], 0x00);
         // Distinct branches / positions / sub-indices give distinct blocks.
         assert_ne!(
-            final_block(BRANCH_RO_KEY, 1, 2, WIDTH_BIT6),
-            final_block(BRANCH_PRP_STREAM, 1, 2, WIDTH_BIT6)
+            final_block(Branch::RoKey, 1, 2, WIDTH_BIT6),
+            final_block(Branch::PrpStream, 1, 2, WIDTH_BIT6)
         );
         assert_ne!(
-            final_block(BRANCH_RO_KEY, 1, 2, WIDTH_BIT6),
-            final_block(BRANCH_RO_KEY, 1, 3, WIDTH_BIT6)
+            final_block(Branch::RoKey, 1, 2, WIDTH_BIT6),
+            final_block(Branch::RoKey, 1, 3, WIDTH_BIT6)
         );
         assert_ne!(prefix_block(1, 2), prefix_block(2, 2));
     }
@@ -170,9 +178,9 @@ mod tests {
     fn finalize_does_not_mutate_state() {
         let mut acc = CmacAccumulator::new(&[0x11u8; 16]);
         acc.absorb(&prefix_block(0, 5));
-        let a = acc.finalize(&final_block(BRANCH_RO_KEY, 1, 0, WIDTH_BIT6));
-        let _ = acc.finalize(&final_block(BRANCH_PRP_STREAM, 1, 0, WIDTH_BIT6));
-        let a_again = acc.finalize(&final_block(BRANCH_RO_KEY, 1, 0, WIDTH_BIT6));
+        let a = acc.finalize(&final_block(Branch::RoKey, 1, 0, WIDTH_BIT6));
+        let _ = acc.finalize(&final_block(Branch::PrpStream, 1, 0, WIDTH_BIT6));
+        let a_again = acc.finalize(&final_block(Branch::RoKey, 1, 0, WIDTH_BIT6));
         assert_eq!(a, a_again);
     }
 
@@ -229,13 +237,17 @@ mod tests {
         }
 
         /// Final blocks injectively encode `(branch, n, s, width)`: the tuple is
-        /// recoverable from the bytes, so distinct inputs give distinct blocks.
-        fn prop_final_block_injective(branch: u8, n: u16, s: u16, width: u8) -> bool {
-            let fb = final_block(branch, n, s, width);
-            fb[0] == branch
-                && u16::from_be_bytes([fb[1], fb[2]]) == n
-                && u16::from_be_bytes([fb[3], fb[4]]) == s
-                && fb[5] == width
+        /// recoverable from the bytes and byte 0 is always non-zero, so distinct
+        /// inputs give distinct blocks (and none collide with a prefix block).
+        fn prop_final_block_injective(n: u16, s: u16, width: u8) -> bool {
+            [Branch::RoKey, Branch::PrpStream].iter().copied().all(|branch| {
+                let fb = final_block(branch, n, s, width);
+                fb[0] == branch as u8
+                    && fb[0] != 0x00
+                    && u16::from_be_bytes([fb[1], fb[2]]) == n
+                    && u16::from_be_bytes([fb[3], fb[4]]) == s
+                    && fb[5] == width
+            })
         }
 
         /// Prefix blocks carry byte0 == 0x00 (never colliding with a final
