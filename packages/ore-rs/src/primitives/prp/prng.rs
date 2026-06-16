@@ -170,11 +170,12 @@ mod tests {
     // Compile-time check that the `ZeroizeOnDrop` *marker* is present (so
     // downstream `T: ZeroizeOnDrop` bounds hold). This does NOT prove the wipe
     // actually runs — `drop_zeroizes_keystream` below covers the runtime path.
-    #[test]
-    fn impls_zeroize_on_drop() {
+    // Written as a compile-time assertion (cf. lines 43-46) rather than a
+    // runtime `#[test]`, since nothing here executes at run time.
+    const _: fn() = || {
         fn assert_zod<T: ZeroizeOnDrop>() {}
         assert_zod::<Aes128Prng>();
-    }
+    };
 
     // Exercises the real `Drop -> zeroize()` path (the only path the PRP uses;
     // it never calls `zeroize()` explicitly). Runs the synthesised destructor
