@@ -12,15 +12,16 @@
 //! used by adding `ore-rs` to your dependencies in your project's `Cargo.toml`.
 //! ```toml
 //! [dependencies]
-//! ore-rs = "0.1"
+//! ore-rs = "0.8"
 //! ```
 //!
 //! ## Example: Encrypt a number with ORE.
 //!
-//! To encrypt a number you need to initalize an [`OreCipher`] as well as `use` the [`OreEncrypt`] trait
-//! which comes with implementations for `u32` and `u64`.
+//! To encrypt a number you need to initialize an [`OreCipher`] as well as `use` the [`OreEncrypt`] trait,
+//! which comes with implementations for `bool`, all integer widths (`u8`–`u128`, `i8`–`i128`), `char`,
+//! `f32` and `f64` (plus `chrono` and `rust_decimal` types behind the `chrono`/`decimal` features).
 //!
-//! To initalize the Cipher, you must decide on the scheme you want to use. There is only one ORE
+//! To initialize the Cipher, you must decide on the scheme you want to use. There is only one ORE
 //! Scheme right now so that's easy but in the future more schemes will become available.
 //!
 //! An `OreCipher` also requires 2 keys (16-bytes each) and an 8-byte seed.
@@ -38,11 +39,9 @@
 //! let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! let ore: OreAes128ChaCha20 = OreCipher::init(&k1, &k2).unwrap();
 //!
-//! // Encryption takes a mutable reference to the cipher and returns a `Result`
+//! // Encryption takes a reference to the cipher and returns a `Result`
 //! let a = 456u64.encrypt(&ore).unwrap();
 //! ```
-//!
-//! *Note that a cipher must be mutable as it manages internal state*.
 //!
 //!
 //! ## Example: Comparing 2 CipherTexts

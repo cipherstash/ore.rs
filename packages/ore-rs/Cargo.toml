@@ -7,6 +7,8 @@ authors = [
 ]
 edition = "2018"
 homepage = "https://cipherstash.com"
+repository = "https://github.com/cipherstash/ore.rs"
+documentation = "https://docs.rs/ore-rs"
 description = "Order-revealing encryption library used by the CipherStash searchable encryption platform"
 license-file = "../../LICENCE"
 readme = "README.md"

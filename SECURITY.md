@@ -2,9 +2,9 @@
 
 ## Supported Versions
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.1.x   | :white_check_mark: |
+This repository publishes the `ore-rs` and `orderable-bytes` crates.
+
+**Security fixes are released for the latest release line of each crate.** Security reports are welcome for any version, but fixes land in the latest release — if you are on an older version, plan to upgrade to receive them.
 
 ## Reporting a Vulnerability
 
