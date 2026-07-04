@@ -17,11 +17,11 @@
 //!
 //! ## Example: Encrypt a number with ORE.
 //!
-//! To encrypt a number you need to initalize an [`OreCipher`] as well as `use` the [`OreEncrypt`] trait,
+//! To encrypt a number you need to initialize an [`OreCipher`] as well as `use` the [`OreEncrypt`] trait,
 //! which comes with implementations for `bool`, all integer widths (`u8`–`u128`, `i8`–`i128`), `char`,
 //! `f32` and `f64` (plus `chrono` and `rust_decimal` types behind the `chrono`/`decimal` features).
 //!
-//! To initalize the Cipher, you must decide on the scheme you want to use. There is only one ORE
+//! To initialize the Cipher, you must decide on the scheme you want to use. There is only one ORE
 //! Scheme right now so that's easy but in the future more schemes will become available.
 //!
 //! An `OreCipher` also requires 2 keys (16-bytes each) and an 8-byte seed.
