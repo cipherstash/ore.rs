@@ -1,5 +1,14 @@
 
 
+### Documentation
+
+- refresh crates.io/docs.rs-facing docs and crate metadata
+
+### Miscellaneous
+
+- release
+
+
 ### Features
 
 - impl ToOrderableBytes for i16/i32/i64/f64
