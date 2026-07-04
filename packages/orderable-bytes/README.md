@@ -4,7 +4,7 @@ Pre-encryption byte encodings for **order-revealing encryption** (ORE) and **ord
 
 ORE and OPE both produce ciphertexts whose byte-wise comparison reveals the order of the underlying plaintexts. To exploit that property you first need to convert your plaintext — a `Decimal`, a `NaiveDate`, a `DateTime<Utc>`, … — into a canonical byte sequence whose lexicographic order already matches the value's natural total order. **That conversion is what this crate does.** Plug the bytes into an ORE or OPE primitive and the resulting ciphertext inherits the same order and equality semantics as the original plaintext.
 
-Each module exposes a `to_orderable_bytes` function and an `ENCODED_LEN` constant. The bytes have two guarantees:
+Primitive types (`bool`, all integer widths, `char`, `f32`/`f64`) implement the `ToOrderableBytes` trait via the always-available `primitive` module; `Decimal` and `chrono` types are covered by feature-gated modules, each exposing a `to_orderable_bytes` function and an `ENCODED_LEN` constant. The bytes have two guarantees:
 
 - **byte-wise lexicographic order agrees with the type's natural total order**
 - **byte equality agrees with value equality**
@@ -17,6 +17,7 @@ Encoders are gated behind per-type feature flags so callers only pay for the dep
 
 | Feature  | Path                                            | Type                       | `ENCODED_LEN` |
 |----------|-------------------------------------------------|----------------------------|---------------|
+| (none)   | `primitive` (`ToOrderableBytes` impls)          | `bool`, `u8`–`u128`, `i8`–`i128`, `char`, `f32`, `f64` | per type |
 | `decimal`| `decimal::to_orderable_bytes`                   | `rust_decimal::Decimal`    | 14            |
 | `chrono` | `chrono::naive_date::to_orderable_bytes`        | `chrono::NaiveDate`        | 4             |
 | `chrono` | `chrono::datetime_utc::to_orderable_bytes`      | `chrono::DateTime<Utc>`    | 12            |

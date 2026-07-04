@@ -7,6 +7,8 @@ authors = [
 ]
 edition = "2021"
 homepage = "https://cipherstash.com"
+repository = "https://github.com/cipherstash/ore.rs"
+documentation = "https://docs.rs/orderable-bytes"
 description = "Canonical, order-preserving fixed-length byte encodings for plaintext types — feed into ORE or OPE schemes that compare encrypted values lexicographically"
 license-file = "../../LICENCE"
 readme = "README.md"
