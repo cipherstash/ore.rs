@@ -579,3 +579,274 @@ mod tests {
         assert_ne!(Some(Ordering::Equal), Ore::compare_raw_slices(&a, &b));
     }
 }
+
+#[cfg(test)]
+mod golden_vectors {
+    //! ORE wire-format stability tests for `OreAes128ChaCha20`.
+    //!
+    //! Encryption is non-deterministic by design: each call draws a
+    //! random 16-byte nonce and folds it into the right-side ciphertext.
+    //! So we cannot assert byte-for-byte equality on the full payload.
+    //!
+    //! What *is* stable across calls — and what consumers (database-side
+    //! `compare_raw_slices`, on-disk ciphertexts, query terms) actually
+    //! depend on — is the **deterministic prefix**: the indicator-function
+    //! header plus the Left half. For an `N`-block plaintext, that's
+    //! `N + 16N = 17N` bytes (header is `N`, each Left block is 16 bytes).
+    //! Total ciphertext is `49N + 16` bytes (header + Left + nonce + Right).
+    //!
+    //! Each fixture below pins those `17N` bytes against a value captured
+    //! from this same module on a fixed key (`k1 = k2 = [7u8; 16]`).
+    //! Together with the explicit `total_len` assertions, these tests
+    //! catch:
+    //!
+    //! - Cipher-level wire-format drift (any change in the indicator
+    //!   function, PRF construction, or block layout).
+    //! - Per-type `OreEncrypt` impls (e.g. an i64 sign-flip going wrong).
+    //! - Plaintext-block-width changes (e.g. an int impl that suddenly
+    //!   widens or narrows).
+    //!
+    //! These vectors are also used as a cross-crate compatibility anchor
+    //! by downstream consumers (notably `cipherstash-suite`'s
+    //! `OreIndexer`) — the `i64` and `f64` fixtures here match their
+    //! counterparts there, since both feed the cipher the same plaintext
+    //! bytes.
+    //!
+    //! When intentionally rolling the wire format, regenerate every
+    //! fixture in lockstep and call out the change explicitly.
+    use super::*;
+    use crate::encrypt::OreEncrypt;
+    #[cfg(feature = "chrono")]
+    use ::chrono::NaiveDate;
+
+    /// Fixed-key cipher used for all golden-vector tests in this module.
+    fn cipher() -> OreAes128ChaCha20 {
+        let k1 = [7u8; 16];
+        let k2 = [7u8; 16];
+        OreCipher::init(&k1, &k2).unwrap()
+    }
+
+    /// Asserts that `bytes` is exactly `49N + 16` long (the full ORE
+    /// ciphertext shape for an `N`-byte plaintext block) and that its
+    /// first `17N` bytes — the deterministic header + Left half — match
+    /// `expected_prefix_hex`.
+    #[track_caller]
+    fn assert_deterministic_prefix<const N: usize>(bytes: &[u8], expected_prefix_hex: &str) {
+        let prefix_len = 17 * N;
+        let total_len = 49 * N + 16;
+        assert_eq!(
+            expected_prefix_hex.len(),
+            prefix_len * 2,
+            "fixture is the wrong length for an {N}-byte plaintext block",
+        );
+        assert_eq!(
+            bytes.len(),
+            total_len,
+            "ciphertext shape changed: got {} bytes, expected {}",
+            bytes.len(),
+            total_len,
+        );
+        assert_eq!(
+            hex::encode(&bytes[..prefix_len]),
+            expected_prefix_hex,
+            "ORE deterministic prefix changed",
+        );
+    }
+
+    #[test]
+    fn u64_wire_format_is_stable() {
+        let c = cipher();
+        assert_deterministic_prefix::<8>(
+            &0u64.encrypt(&c).unwrap().to_bytes(),
+            "cecececececececefc6a65709ae5689bd6be674717d0b1e65b2fad12385216ab\
+             dd9fefc3390261fee1e223d4e971d7796d6edea734d9edb88eed524f40f5554b\
+             2e4d35f355d231dc71281ff74c420c492853a6ef321662fb7c7a3ec3b8e36d10\
+             8e069671a8e086d27f6b5fb9ca399b5f003190eab8031552cf4692d29f9451a0\
+             caa6a8885a60348f",
+        );
+        assert_deterministic_prefix::<8>(
+            &42u64.encrypt(&c).unwrap().to_bytes(),
+            "cecececececece4ffc6a65709ae5689bd6be674717d0b1e65b2fad12385216ab\
+             dd9fefc3390261fee1e223d4e971d7796d6edea734d9edb88eed524f40f5554b\
+             2e4d35f355d231dc71281ff74c420c492853a6ef321662fb7c7a3ec3b8e36d10\
+             8e069671a8e086d27f6b5fb9ca399b5f003190eab80315521b0b6c745c46fd15\
+             791d9f75b665a4a2",
+        );
+        assert_deterministic_prefix::<8>(
+            &u64::MAX.encrypt(&c).unwrap().to_bytes(),
+            "e51cd055a35629704d773701cdbd62fd05175e913aa7c349deba38250f0c82b8\
+             60b9782edab63bcbba7a1325a5e3435a36a927dc6292c29f6021e3744d11be6e\
+             501b99ffcc309a397c9a0580cc2345540156953eb58b4c347ef5aabd19a6116b\
+             f6c2ed449be770a7c29fe8c750f62a37806759832dcb80f02833467fb96b6a3c\
+             d2ee34cbf4e7e102",
+        );
+    }
+
+    #[test]
+    fn i64_wire_format_is_stable() {
+        let c = cipher();
+        assert_deterministic_prefix::<8>(
+            &0i64.encrypt(&c).unwrap().to_bytes(),
+            "d00d0d0d0d0d0d0ddaf1cba91cf962e083775b5237c06c06747140c08f504744\
+             71c10b31426c70f0405fc43b6ec3a1d65b77d5f6f4accab914a2da8ebdfba7f7\
+             fd24456ae9dd3fab5b84aadb93a43b89033f2a9c3a33305fafbf28974022357a\
+             1278dade28f538f20f2a218a1c145be0cc0d522b73ed052d39163d5fcbdb2227\
+             cecd7cd460cdefd4",
+        );
+        assert_deterministic_prefix::<8>(
+            &42i64.encrypt(&c).unwrap().to_bytes(),
+            "d00d0d0d0d0d0d16daf1cba91cf962e083775b5237c06c06747140c08f504744\
+             71c10b31426c70f0405fc43b6ec3a1d65b77d5f6f4accab914a2da8ebdfba7f7\
+             fd24456ae9dd3fab5b84aadb93a43b89033f2a9c3a33305fafbf28974022357a\
+             1278dade28f538f20f2a218a1c145be0cc0d522b73ed052d573c8f420a888937\
+             01ebcde6f5bb6101",
+        );
+        assert_deterministic_prefix::<8>(
+            &(-42i64).encrypt(&c).unwrap().to_bytes(),
+            "d3228ef7485a3f789a88d0d95fd1c0b3f1790e02928fdd895c427411cb1288bf\
+             c18575b8ab6d8b592d6875bf185afa1b242769643510b699adc553625ad5615a\
+             f0cd34ad11f5e799f4e2607809d7db52c636cbe5837fd7c825642c485fdbc430\
+             14112a08408c71beb50119d58d3b5a09ea400ca8c9c8b98fc8f9430da4e4f04e\
+             19edc34f050376ce",
+        );
+        assert_deterministic_prefix::<8>(
+            &i64::MIN.encrypt(&c).unwrap().to_bytes(),
+            "cecececececececefc6a65709ae5689bd6be674717d0b1e65b2fad12385216ab\
+             dd9fefc3390261fee1e223d4e971d7796d6edea734d9edb88eed524f40f5554b\
+             2e4d35f355d231dc71281ff74c420c492853a6ef321662fb7c7a3ec3b8e36d10\
+             8e069671a8e086d27f6b5fb9ca399b5f003190eab8031552cf4692d29f9451a0\
+             caa6a8885a60348f",
+        );
+        assert_deterministic_prefix::<8>(
+            &i64::MAX.encrypt(&c).unwrap().to_bytes(),
+            "e51cd055a35629704d773701cdbd62fd05175e913aa7c349deba38250f0c82b8\
+             60b9782edab63bcbba7a1325a5e3435a36a927dc6292c29f6021e3744d11be6e\
+             501b99ffcc309a397c9a0580cc2345540156953eb58b4c347ef5aabd19a6116b\
+             f6c2ed449be770a7c29fe8c750f62a37806759832dcb80f02833467fb96b6a3c\
+             d2ee34cbf4e7e102",
+        );
+    }
+
+    #[test]
+    fn f64_wire_format_is_stable() {
+        let c = cipher();
+        // f64 0.0 and i64 0 share the same plaintext bytes
+        // (`[0x80, 0, 0, 0, 0, 0, 0, 0]`) under their respective
+        // `to_orderable_bytes` impls and therefore the same Left half.
+        assert_deterministic_prefix::<8>(
+            &0.0f64.encrypt(&c).unwrap().to_bytes(),
+            "d00d0d0d0d0d0d0ddaf1cba91cf962e083775b5237c06c06747140c08f504744\
+             71c10b31426c70f0405fc43b6ec3a1d65b77d5f6f4accab914a2da8ebdfba7f7\
+             fd24456ae9dd3fab5b84aadb93a43b89033f2a9c3a33305fafbf28974022357a\
+             1278dade28f538f20f2a218a1c145be0cc0d522b73ed052d39163d5fcbdb2227\
+             cecd7cd460cdefd4",
+        );
+        assert_deterministic_prefix::<8>(
+            &1.5f64.encrypt(&c).unwrap().to_bytes(),
+            "0593dbdbdbdbdbdbbbd98421c5189a12fc5c39545de73168e3942466fd993ec4\
+             8f554e421343631a5d9409a5a6ea0a78d5fc05a4e43a3eaabfba978c222edd38\
+             43bb320aa9ab2e883b0e1865898a85cc93c74512068e26af6ae406cd61e81c7f\
+             259c633bd621df1625312d5e0ad05672f19d79a3cfcdadf3a4904732daea75ce\
+             1eca3363d5be73c6",
+        );
+        assert_deterministic_prefix::<8>(
+            &(-1.5f64).encrypt(&c).unwrap().to_bytes(),
+            "fb03c6e95da115fbb1ca1d4a741cf59b5eb87f38e59ac17cddb8dafbe0aa6b02\
+             b134c60c41e450ff016e9efbf87862fc57a5e75b586c3ed04baf962e54e865e9\
+             a3e9334e40042905462c2ea66e4e594d3d894db23927e27c615fef6ddd6e1ed6\
+             2a976960d641eadfbe8e5d48dfe08656c4cc3a90d7dd5a3de2422b8b5d9b0784\
+             13f450fb6d113815",
+        );
+    }
+
+    #[test]
+    fn i32_wire_format_is_stable() {
+        let c = cipher();
+        assert_deterministic_prefix::<4>(
+            &0i32.encrypt(&c).unwrap().to_bytes(),
+            "d00d0d0ddaf1cba91cf962e083775b5237c06c062a72cf35efab4653832ae18c\
+             f692f93e084f3adb31b82b1770ef586d4e64f96df50ac5e7e1f5f659befa2a2a\
+             19750b77",
+        );
+        assert_deterministic_prefix::<4>(
+            &42i32.encrypt(&c).unwrap().to_bytes(),
+            "d00d0d16daf1cba91cf962e083775b5237c06c062a72cf35efab4653832ae18c\
+             f692f93e084f3adb31b82b1770ef586d4e64f96d6dfbb06b2d63eabc222a02d5\
+             939a80f3",
+        );
+        assert_deterministic_prefix::<4>(
+            &(-42i32).encrypt(&c).unwrap().to_bytes(),
+            "d3228eee9a88d0d95fd1c0b3f1790e02928fdd89f24f431cb2ef7d7791b737da\
+             ffa262449dfb565bc18bb77ef5f987fdd26824530dc94819b1c8ebca30309b8c\
+             8636cfcf",
+        );
+        assert_deterministic_prefix::<4>(
+            &i32::MIN.encrypt(&c).unwrap().to_bytes(),
+            "cecececefc6a65709ae5689bd6be674717d0b1e68431fb1b9f87c803668c6e1b\
+             3348e723d5a4768b7e39dc7fd22b85a1f51cbd85f74531b4cf312e5bfdb0c648\
+             a2f50026",
+        );
+        assert_deterministic_prefix::<4>(
+            &i32::MAX.encrypt(&c).unwrap().to_bytes(),
+            "e51cd0554d773701cdbd62fd05175e913aa7c3498f5e9c5ef8bcae8fe7a03b86\
+             f2ce17aa58d3a5c6de503efb09a456edfc0e16fb3b747143d28bef147d9aca04\
+             83b7ff92",
+        );
+    }
+
+    #[test]
+    fn i16_wire_format_is_stable() {
+        let c = cipher();
+        assert_deterministic_prefix::<2>(
+            &0i16.encrypt(&c).unwrap().to_bytes(),
+            "d00ddaf1cba91cf962e083775b5237c06c064c40ec240af33273bb4832fe24ab254e",
+        );
+        assert_deterministic_prefix::<2>(
+            &42i16.encrypt(&c).unwrap().to_bytes(),
+            "d016daf1cba91cf962e083775b5237c06c069578b0052c8402e2ed18a00f7229ac80",
+        );
+        assert_deterministic_prefix::<2>(
+            &(-42i16).encrypt(&c).unwrap().to_bytes(),
+            "d3bb9a88d0d95fd1c0b3f1790e02928fdd89b083c07528f9051c525be47f0902c1bb",
+        );
+    }
+
+    #[test]
+    fn bool_wire_format_is_stable() {
+        let c = cipher();
+        assert_deterministic_prefix::<1>(
+            &false.encrypt(&c).unwrap().to_bytes(),
+            "cefc6a65709ae5689bd6be674717d0b1e6",
+        );
+        assert_deterministic_prefix::<1>(
+            &true.encrypt(&c).unwrap().to_bytes(),
+            "e10d717c3f0a874c683a02b8d27dcdaf64",
+        );
+    }
+
+    #[cfg(feature = "chrono")]
+    #[test]
+    fn naive_date_wire_format_is_stable() {
+        let c = cipher();
+        assert_deterministic_prefix::<4>(
+            &NaiveDate::from_ymd_opt(2024, 1, 15)
+                .unwrap()
+                .encrypt(&c)
+                .unwrap()
+                .to_bytes(),
+            "d038ee23daf1cba91cf962e083775b5237c06c06a7b068e660dee83d73c60c76\
+             2845dd312350293f4022e1d34108c6c2c4bb0d5fb1ef22cad3dc65180ed9774c\
+             0b041752",
+        );
+        assert_deterministic_prefix::<4>(
+            &NaiveDate::from_ymd_opt(1970, 1, 1)
+                .unwrap()
+                .encrypt(&c)
+                .unwrap()
+                .to_bytes(),
+            "d0400910daf1cba91cf962e083775b5237c06c0688d1ffba203844a0ead9ab56\
+             0b0aeb43945dd80dec3929fe7e88fcbcc5b7e1cd4dacaec8cdadd4fd6cbb923b\
+             b0a0d4ce",
+        );
+    }
+}
