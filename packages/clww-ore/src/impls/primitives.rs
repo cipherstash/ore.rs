@@ -380,6 +380,9 @@ macro_rules! impl_cllw_ope_float {
 impl_cllw_ope_float!(f32, u32);
 impl_cllw_ope_float!(f64, u64);
 
+// Gated with `byte_array` (its only user) so builds without either feature
+// don't carry a dead function.
+#[cfg(any(feature = "chrono", feature = "decimal"))]
 impl<const N: usize> OpeCllw8V1<N> {
     /// Construct a ciphertext from raw bytes produced by
     /// [`super::encrypt_ope_bits`]. Crate-internal — used by feature
