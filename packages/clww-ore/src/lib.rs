@@ -150,6 +150,9 @@ pub struct Error;
 /// The key is used to encrypt and decrypt values while preserving their ordering.
 /// All encryption operations are deterministic for a given key.
 ///
+/// The key material is wiped on drop (`ZeroizeOnDrop`), so callers deriving a
+/// `Key` from other secrets only need to wipe their own intermediates.
+///
 /// # Examples
 ///
 /// ```
@@ -166,6 +169,7 @@ pub struct Error;
 /// let decrypted = key.decrypt(ciphertext).unwrap();
 /// assert_eq!(plaintext, decrypted);
 /// ```
+#[derive(zeroize::Zeroize, zeroize::ZeroizeOnDrop)]
 pub struct Key([u8; 32]);
 
 impl Key {
