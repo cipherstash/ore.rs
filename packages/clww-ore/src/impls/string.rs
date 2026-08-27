@@ -81,6 +81,44 @@ impl CllwOpeEncrypt for &[u8] {
     }
 }
 
+/// Owned counterpart of the `&str` impl: an owned value can outlive the call
+/// that hands it to an encryptor (e.g. a visitor that must be `'static`),
+/// where a borrow cannot. Produces byte-identical ciphertext to `&str`.
+impl CllwOreEncrypt for String {
+    type Output = OreCllw8VariableV1;
+
+    fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+        self.as_str().encrypt_with_salt(key, salt)
+    }
+}
+
+/// Owned counterpart of the `&[u8]` impl; byte-identical ciphertext.
+impl CllwOreEncrypt for Vec<u8> {
+    type Output = OreCllw8VariableV1;
+
+    fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+        self.as_slice().encrypt_with_salt(key, salt)
+    }
+}
+
+/// Owned counterpart of the `&str` impl; byte-identical ciphertext.
+impl CllwOpeEncrypt for String {
+    type Output = OpeCllw8VariableV1;
+
+    fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+        self.as_str().encrypt_ope_with_salt(key, salt)
+    }
+}
+
+/// Owned counterpart of the `&[u8]` impl; byte-identical ciphertext.
+impl CllwOpeEncrypt for Vec<u8> {
+    type Output = OpeCllw8VariableV1;
+
+    fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+        self.as_slice().encrypt_ope_with_salt(key, salt)
+    }
+}
+
 /// Normalizes the string use Unicode = NFKC normalization, and then removes any
 /// characters that are not alphanumeric, whitespace, or ASCII punctuation.
 /// This is a "rough" collation that is used to orderize strings for encryption.
@@ -727,5 +765,30 @@ mod tests {
             // SafeString only contains chars that survive orderize_string
             orderize_string(&x.0) == x.0
         }
+    }
+
+    #[test]
+    fn owned_string_matches_borrowed_str() {
+        let key = Key::from([7; 32]);
+        let borrowed = key.encrypt("hello world").unwrap();
+        let owned = key.encrypt(String::from("hello world")).unwrap();
+        assert_eq!(borrowed.as_ref(), owned.as_ref());
+
+        let borrowed = key.encrypt_ope("hello world").unwrap();
+        let owned = key.encrypt_ope(String::from("hello world")).unwrap();
+        assert_eq!(borrowed.as_ref(), owned.as_ref());
+    }
+
+    #[test]
+    fn owned_bytes_match_borrowed_slice() {
+        let key = Key::from([7; 32]);
+        let bytes: &[u8] = b"\x00\xff\x10";
+        let borrowed = key.encrypt(bytes).unwrap();
+        let owned = key.encrypt(bytes.to_vec()).unwrap();
+        assert_eq!(borrowed.as_ref(), owned.as_ref());
+
+        let borrowed = key.encrypt_ope(bytes).unwrap();
+        let owned = key.encrypt_ope(bytes.to_vec()).unwrap();
+        assert_eq!(borrowed.as_ref(), owned.as_ref());
     }
 }
