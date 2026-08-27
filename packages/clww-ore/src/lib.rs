@@ -128,6 +128,7 @@
 //! assert_eq!(pt, 42u32);
 //! ```
 use thiserror::Error;
+use zeroize::Zeroize;
 mod biterator;
 mod impls;
 mod nibble_iterator;
@@ -150,8 +151,11 @@ pub struct Error;
 /// The key is used to encrypt and decrypt values while preserving their ordering.
 /// All encryption operations are deterministic for a given key.
 ///
-/// The key material is wiped on drop (`ZeroizeOnDrop`), so callers deriving a
-/// `Key` from other secrets only need to wipe their own intermediates.
+/// The key material is wiped on drop (`ZeroizeOnDrop`), and
+/// [`Key::from`] wipes the by-value copy it is handed. Each layer is
+/// responsible for the copy it owns: callers deriving a `Key` from other
+/// secrets still wipe the array they passed in (it is `Copy`) and any other
+/// intermediates of their own.
 ///
 /// # Examples
 ///
@@ -262,8 +266,13 @@ impl Key {
 }
 
 impl From<[u8; 32]> for Key {
-    fn from(key: [u8; 32]) -> Self {
-        Self(key)
+    /// Move the bytes into a self-wiping `Key`. `[u8; 32]` is `Copy`, so the
+    /// argument is a copy: it is wiped here before returning, but the caller's
+    /// own array is the caller's to wipe (`zeroize` it after the call).
+    fn from(mut key: [u8; 32]) -> Self {
+        let wrapped = Key(key);
+        key.zeroize();
+        wrapped
     }
 }
 
