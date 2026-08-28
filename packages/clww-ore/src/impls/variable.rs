@@ -51,10 +51,29 @@ impl FromHex for OreCllw8VariableV1 {
 }
 
 /// FIXME: this impl should not exist - there are infinitely many Vec lengths that will not contain a valid term.
-/// Fallibility is a must. Switch to TryFrom.
+/// Fallibility is a must. Switch to TryFrom (below) and remove this once callers migrate.
 impl From<Vec<u8>> for OreCllw8VariableV1 {
     fn from(bytes: Vec<u8>) -> Self {
         Self { bytes }
+    }
+}
+
+/// Rebuild a ciphertext from stored bytes, rejecting lengths no ORE
+/// ciphertext of this shape can have: encryption emits one byte per
+/// plaintext *bit*, so a valid length is a multiple of 8 (the same check
+/// [`OreCllw8VariableV1::decrypt_to_bytes`] applies before decrypting).
+/// Structural only — bytes that pass are not thereby proven to be a genuine
+/// ciphertext.
+impl TryFrom<&[u8]> for OreCllw8VariableV1 {
+    type Error = Error;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        if !value.len().is_multiple_of(BITS_PER_BYTE) {
+            return Err(Error);
+        }
+        Ok(Self {
+            bytes: value.to_vec(),
+        })
     }
 }
 
@@ -197,6 +216,24 @@ impl OpeCllw8VariableV1 {
     /// [`crate::encrypt_ope_bits`], and wrap the resulting bytes here.
     pub fn from_bytes(bytes: Vec<u8>) -> Self {
         Self { bytes }
+    }
+}
+
+/// Rebuild a ciphertext from stored bytes, rejecting lengths no OPE
+/// ciphertext of this shape can have: a valid length is
+/// `8 * plaintext_bytes + 1` (one byte per plaintext bit plus the reserved
+/// leading carry byte). Structural only — bytes that pass are not thereby
+/// proven to be a genuine ciphertext.
+impl TryFrom<&[u8]> for OpeCllw8VariableV1 {
+    type Error = Error;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        if value.len() % BITS_PER_BYTE != 1 {
+            return Err(Error);
+        }
+        Ok(Self {
+            bytes: value.to_vec(),
+        })
     }
 }
 
