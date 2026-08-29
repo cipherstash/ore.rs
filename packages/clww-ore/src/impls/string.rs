@@ -42,7 +42,9 @@ impl CllwOreEncrypt for &[u8] {
 
     fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         let bits = self.iter().flat_map(|&byte| Biterator::new(byte));
-        Ok(OreCllw8VariableV1::from(encrypt_ore_bits(bits, key, salt)))
+        Ok(OreCllw8VariableV1::from_bytes_unchecked(encrypt_ore_bits(
+            bits, key, salt,
+        )))
     }
 }
 
@@ -51,7 +53,7 @@ impl CllwOreEncrypt for &str {
 
     fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         let string = orderize_string(self);
-        Ok(OreCllw8VariableV1::from(encrypt_ore_bits(
+        Ok(OreCllw8VariableV1::from_bytes_unchecked(encrypt_ore_bits(
             string_biter(&string),
             key,
             salt,
@@ -66,7 +68,7 @@ impl CllwOpeEncrypt for &str {
         let normalized = orderize_string(self);
         let n = normalized.len() * 8;
         let bytes = encrypt_ope_bits(string_biter(&normalized), n, key, salt);
-        Ok(OpeCllw8VariableV1::from_bytes(bytes))
+        Ok(OpeCllw8VariableV1::from_bytes_unchecked(bytes))
     }
 }
 
@@ -77,7 +79,7 @@ impl CllwOpeEncrypt for &[u8] {
         let n = self.len() * 8;
         let bits = self.iter().flat_map(|&byte| Biterator::new(byte));
         let bytes = encrypt_ope_bits(bits, n, key, salt);
-        Ok(OpeCllw8VariableV1::from_bytes(bytes))
+        Ok(OpeCllw8VariableV1::from_bytes_unchecked(bytes))
     }
 }
 
@@ -505,7 +507,7 @@ mod tests {
         // Truncate to make length not a multiple of 8
         // Valid length would be 32 (4 bytes * 8 bits), so try 30
         let invalid_bytes = ciphertext.as_ref()[..30].to_vec();
-        let malformed_ct = OreCllw8VariableV1::from(invalid_bytes);
+        let malformed_ct = OreCllw8VariableV1::from_bytes_unchecked(invalid_bytes);
 
         // Decryption should fail with Unspecified error
         let result = malformed_ct.decrypt_to_bytes(&key, None);
@@ -518,7 +520,7 @@ mod tests {
 
         // Create a ciphertext with length 7 (not multiple of 8)
         let invalid_bytes = vec![0u8; 7];
-        let malformed_ct = OreCllw8VariableV1::from(invalid_bytes);
+        let malformed_ct = OreCllw8VariableV1::from_bytes_unchecked(invalid_bytes);
 
         // Decryption should fail
         let result = malformed_ct.decrypt_to_bytes(&key, None);
@@ -530,7 +532,7 @@ mod tests {
         let key = Key::from([0; 32]);
 
         // Empty ciphertext (length 0) is valid - represents empty input
-        let empty_ct = OreCllw8VariableV1::from(vec![]);
+        let empty_ct = OreCllw8VariableV1::from_bytes_unchecked(vec![]);
 
         let result = empty_ct.decrypt_to_bytes(&key, None);
         assert!(result.is_ok());
@@ -557,7 +559,7 @@ mod tests {
 
         // Create a malformed ciphertext (length not multiple of 8)
         let invalid_bytes = vec![0u8; 15];
-        let malformed_ct = OreCllw8VariableV1::from(invalid_bytes);
+        let malformed_ct = OreCllw8VariableV1::from_bytes_unchecked(invalid_bytes);
 
         // String decryption should also fail with the same error
         let result = key.decrypt(malformed_ct);

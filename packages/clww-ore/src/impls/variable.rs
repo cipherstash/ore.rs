@@ -40,6 +40,13 @@ impl AsRef<[u8]> for OreCllw8VariableV1 {
     }
 }
 
+/// Deliberately **not** length-checked, unlike
+/// [`from_bytes`](OreCllw8VariableV1::from_bytes) and the `TryFrom` impl: this
+/// is the wire decoder (`#[serde(with = "hex::serde")]`) for consumers whose
+/// plaintext is a *tagged bit stream* rather than whole bytes, whose
+/// ciphertexts are legitimately not a multiple of 8 bytes long. Rejecting
+/// them here would reject real stored terms. See
+/// [`from_bytes_unchecked`](OreCllw8VariableV1::from_bytes_unchecked).
 impl FromHex for OreCllw8VariableV1 {
     type Error = FromHexError;
 
@@ -50,34 +57,47 @@ impl FromHex for OreCllw8VariableV1 {
     }
 }
 
-/// FIXME: this impl should not exist - there are infinitely many Vec lengths that will not contain a valid term.
-/// Fallibility is a must. Switch to TryFrom (below) and remove this once callers migrate.
-impl From<Vec<u8>> for OreCllw8VariableV1 {
-    fn from(bytes: Vec<u8>) -> Self {
-        Self { bytes }
-    }
-}
-
-/// Rebuild a ciphertext from stored bytes, rejecting lengths no ORE
-/// ciphertext of this shape can have: encryption emits one byte per
-/// plaintext *bit*, so a valid length is a multiple of 8 (the same check
-/// [`OreCllw8VariableV1::decrypt_to_bytes`] applies before decrypting).
-/// Structural only — bytes that pass are not thereby proven to be a genuine
-/// ciphertext.
+/// Slice-borrowing counterpart of [`OreCllw8VariableV1::from_bytes`], with
+/// the same length check.
 impl TryFrom<&[u8]> for OreCllw8VariableV1 {
     type Error = Error;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        if !value.len().is_multiple_of(BITS_PER_BYTE) {
-            return Err(Error);
-        }
-        Ok(Self {
-            bytes: value.to_vec(),
-        })
+        Self::from_bytes(value.to_vec())
     }
 }
 
 impl OreCllw8VariableV1 {
+    /// The one length rule, shared by [`from_bytes`](Self::from_bytes) and
+    /// the `TryFrom` impl: encryption emits one byte per plaintext *bit*, so
+    /// a ciphertext over whole-byte plaintext is a multiple of 8 bytes long
+    /// (the same check [`decrypt_to_bytes`](Self::decrypt_to_bytes) applies
+    /// before decrypting).
+    fn is_byte_aligned_len(len: usize) -> bool {
+        len.is_multiple_of(BITS_PER_BYTE)
+    }
+
+    /// Wrap bytes without the length check — for ciphertexts this crate just
+    /// produced (valid by construction) and for consumers encrypting a
+    /// *tagged bit stream* rather than whole bytes, whose ciphertexts are
+    /// legitimately not a multiple of 8 bytes long and which
+    /// [`from_bytes`](Self::from_bytes) would therefore reject.
+    pub fn from_bytes_unchecked(bytes: Vec<u8>) -> Self {
+        Self { bytes }
+    }
+
+    /// Rebuild a ciphertext from stored bytes, rejecting lengths no ORE
+    /// ciphertext of *whole-byte* plaintext can have. Structural only —
+    /// bytes that pass are not thereby proven to be a genuine ciphertext.
+    /// Callers holding a tagged-bit-stream ciphertext want
+    /// [`from_bytes_unchecked`](Self::from_bytes_unchecked) instead.
+    pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
+        if !Self::is_byte_aligned_len(bytes.len()) {
+            return Err(Error);
+        }
+        Ok(Self { bytes })
+    }
+
     /// Decrypt the ciphertext to raw bytes
     pub fn decrypt_to_bytes(&self, key: &Key, salt: Option<&[u8]>) -> Result<Vec<u8>, Error> {
         // Validate that ciphertext length is a multiple of 8
@@ -208,32 +228,46 @@ pub struct OpeCllw8VariableV1 {
 }
 
 impl OpeCllw8VariableV1 {
-    /// Construct a ciphertext from raw bytes produced by [`crate::encrypt_ope_bits`].
-    ///
-    /// Callers (`&str`/`&[u8]` impls, feature-gated modules like `decimal` and
-    /// `chrono`, and external consumers wiring their own tagged plaintext bit
-    /// streams) build the canonical byte form, run it through
-    /// [`crate::encrypt_ope_bits`], and wrap the resulting bytes here.
-    pub fn from_bytes(bytes: Vec<u8>) -> Self {
+    /// The one length rule, shared by [`from_bytes`](Self::from_bytes) and
+    /// the `TryFrom` impl: a ciphertext over whole-byte plaintext is
+    /// `8 * plaintext_bytes + 1` long (one byte per plaintext bit plus the
+    /// reserved leading carry byte).
+    fn is_byte_aligned_len(len: usize) -> bool {
+        len % BITS_PER_BYTE == 1
+    }
+
+    /// Wrap bytes produced by [`crate::encrypt_ope_bits`] without the length
+    /// check — for ciphertexts this crate just produced (valid by
+    /// construction) and for consumers encrypting a *tagged bit stream*
+    /// rather than whole bytes (the `decimal`/`chrono` modules, external
+    /// consumers wiring their own tagged plaintext bit streams), whose
+    /// ciphertexts are legitimately not `8n + 1` long and which
+    /// [`from_bytes`](Self::from_bytes) would therefore reject.
+    pub fn from_bytes_unchecked(bytes: Vec<u8>) -> Self {
         Self { bytes }
+    }
+
+    /// Rebuild a ciphertext from stored bytes produced by
+    /// [`crate::encrypt_ope_bits`], rejecting lengths no OPE ciphertext of
+    /// *whole-byte* plaintext can have. Structural only — bytes that pass are
+    /// not thereby proven to be a genuine ciphertext. Callers holding a
+    /// tagged-bit-stream ciphertext want
+    /// [`from_bytes_unchecked`](Self::from_bytes_unchecked) instead.
+    pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
+        if !Self::is_byte_aligned_len(bytes.len()) {
+            return Err(Error);
+        }
+        Ok(Self { bytes })
     }
 }
 
-/// Rebuild a ciphertext from stored bytes, rejecting lengths no OPE
-/// ciphertext of this shape can have: a valid length is
-/// `8 * plaintext_bytes + 1` (one byte per plaintext bit plus the reserved
-/// leading carry byte). Structural only — bytes that pass are not thereby
-/// proven to be a genuine ciphertext.
+/// Slice-borrowing counterpart of [`OpeCllw8VariableV1::from_bytes`], with
+/// the same length check.
 impl TryFrom<&[u8]> for OpeCllw8VariableV1 {
     type Error = Error;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        if value.len() % BITS_PER_BYTE != 1 {
-            return Err(Error);
-        }
-        Ok(Self {
-            bytes: value.to_vec(),
-        })
+        Self::from_bytes(value.to_vec())
     }
 }
 
@@ -243,6 +277,9 @@ impl AsRef<[u8]> for OpeCllw8VariableV1 {
     }
 }
 
+/// Deliberately **not** length-checked, for the same reason as the ORE impl
+/// above: it is the wire decoder for tagged-bit-stream ciphertexts, whose
+/// lengths the `8n + 1` rule does not describe.
 impl FromHex for OpeCllw8VariableV1 {
     type Error = FromHexError;
 
@@ -250,5 +287,87 @@ impl FromHex for OpeCllw8VariableV1 {
         Ok(Self {
             bytes: hex::decode(hex)?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // One length rule per type, shared by `from_bytes` and `TryFrom`: over
+    // whole-byte plaintext an ORE ciphertext is a multiple of 8 bytes and an
+    // OPE ciphertext is `8 * n + 1` (the reserved leading carry byte).
+    // `from_hex` (the wire decoder) and `from_bytes_unchecked` stay permissive
+    // for tagged-bit-stream ciphertexts, which the rule does not describe.
+
+    #[test]
+    fn ore_rejects_impossible_length_on_the_checked_entry_points() {
+        let short = vec![0u8; 7];
+        assert!(OreCllw8VariableV1::from_bytes(short.clone()).is_err());
+        assert!(OreCllw8VariableV1::try_from(short.as_slice()).is_err());
+        // `from_hex` and `from_bytes_unchecked` are the documented escape
+        // hatches for tagged-bit-stream ciphertexts, so they accept it.
+        assert!(OreCllw8VariableV1::from_hex(hex::encode(&short)).is_ok());
+    }
+
+    #[test]
+    fn ore_round_trips_a_valid_length_on_every_entry_point() {
+        let valid = vec![0xABu8; 16];
+        let hex_str = hex::encode(&valid);
+
+        assert_eq!(
+            OreCllw8VariableV1::from_bytes(valid.clone())
+                .expect("from_bytes")
+                .as_ref(),
+            valid.as_slice()
+        );
+        assert_eq!(
+            OreCllw8VariableV1::try_from(valid.as_slice())
+                .expect("try_from")
+                .as_ref(),
+            valid.as_slice()
+        );
+        assert_eq!(
+            OreCllw8VariableV1::from_hex(&hex_str)
+                .expect("from_hex")
+                .as_ref(),
+            valid.as_slice()
+        );
+    }
+
+    #[test]
+    fn ope_rejects_impossible_length_on_the_checked_entry_points() {
+        // A multiple of 8 is exactly what an OPE ciphertext cannot be: the
+        // carry byte makes every valid length `8 * n + 1`.
+        let short = vec![0u8; 8];
+        assert!(OpeCllw8VariableV1::from_bytes(short.clone()).is_err());
+        assert!(OpeCllw8VariableV1::try_from(short.as_slice()).is_err());
+        // As for ORE: the hex wire decoder stays permissive on purpose.
+        assert!(OpeCllw8VariableV1::from_hex(hex::encode(&short)).is_ok());
+    }
+
+    #[test]
+    fn ope_round_trips_a_valid_length_on_every_entry_point() {
+        let valid = vec![0xCDu8; 17];
+        let hex_str = hex::encode(&valid);
+
+        assert_eq!(
+            OpeCllw8VariableV1::from_bytes(valid.clone())
+                .expect("from_bytes")
+                .as_ref(),
+            valid.as_slice()
+        );
+        assert_eq!(
+            OpeCllw8VariableV1::try_from(valid.as_slice())
+                .expect("try_from")
+                .as_ref(),
+            valid.as_slice()
+        );
+        assert_eq!(
+            OpeCllw8VariableV1::from_hex(&hex_str)
+                .expect("from_hex")
+                .as_ref(),
+            valid.as_slice()
+        );
     }
 }
