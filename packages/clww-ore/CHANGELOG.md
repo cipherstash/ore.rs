@@ -6,21 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-### Breaking Changes
-
-- `OreCllw8VariableV1` no longer implements `From<Vec<u8>>`. The impl accepted
-  any byte length, including lengths no ORE ciphertext can have. Use
-  `from_bytes` / `TryFrom<&[u8]>` (length-checked) or `from_bytes_unchecked`
-  (for tagged-bit-stream ciphertexts, whose lengths the whole-byte rule does
-  not describe).
-- `OpeCllw8VariableV1::from_bytes` is now fallible, rejecting lengths no OPE
-  ciphertext of whole-byte plaintext can have (`8n + 1`). The previous
-  infallible behaviour is available as `from_bytes_unchecked`;
-  `TryFrom<&[u8]>` applies the same check over a slice.
-- `FromHex` for both types is deliberately unchanged (not length-checked): it
-  is the wire decoder for stored terms, including tagged-bit-stream
-  ciphertexts.
-
 ### Documentation
 
 - correct OPE correctness claim; add empirical error-rate test
