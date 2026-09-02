@@ -10,6 +10,7 @@ use crate::impls::encrypt_ope_bits;
 use crate::impls::variable::{OpeCllw8VariableV1, OreCllw8VariableV1};
 use crate::{CllwOpeEncrypt, CllwOreEncrypt, Error, Key};
 use unicode_normalization::char::decompose_canonical;
+use zeroize::Zeroizing;
 
 /// Encrypts a bit stream into a CLLW ORE ciphertext.
 ///
@@ -86,7 +87,55 @@ impl CllwOpeEncrypt for &[u8] {
 /// Owned counterpart of the `&str` impl: an owned value can outlive the call
 /// that hands it to an encryptor (e.g. a visitor that must be `'static`),
 /// where a borrow cannot. Produces byte-identical ciphertext to `&str`.
+///
+/// The operand is taken into a [`Zeroizing`] for the duration of the call, so
+/// an owned plaintext is wiped when this returns rather than handed back to
+/// the allocator intact. A caller who owns the plaintext already should
+/// prefer the `Zeroizing<String>` impl and keep it wrapped throughout.
 impl CllwOreEncrypt for String {
+    type Output = OreCllw8VariableV1;
+
+    fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+        Zeroizing::new(self).encrypt_with_salt(key, salt)
+    }
+}
+
+/// Owned counterpart of the `&[u8]` impl; byte-identical ciphertext. Wipes
+/// its operand, as the `String` impl does.
+impl CllwOreEncrypt for Vec<u8> {
+    type Output = OreCllw8VariableV1;
+
+    fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+        Zeroizing::new(self).encrypt_with_salt(key, salt)
+    }
+}
+
+/// Owned counterpart of the `&str` impl; byte-identical ciphertext. Wipes its
+/// operand, as the ORE `String` impl does.
+impl CllwOpeEncrypt for String {
+    type Output = OpeCllw8VariableV1;
+
+    fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+        Zeroizing::new(self).encrypt_ope_with_salt(key, salt)
+    }
+}
+
+/// Owned counterpart of the `&[u8]` impl; byte-identical ciphertext. Wipes
+/// its operand, as the ORE `Vec<u8>` impl does.
+impl CllwOpeEncrypt for Vec<u8> {
+    type Output = OpeCllw8VariableV1;
+
+    fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
+        Zeroizing::new(self).encrypt_ope_with_salt(key, salt)
+    }
+}
+
+/// The wrapped-owned impls, and the ones a caller holding a secret should
+/// reach for: the operand keeps its wipe-on-drop the whole way through, so
+/// nothing has to remember to wrap it at the boundary. `'static` and `Send`
+/// like the bare owned impls, so they satisfy the same visitor bounds.
+/// Byte-identical ciphertext to `&str` / `&[u8]`.
+impl CllwOreEncrypt for Zeroizing<String> {
     type Output = OreCllw8VariableV1;
 
     fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
@@ -94,8 +143,8 @@ impl CllwOreEncrypt for String {
     }
 }
 
-/// Owned counterpart of the `&[u8]` impl; byte-identical ciphertext.
-impl CllwOreEncrypt for Vec<u8> {
+/// See the [`Zeroizing<String>`](CllwOreEncrypt#impl-CllwOreEncrypt-for-Zeroizing<String>) impl.
+impl CllwOreEncrypt for Zeroizing<Vec<u8>> {
     type Output = OreCllw8VariableV1;
 
     fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
@@ -103,8 +152,8 @@ impl CllwOreEncrypt for Vec<u8> {
     }
 }
 
-/// Owned counterpart of the `&str` impl; byte-identical ciphertext.
-impl CllwOpeEncrypt for String {
+/// See the [`Zeroizing<String>`](CllwOreEncrypt#impl-CllwOreEncrypt-for-Zeroizing<String>) impl.
+impl CllwOpeEncrypt for Zeroizing<String> {
     type Output = OpeCllw8VariableV1;
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
@@ -112,8 +161,8 @@ impl CllwOpeEncrypt for String {
     }
 }
 
-/// Owned counterpart of the `&[u8]` impl; byte-identical ciphertext.
-impl CllwOpeEncrypt for Vec<u8> {
+/// See the [`Zeroizing<String>`](CllwOreEncrypt#impl-CllwOreEncrypt-for-Zeroizing<String>) impl.
+impl CllwOpeEncrypt for Zeroizing<Vec<u8>> {
     type Output = OpeCllw8VariableV1;
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
@@ -127,17 +176,20 @@ impl CllwOpeEncrypt for Vec<u8> {
 ///
 /// Eventually, this will move to a more sophisticated collation that can handle
 /// more complex strings using the [Unicode Collation Algorithm](https://www.unicode.org/reports/tr10/).
-pub fn orderize_string(input: &str) -> String {
+pub fn orderize_string(input: &str) -> Zeroizing<String> {
     fn filter_push(out: &mut String, c: char) {
         if c.is_alphanumeric() || c.is_whitespace() || c.is_ascii_punctuation() {
             out.push(c);
         }
     }
 
-    input.chars().fold(String::new(), |mut out, c| {
+    // `Zeroizing`, not a bare `String`: the collated form is derived from the
+    // plaintext and is just as sensitive as it, so it must not outlive the
+    // caller unwiped. It derefs to `str`, so callers read it unchanged.
+    Zeroizing::new(input.chars().fold(String::new(), |mut out, c| {
         decompose_canonical(c, |c| filter_push(&mut out, c));
         out
-    })
+    }))
 }
 
 #[cfg(test)]
@@ -147,6 +199,66 @@ mod tests {
     use crate::{Error, Key};
     use quickcheck::{quickcheck, Arbitrary, Gen};
     use std::cmp::Ordering;
+    use zeroize::Zeroizing;
+
+    /// The wrapped-owned impls exist so a caller holding a secret never has to
+    /// unwrap it to encrypt. That is only true if they are interchangeable
+    /// with the borrowed impls, so pin the ciphertext bytes across all three
+    /// spellings — borrowed, bare owned, and `Zeroizing` — for ORE and OPE.
+    #[test]
+    fn every_owned_spelling_encrypts_identically_to_the_borrowed_one() {
+        let key = Key::from([7; 32]);
+        let text = "Ada Lovelace, 1815";
+        let bytes = text.as_bytes();
+
+        let ore_borrowed = key.encrypt(text).unwrap();
+        assert_eq!(
+            key.encrypt(text.to_string()).unwrap().as_ref(),
+            ore_borrowed.as_ref()
+        );
+        assert_eq!(
+            key.encrypt(Zeroizing::new(text.to_string()))
+                .unwrap()
+                .as_ref(),
+            ore_borrowed.as_ref()
+        );
+
+        let ore_bytes_borrowed = key.encrypt(bytes).unwrap();
+        assert_eq!(
+            key.encrypt(bytes.to_vec()).unwrap().as_ref(),
+            ore_bytes_borrowed.as_ref()
+        );
+        assert_eq!(
+            key.encrypt(Zeroizing::new(bytes.to_vec()))
+                .unwrap()
+                .as_ref(),
+            ore_bytes_borrowed.as_ref()
+        );
+
+        let ope_borrowed = key.encrypt_ope(text).unwrap();
+        assert_eq!(
+            key.encrypt_ope(text.to_string()).unwrap().as_ref(),
+            ope_borrowed.as_ref()
+        );
+        assert_eq!(
+            key.encrypt_ope(Zeroizing::new(text.to_string()))
+                .unwrap()
+                .as_ref(),
+            ope_borrowed.as_ref()
+        );
+
+        let ope_bytes_borrowed = key.encrypt_ope(bytes).unwrap();
+        assert_eq!(
+            key.encrypt_ope(bytes.to_vec()).unwrap().as_ref(),
+            ope_bytes_borrowed.as_ref()
+        );
+        assert_eq!(
+            key.encrypt_ope(Zeroizing::new(bytes.to_vec()))
+                .unwrap()
+                .as_ref(),
+            ope_bytes_borrowed.as_ref()
+        );
+    }
 
     /// The set of characters that survive `orderize_string`: ASCII alphanumeric, space, and ASCII
     /// punctuation. These are the characters that are preserved after NFKC normalization and
@@ -600,7 +712,7 @@ mod tests {
 
             // The decrypted value should match the orderized input
             let expected = orderize_string(&x.0);
-            decrypted == expected
+            decrypted == *expected
         }
 
         /// Test that empty string encrypts deterministically
@@ -759,13 +871,13 @@ mod tests {
             let ascii_only: String = x.0.chars()
                 .filter(|c| c.is_ascii_alphanumeric() || *c == ' ')
                 .collect();
-            orderize_string(&ascii_only) == ascii_only
+            *orderize_string(&ascii_only) == ascii_only
         }
 
         /// Test that SafeString instances are unchanged by orderize_string
         fn prop_orderize_safe_string_unchanged(x: SafeString) -> bool {
             // SafeString only contains chars that survive orderize_string
-            orderize_string(&x.0) == x.0
+            *orderize_string(&x.0) == x.0
         }
     }
 
