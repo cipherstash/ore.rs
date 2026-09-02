@@ -53,7 +53,7 @@ impl CllwOreEncrypt for &str {
     type Output = OreCllw8VariableV1;
 
     fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
-        let string = orderize_string(self);
+        let string = orderize_secret(self);
         Ok(OreCllw8VariableV1::from_bytes_unchecked(encrypt_ore_bits(
             string_biter(&string),
             key,
@@ -66,7 +66,7 @@ impl CllwOpeEncrypt for &str {
     type Output = OpeCllw8VariableV1;
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
-        let normalized = orderize_string(self);
+        let normalized = orderize_secret(self);
         let n = normalized.len() * 8;
         let bytes = encrypt_ope_bits(string_biter(&normalized), n, key, salt);
         Ok(OpeCllw8VariableV1::from_bytes_unchecked(bytes))
@@ -176,20 +176,34 @@ impl CllwOpeEncrypt for Zeroizing<Vec<u8>> {
 ///
 /// Eventually, this will move to a more sophisticated collation that can handle
 /// more complex strings using the [Unicode Collation Algorithm](https://www.unicode.org/reports/tr10/).
-pub fn orderize_string(input: &str) -> Zeroizing<String> {
+///
+/// The collated form is derived from the input and is exactly as sensitive as
+/// it, so a caller collating a secret should wrap the result — or call it
+/// through [`Zeroizing`], as this crate's own encrypt paths do via
+/// `orderize_secret`. The bare `String` return is kept for compatibility with
+/// existing callers; wrapping it costs nothing (`Zeroizing::new` moves the
+/// same allocation).
+pub fn orderize_string(input: &str) -> String {
     fn filter_push(out: &mut String, c: char) {
         if c.is_alphanumeric() || c.is_whitespace() || c.is_ascii_punctuation() {
             out.push(c);
         }
     }
 
-    // `Zeroizing`, not a bare `String`: the collated form is derived from the
-    // plaintext and is just as sensitive as it, so it must not outlive the
-    // caller unwiped. It derefs to `str`, so callers read it unchanged.
-    Zeroizing::new(input.chars().fold(String::new(), |mut out, c| {
+    input.chars().fold(String::new(), |mut out, c| {
         decompose_canonical(c, |c| filter_push(&mut out, c));
         out
-    }))
+    })
+}
+
+/// [`orderize_string`], with the collated form wiped when it drops.
+///
+/// The encrypt paths run over a plaintext operand, so the intermediate
+/// collated copy must not go back to the allocator intact — in a wasm guest
+/// that memory is linear memory the host can read. `Zeroizing::new` moves the
+/// `String`, so this is the same allocation, not a second copy.
+fn orderize_secret(input: &str) -> Zeroizing<String> {
+    Zeroizing::new(orderize_string(input))
 }
 
 #[cfg(test)]
@@ -712,7 +726,7 @@ mod tests {
 
             // The decrypted value should match the orderized input
             let expected = orderize_string(&x.0);
-            decrypted == *expected
+            decrypted == expected
         }
 
         /// Test that empty string encrypts deterministically
@@ -871,13 +885,13 @@ mod tests {
             let ascii_only: String = x.0.chars()
                 .filter(|c| c.is_ascii_alphanumeric() || *c == ' ')
                 .collect();
-            *orderize_string(&ascii_only) == ascii_only
+            orderize_string(&ascii_only) == ascii_only
         }
 
         /// Test that SafeString instances are unchanged by orderize_string
         fn prop_orderize_safe_string_unchanged(x: SafeString) -> bool {
             // SafeString only contains chars that survive orderize_string
-            *orderize_string(&x.0) == x.0
+            orderize_string(&x.0) == x.0
         }
     }
 
