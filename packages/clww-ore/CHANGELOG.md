@@ -65,6 +65,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - reinstate the cllw_ore json support
 - ♻️ plaintext-side domain separation for orderable terms
 
+## [0.5.0] - 2026-10-01
+
+### ⚠ Breaking changes
+
+- `OreCllw8VariableV1` no longer implements `From<Vec<u8>>` and `OpeCllw8VariableV1::from_bytes` is now fallible. Decode stored ciphertexts with `from_bytes` / `TryFrom<&[u8]>` (length-checked); wrap tagged-bit-stream ciphertexts, whose lengths the whole-byte rules do not describe, with `from_bytes_unchecked`. The `FromHex` hex wire decoder is unchanged and deliberately unchecked.
+
+
+### Features
+
+- freeze the byte formats the crate owns (phase 2)
+- length-checked decoding for variable-length ciphertexts
+
+### Fixes
+
+- address phase-2 review findings on the frozen byte formats
+- wipe the plaintext operand on the ORE/OPE term paths
+- keep orderize_string's public signature
+- remove stale nested Cargo.lock files pinning rand 0.8.5
+
+### Miscellaneous
+
+- version the variable-ciphertext API change as 0.5.0
+
 ## [0.34.0] - 2026-03-04
 
 ### Changed
