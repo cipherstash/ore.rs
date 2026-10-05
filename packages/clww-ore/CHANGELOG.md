@@ -65,6 +65,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - reinstate the cllw_ore json support
 - ♻️ plaintext-side domain separation for orderable terms
 
+## [0.5.1] - 2026-10-05
+
+
+### Miscellaneous
+
+- update Cargo.toml dependencies
+
 ## [0.5.0] - 2026-10-01
 
 ### ⚠ Breaking changes
