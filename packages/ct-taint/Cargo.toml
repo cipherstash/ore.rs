@@ -1,0 +1,36 @@
+# Valgrind taint harness for ore-rs's secret-dependent code paths.
+#
+# This is a DETACHED crate (own `[workspace]` table, not a member of the root
+# workspace): it links Valgrind client requests through `crabgrind`, which the
+# normal build and test of ore-rs must never depend on. Run it with
+# `scripts/ct-taint.sh`, under `valgrind --tool=memcheck`; outside Valgrind the
+# marks are no-ops and the binary just exercises the paths.
+#
+# The technique is ctgrind's: mark the key and the plaintext as *undefined*
+# memory, run the operation, and let memcheck report every conditional jump
+# and every memory address that depends on them. Each report is a
+# secret-dependent branch or a secret-indexed access. The expected reports —
+# the documented exceptions — live in `valgrind.supp`; anything else fails
+# the run.
+[package]
+name = "ct-taint"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[dependencies]
+crabgrind = "0.4"
+hex-literal = "0.4"
+
+[dependencies.ore-rs]
+path = "../ore-rs"
+
+# Frames must resolve for the suppressions to match by function name, so keep
+# debug info in the optimised build. Optimisation is required: the question is
+# whether the *shipped* code is branch-free, and the debug build is not the
+# shipped code.
+[profile.release]
+debug = 1
+
+[workspace]
+resolver = "2"
