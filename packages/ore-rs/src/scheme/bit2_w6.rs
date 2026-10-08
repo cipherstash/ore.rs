@@ -117,6 +117,7 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128Bit6<R> {
     type RightBlockType = RightBlock8;
 
     const WIRE_HEADER: Option<WireHeader> = Some(WIRE);
+    const SYMBOL_DOMAIN: usize = <Bit6 as BlockWidth>::DOMAIN;
 
     fn init(k1: &[u8; 16], k2: &[u8; 16]) -> Result<Self, OreError> {
         let rng: R = SeedableRng::from_entropy();
@@ -239,6 +240,16 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128Bit6<R> {
         let left_size = Self::LeftBlockType::BLOCK_SIZE;
         let right_size = Self::RightBlockType::BLOCK_SIZE;
         if a.len() != num_blocks * (left_size + 1 + right_size) + NONCE_SIZE {
+            return None;
+        }
+        // Reject symbols outside the 64-element domain: the scan below reads
+        // the right block at `a[l]`, which must index one of its 64 bits.
+        // `xt` is public, so this may branch.
+        if a[..num_blocks]
+            .iter()
+            .chain(&b[..num_blocks])
+            .any(|&s| usize::from(s) >= <Bit6 as BlockWidth>::DOMAIN)
+        {
             return None;
         }
 

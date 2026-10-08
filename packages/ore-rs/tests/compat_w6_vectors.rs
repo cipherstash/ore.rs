@@ -22,7 +22,7 @@
 
 use ore_rs::{
     scheme::bit2_w6::{OreAes128Bit6, OreAes128Bit6ChaCha20},
-    CipherText, OreCipher, OreEncrypt, OreOutput,
+    CipherText, Left, OreCipher, OreEncrypt, OreOutput,
 };
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -222,6 +222,40 @@ fn typed_comparison_of_pinned_bytes() {
 // ---------------------------------------------------------------------------
 // Generator (run manually; see module docs)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Malformed symbols: an `xt` byte outside the 64-element domain
+// ---------------------------------------------------------------------------
+
+/// A pinned ciphertext with its first `xt` byte (just after the 4-byte
+/// header) set to 64, one past the Bit6 symbol domain.
+fn with_out_of_domain_symbol(hex_str: &str) -> Vec<u8> {
+    let mut bytes = pinned(hex_str);
+    bytes[4] = 64;
+    bytes
+}
+
+#[test]
+fn parsers_reject_out_of_domain_symbols() {
+    let full = with_out_of_domain_symbol(FULL_U64[0].1);
+    assert!(CipherText::<OreAes128Bit6ChaCha20, 11>::from_slice(&full).is_err());
+
+    let left = with_out_of_domain_symbol(LEFT_U64_456);
+    assert!(Left::<OreAes128Bit6ChaCha20, 11>::from_slice(&left).is_err());
+
+    // The highest in-domain symbol still parses.
+    let mut edge = pinned(FULL_U64[0].1);
+    edge[4] = 63;
+    assert!(CipherText::<OreAes128Bit6ChaCha20, 11>::from_slice(&edge).is_ok());
+}
+
+#[test]
+fn raw_comparator_rejects_out_of_domain_symbols() {
+    let good = pinned(FULL_U64[0].1);
+    let bad = with_out_of_domain_symbol(FULL_U64[0].1);
+    assert_eq!(OreAes128Bit6ChaCha20::compare_raw_slices(&bad, &good), None);
+    assert_eq!(OreAes128Bit6ChaCha20::compare_raw_slices(&good, &bad), None);
+}
 
 #[test]
 #[ignore = "generator: prints the contents of tests/compat_w6_vectors/vectors.rs"]

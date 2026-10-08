@@ -194,6 +194,12 @@ pub trait OreCipher: Sized {
     /// ORE v2 onwards must set this; see [`WireHeader`].
     const WIRE_HEADER: Option<WireHeader> = None;
 
+    /// Number of distinct per-block symbols (`xt` values) the scheme
+    /// produces: 256 for the byte-wide legacy scheme, 64 for Bit6. Parsers
+    /// reject a ciphertext whose `xt` holds a symbol outside `0..SYMBOL_DOMAIN`,
+    /// since the comparator indexes the right block by it.
+    const SYMBOL_DOMAIN: usize = 256;
+
     /// Initialise the cipher from two 16-byte keys: `k1` for the
     /// per-block-tag PRF and `k2` for the per-block PRP seed PRF.
     fn init(k1: &[u8; 16], k2: &[u8; 16]) -> Result<Self, OreError>;
