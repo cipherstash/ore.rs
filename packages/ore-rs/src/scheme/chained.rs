@@ -15,8 +15,15 @@
 //! - **right block**: `H(ro(n, j), nonce) ⊕ indicator`, as the fixed-N scheme.
 //!
 //! Comparison is lexicographic: scan `min(len_a, len_b)` blocks; if a prefix
-//! matches throughout, the shorter sorts first. Common-prefix-length leakage is
-//! the intended, query-time-scoped leakage (plan §5b).
+//! matches throughout, the shorter sorts first. A comparison reveals the
+//! common-prefix length.
+//!
+//! **Stored rows compare offline.** A full ciphertext carries its
+//! deterministic left half (`xt`, `f`), so anyone holding two stored full
+//! ciphertexts can run `compare_raw_slices` with no
+//! query and learn their order and common-prefix length. The legacy scheme
+//! has the same exposure. There is no right-only storage path yet (plan
+//! §5(b)).
 
 use std::cell::RefCell;
 use std::cmp::Ordering;
@@ -35,7 +42,7 @@ use crate::primitives::hash::FixedPiZ2Hash;
 use crate::primitives::prp::LemireFyPrp;
 use crate::primitives::{AesBlock, Hash, HashKey, Prp};
 use crate::scheme::decompose::{decompose_6bit, num_blocks_6bit};
-use crate::scheme::width::ct_select_byte;
+use crate::scheme::width::{ct_assign_bytes, ct_bit, ct_select_byte};
 use crate::OreError;
 
 const VERSION: u8 = 0x02;
@@ -148,6 +155,11 @@ impl VarCipherText {
         if data.len() != total_len(count) {
             return Err(ParseError);
         }
+        // Same rule as the comparators (and the fixed-width parsers): a symbol
+        // outside the 6-bit domain is not a ciphertext of this scheme.
+        if !symbols_in_domain(data, count) {
+            return Err(ParseError);
+        }
         let xt = data[HEADER_LEN..HEADER_LEN + count].to_vec();
         let mut f = Vec::with_capacity(count);
         for n in 0..count {
@@ -249,9 +261,15 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
                     WIDTH_BIT6,
                 )));
             }
-            let mut fb = [0u8; F_LEN];
-            fb.copy_from_slice(ro[permuted as usize].as_slice());
-            f.push(fb);
+            // f[n] = ro(n, xt[n]), derived directly rather than read from `ro`
+            // at the secret index `permuted` (a 1 KiB table spans many cache
+            // lines). Same bytes as `encrypt_left_var`.
+            f.push(acc.finalize(&final_block(
+                Branch::RoKey,
+                n16,
+                permuted as u16,
+                WIDTH_BIT6,
+            )));
 
             // right block = H-mask ⊕ indicator (trashes `ro`).
             let mut rb = [0u8; RIGHT_LEN];
@@ -301,14 +319,16 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         Ok(VarLeft { xt, f })
     }
 
-    /// Encrypt a string (UTF-8 bytes → MSB-first 6-bit blocks).
+    /// Encrypt a string (UTF-8 bytes → MSB-first 6-bit blocks). Strings
+    /// longer than [`MAX_STR_BYTES`] return [`OreError::TooManyBlocks`].
     pub fn encrypt_str(&self, s: &str) -> Result<VarCipherText, OreError> {
-        self.encrypt_var(&str_to_blocks(s))
+        self.encrypt_var(&str_to_blocks(s)?)
     }
 
-    /// Left-only string ciphertext.
+    /// Left-only string ciphertext. Strings longer than [`MAX_STR_BYTES`]
+    /// return [`OreError::TooManyBlocks`].
     pub fn encrypt_left_str(&self, s: &str) -> Result<VarLeft, OreError> {
-        self.encrypt_left_var(&str_to_blocks(s))
+        self.encrypt_left_var(&str_to_blocks(s)?)
     }
 
     /// Compare two serialised full ciphertexts (lexicographic; shorter prefix
@@ -323,6 +343,9 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         if a.len() != total_len(ca) || b.len() != total_len(cb) {
             return None;
         }
+        if !symbols_in_domain(a, ca) || !symbols_in_domain(b, cb) {
+            return None;
+        }
         // Only `a`'s left half and `b`'s right half are read (Lewi-Wu
         // asymmetry); the left-only query path is `compare_left_to_full`.
         Some(Self::compare_views(a, ca, b, cb))
@@ -332,8 +355,9 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     /// [`Self::encrypt_left_var`]/[`Self::encrypt_left_str`] — against a stored
     /// full ciphertext `full`. This is the Lewi-Wu query path: a comparison
     /// needs only the query's left half (`xt`/`f`) and the stored ciphertext's
-    /// right half, so the smaller left-only artifact suffices and the stored
-    /// right half reveals nothing at rest. Returns `left`'s order relative to
+    /// right half, so the smaller left-only artifact suffices. This does not
+    /// make stored data safe at rest: a stored *full* ciphertext also carries
+    /// its left half, so two stored rows compare offline (see the module docs). Returns `left`'s order relative to
     /// `full` (`Less` ⇒ the query plaintext sorts before the stored one).
     /// `None` if either input is malformed.
     pub fn compare_left_to_full(left: &[u8], full: &[u8]) -> Option<Ordering> {
@@ -346,6 +370,9 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         if left.len() != left_len(cl) || full.len() != total_len(cf) {
             return None;
         }
+        if !symbols_in_domain(left, cl) || !symbols_in_domain(full, cf) {
+            return None;
+        }
         Some(Self::compare_views(left, cl, full, cf))
     }
 
@@ -356,14 +383,28 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     /// matches throughout, the shorter sorts first; otherwise the first
     /// differing block is resolved via the random oracle against `b`'s right
     /// block. `a` reads only `xt`/`f`, `b` reads `xt`/`f`/`nonce`/`right`.
+    ///
+    /// The scan reads every block of the shared prefix, including `b`'s right
+    /// blocks, and latches the first differing block's `xt`, `f` and `right`
+    /// as it goes; the resolution step works from the latched copies, so no
+    /// load is indexed by the position of the first difference. A direct
+    /// `right_at(b, cb, l)` after the scan was the one load whose cache state
+    /// depended on `l` (the scan never needed the right blocks), and dudect
+    /// measured it as a timing signal; see `docs/reviews/`.
     fn compare_views(a: &[u8], ca: usize, b: &[u8], cb: usize) -> Ordering {
         let min_count = ca.min(cb);
         let mut is_equal = Choice::from(1u8);
-        let mut l: u64 = 0;
+        let mut sel_xt = 0u8;
+        let mut sel_f = [0u8; F_LEN];
+        let mut sel_right = [0u8; RIGHT_LEN];
         for n in 0..min_count {
             let differs = !xt_at(a, n).ct_eq(&xt_at(b, n)) | !f_at(a, ca, n).ct_eq(f_at(b, cb, n));
-            l.conditional_assign(&(n as u64), is_equal & differs);
-            is_equal.conditional_assign(&Choice::from(0u8), is_equal & differs);
+            // Set for exactly one `n`: the first differing block.
+            let first = is_equal & differs;
+            sel_xt.conditional_assign(&xt_at(a, n), first);
+            ct_assign_bytes(&mut sel_f, f_at(a, ca, n), first);
+            ct_assign_bytes(&mut sel_right, right_at(b, cb, n), first);
+            is_equal.conditional_assign(&Choice::from(0u8), first);
         }
 
         if bool::from(is_equal) {
@@ -371,12 +412,10 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
             return ca.cmp(&cb);
         }
 
-        let l = l as usize;
         let hasher = FixedPiZ2Hash::new(HashKey::from_slice(nonce_at(b, cb)));
-        let h = hasher.hash(f_at(a, ca, l));
-        let permuted = xt_at(a, l);
-        let byte = ct_select_byte(right_at(b, cb, l), (permuted / 8) as usize);
-        let test = ((byte >> (permuted % 8)) & 1) ^ h;
+        let h = hasher.hash(&sel_f);
+        let byte = ct_select_byte(&sel_right, (sel_xt / 8) as usize);
+        let test = ct_bit(byte, sel_xt % 8) ^ h;
         if test == 1 {
             Ordering::Greater
         } else {
@@ -391,14 +430,34 @@ impl<R: Rng + SeedableRng> Drop for OreAes128Bit6Chained<R> {
     }
 }
 
-fn str_to_blocks(s: &str) -> Vec<u8> {
+/// Whether every `xt` symbol of a serialised view is inside the 64-element
+/// domain. The comparator reads the right block at `xt[l]`; a symbol of 64 or
+/// more would select no byte and silently read 0. `xt` is public, so this may
+/// branch.
+fn symbols_in_domain(view: &[u8], count: usize) -> bool {
+    (0..count).all(|i| usize::from(xt_at(view, i)) < DOMAIN)
+}
+
+/// Longest string, in UTF-8 bytes, whose block count fits the wire format's
+/// `u16`: `⌈8n/6⌉ ≤ 65_535` gives `n ≤ 49_151`.
+pub const MAX_STR_BYTES: usize = u16::MAX as usize * 6 / 8;
+
+const _: () = assert!(num_blocks_6bit(MAX_STR_BYTES) <= u16::MAX as usize);
+const _: () = assert!(num_blocks_6bit(MAX_STR_BYTES + 1) > u16::MAX as usize);
+
+/// Decompose `s` into 6-bit blocks, refusing a string too long for the wire
+/// format *before* allocating or decomposing it.
+fn str_to_blocks(s: &str) -> Result<Vec<u8>, OreError> {
     let bytes = s.as_bytes();
+    if bytes.len() > MAX_STR_BYTES {
+        return Err(OreError::TooManyBlocks);
+    }
     let nb = num_blocks_6bit(bytes.len());
     let mut blocks = vec![0u8; nb];
     if nb > 0 {
         decompose_6bit(bytes, &mut blocks);
     }
-    blocks
+    Ok(blocks)
 }
 
 #[cfg(test)]
@@ -407,6 +466,41 @@ mod tests {
 
     fn ore() -> OreAes128Bit6ChainedChaCha20 {
         OreAes128Bit6Chained::init(&[0x11; 16]).unwrap()
+    }
+
+    #[test]
+    fn strings_over_the_wire_limit_are_rejected() {
+        let c = ore();
+        let too_long = "a".repeat(MAX_STR_BYTES + 1);
+        assert!(matches!(
+            c.encrypt_str(&too_long),
+            Err(OreError::TooManyBlocks)
+        ));
+        assert!(matches!(
+            c.encrypt_left_str(&too_long),
+            Err(OreError::TooManyBlocks)
+        ));
+    }
+
+    #[test]
+    fn comparators_reject_out_of_domain_symbols() {
+        let c = ore();
+        let a = c.encrypt_str("apple").unwrap().to_bytes();
+        let b = c.encrypt_str("apricot").unwrap().to_bytes();
+        let q = c.encrypt_left_str("apple").unwrap().to_bytes();
+        assert!(OreAes128Bit6Chained::<ChaCha20Rng>::compare_raw_slices(&a, &b).is_some());
+
+        // First `xt` byte follows the 4-byte header.
+        let mut bad = a.clone();
+        bad[HEADER_LEN] = DOMAIN as u8;
+        let mut bad_q = q.clone();
+        bad_q[HEADER_LEN] = DOMAIN as u8;
+
+        type C = OreAes128Bit6Chained<ChaCha20Rng>;
+        assert_eq!(C::compare_raw_slices(&bad, &b), None);
+        assert_eq!(C::compare_raw_slices(&b, &bad), None);
+        assert_eq!(C::compare_left_to_full(&bad_q, &b), None);
+        assert_eq!(C::compare_left_to_full(&q, &bad), None);
     }
 
     fn cmp(c: &OreAes128Bit6ChainedChaCha20, a: &str, b: &str) -> Ordering {

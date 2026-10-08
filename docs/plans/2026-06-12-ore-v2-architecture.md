@@ -381,11 +381,14 @@ reveals nothing about order. Three threat tiers follow:
   nothing. **But right-only storage is not supported today**
   ([#99](https://github.com/cipherstash/ore.rs/issues/99)). Every scheme here, legacy
   Bit8 included, stores full ciphertexts, whose deterministic left half (`xt`, `f`)
-  sits next to the right half, and the only comparators (`compare_raw_slices`, `Ord`
-  on `CipherText`) take two full ciphertexts. So until #99 lands, an attacker who
+  sits next to the right half, and the right half is not usable on its own: the only
+  comparators (`compare_raw_slices`, `Ord` on `CipherText`) take two full ciphertexts,
+  and `VarRight` has no serialise/compare API. So until #99 lands, an attacker who
   exfiltrates the database can compare any two stored rows, with no query, and
   recovers their **order** and, for strings, their **common-prefix length**. This is
-  the same exposure as legacy Bit8 today, not a regression.
+  the same exposure as legacy Bit8 today, not a regression. Right-only storage needs a
+  left-versus-right comparator, likely a trinary indicator, which is a format change
+  (#99).
 - **Query time (legitimate operator):** running a query emits a left ciphertext, and
   each comparison against the stored rights reveals first-differing-block (=
   common-prefix length for strings) for exactly the pairs that query touches.
@@ -593,7 +596,8 @@ PR 2's trait change, which should be called out in the changelog).
       no code path can write seed material into a ciphertext (PR 2).
 - [ ] Domain separation between Bit8/Bit6/chained schemes under shared keys (PR 5, 6).
       Bit8/Bit6: done by key derivation (§4), with a cross-scheme regression test.
-      Chained: to confirm in PR 6.
+      Chained: separated, its only key is `AES_{k1}("ORE.v2.chain.acc")`, whose last
+      byte is outside every legacy PRF input and whose label differs from Bit6's.
 - [x] H instantiation (§6) selected and signed off (2026-06-15): BHKR σ-MMO,
       random-permutation model; see §6 and review brief A1.
 - [x] Selected §5(b) accumulator candidate reviewed and signed off (2026-10-09; review
