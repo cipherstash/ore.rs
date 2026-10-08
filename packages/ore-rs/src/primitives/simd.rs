@@ -44,21 +44,22 @@ pub(crate) fn gt_mask_xor_256(table: &[u8; 256], x: u8, out: &mut [u8]) {
     #[cfg(target_arch = "aarch64")]
     // SAFETY: NEON is baseline on aarch64; `out` length asserted above.
     unsafe {
-        neon::gt_mask_xor_256(table, x, out);
-        return;
+        neon::gt_mask_xor_256(table, x, out)
     }
 
-    #[cfg(target_arch = "x86_64")]
-    if is_x86_feature_detected!("avx2") {
-        // SAFETY: AVX2 presence just checked; `out` length asserted above.
-        unsafe {
-            avx2::gt_mask_xor_256(table, x, out);
+    // Excluded on aarch64, where the NEON path above always handles it, so
+    // the fallback is never unreachable code needing an `allow`.
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        #[cfg(target_arch = "x86_64")]
+        if is_x86_feature_detected!("avx2") {
+            // SAFETY: AVX2 presence just checked; `out` length asserted above.
+            unsafe { avx2::gt_mask_xor_256(table, x, out) };
             return;
         }
-    }
 
-    #[allow(unreachable_code)]
-    scalar::gt_mask_xor(table, x, out);
+        scalar::gt_mask_xor(table, x, out);
+    }
 }
 
 /// 64-lane variant of [`gt_mask_xor_256`] for the Bit6 block domain.
@@ -71,11 +72,10 @@ pub(crate) fn gt_mask_xor_64(table: &[u8; 64], x: u8, out: &mut [u8]) {
     #[cfg(target_arch = "aarch64")]
     // SAFETY: NEON is baseline on aarch64; `out` length asserted above.
     unsafe {
-        neon::gt_mask_xor_64(table, x, out);
-        return;
+        neon::gt_mask_xor_64(table, x, out)
     }
 
-    #[allow(unreachable_code)]
+    #[cfg(not(target_arch = "aarch64"))]
     scalar::gt_mask_xor(table, x, out);
 }
 
@@ -84,17 +84,19 @@ pub(crate) fn gt_mask_xor_64(table: &[u8; 64], x: u8, out: &mut [u8]) {
 /// (callers pass `out` slots they own; bits are assigned, not accumulated).
 #[inline]
 pub(crate) fn lsb_mask_256(blocks: &[AesBlock], out: &mut [u8]) {
-    debug_assert_eq!(blocks.len(), 256);
-    debug_assert_eq!(out.len(), 32);
+    // Real asserts (not debug_assert): the NEON path gathers `blocks` via raw
+    // pointers assuming exactly 256 blocks, so a shorter slice would read out
+    // of bounds (UB) in a release build without this check.
+    assert_eq!(blocks.len(), 256);
+    assert_eq!(out.len(), 32);
 
     #[cfg(target_arch = "aarch64")]
     // SAFETY: NEON is baseline on aarch64; lengths asserted above.
     unsafe {
-        neon::lsb_mask_256(blocks, out);
-        return;
+        neon::lsb_mask_256(blocks, out)
     }
 
-    #[allow(unreachable_code)]
+    #[cfg(not(target_arch = "aarch64"))]
     scalar::lsb_mask(blocks, out);
 }
 
@@ -103,6 +105,13 @@ pub(crate) mod scalar {
 
     /// Length-generic scalar indicator pack: `table.len()` must be a
     /// multiple of 8 and equal to `out.len() * 8`.
+    ///
+    /// Used by the non-aarch64 dispatchers and as the test oracle; on
+    /// aarch64 the lib always reaches NEON, so outside `cfg(test)` it is
+    /// unreferenced there. Compiling it exactly where it is used keeps it
+    /// from being dead code without an `allow`. (`lsb_mask` below stays
+    /// always compiled: `hash.rs` calls it directly for non-256 inputs.)
+    #[cfg(any(not(target_arch = "aarch64"), test))]
     pub(crate) fn gt_mask_xor(table: &[u8], x: u8, out: &mut [u8]) {
         for (slot, chunk) in out.iter_mut().zip(table.chunks_exact(8)) {
             let mut byte = 0u8;
