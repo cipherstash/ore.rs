@@ -1,0 +1,52 @@
+# Fuzz crate for ore-rs's ciphertext parsers and raw-byte comparators.
+#
+# This is a DETACHED crate: the `[workspace]` table at the bottom makes it its
+# own workspace root, so the libfuzzer-sys dependency and the nightly-only
+# build never touch the main workspace. It is not a member of the root
+# `Cargo.toml`. Run with `cargo +nightly fuzz run <target>` from this
+# directory, or via `scripts/fuzz.sh`.
+[package]
+name = "ore-rs-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.ore-rs]
+path = ".."
+
+[[bin]]
+name = "chained_parse"
+path = "fuzz_targets/chained_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "chained_compare"
+path = "fuzz_targets/chained_compare.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "bit6_parse"
+path = "fuzz_targets/bit6_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "bit8_parse"
+path = "fuzz_targets/bit8_parse.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+resolver = "2"
