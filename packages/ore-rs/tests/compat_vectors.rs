@@ -220,7 +220,7 @@ fn left_against_pinned_full() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[ignore = "generator: prints the contents of tests/vectors/mod.rs"]
+#[ignore = "generator: prints the contents of tests/compat_vectors/vectors.rs"]
 fn generate() {
     println!("// Contents of tests/compat_vectors/vectors.rs");
     println!(
