@@ -144,6 +144,125 @@ mod encrypt;
 mod primitives;
 pub mod scheme;
 pub use crate::ciphertext::*;
+
+/// Timing-measurement entry points to private primitives, for the detached
+/// `ct-dudect` crate. Enabled only by the `ct-bench` feature; not public API.
+#[cfg(feature = "ct-bench")]
+#[doc(hidden)]
+pub mod ct_bench {
+    use crate::primitives::prp::{oblivious, LemireFyPrp};
+    use crate::primitives::Prp;
+
+    /// Build the 64-element Bit6 PRP from a 512-byte draw stream and return
+    /// one permuted value, so the construction is observably used. This is
+    /// the builder the schemes use (the target's oblivious builder).
+    pub fn lemire_fy_prp_from_stream(stream: &[u8; 512]) -> u8 {
+        LemireFyPrp::<64>::from_stream(stream)
+            .expect("512 bytes is a full stream")
+            .permute(0)
+            .expect("0 is in the domain")
+    }
+
+    fn from_stream_with(stream: &[u8; 512], build: fn(&[u8], &mut [u8; 64], &mut [u8; 64])) -> u8 {
+        LemireFyPrp::<64>::from_stream_with(stream, build)
+            .expect("512 bytes is a full stream")
+            .permute(0)
+            .expect("0 is in the domain")
+    }
+
+    /// As [`lemire_fy_prp_from_stream`], through the reference builder:
+    /// textbook Fisher–Yates with secret-indexed swaps and inverse fill.
+    /// Not used by any scheme; here for before/after timing.
+    pub fn lemire_fy_prp_from_stream_reference(stream: &[u8; 512]) -> u8 {
+        from_stream_with(stream, oblivious::reference::build)
+    }
+
+    /// As [`lemire_fy_prp_from_stream`], through the byte-at-a-time
+    /// `subtle_ng` oblivious builder whatever the target.
+    pub fn lemire_fy_prp_from_stream_scalar_oblivious(stream: &[u8; 512]) -> u8 {
+        from_stream_with(stream, oblivious::scalar::build)
+    }
+
+    /// As [`lemire_fy_prp_from_stream`], through the portable SWAR
+    /// oblivious builder whatever the target.
+    pub fn lemire_fy_prp_from_stream_swar_oblivious(stream: &[u8; 512]) -> u8 {
+        from_stream_with(stream, oblivious::swar::build)
+    }
+
+    // -----------------------------------------------------------------
+    // Mechanism isolation: the two halves of the reference builder, and a
+    // control for each with the same work at public addresses. Each keeps
+    // its table in one 64-byte-aligned line, as `LemireFyPrp<64>` does.
+    // -----------------------------------------------------------------
+
+    /// One 64-byte, line-aligned table.
+    #[repr(C, align(64))]
+    pub struct Line(pub [u8; 64]);
+
+    /// Lemire draw for step `i`, reduced to `0..=i`, as the builders do.
+    #[inline(always)]
+    fn draw(stream: &[u8; 512], i: usize) -> usize {
+        let d = 63 - i;
+        let mut b = [0u8; 8];
+        b.copy_from_slice(&stream[d * 8..d * 8 + 8]);
+        ((u64::from_le_bytes(b) as u128 * (i as u128 + 1)) >> 64) as usize
+    }
+
+    /// The reference builder's Fisher–Yates swap loop alone (no inverse
+    /// fill): swaps at the secret draw-derived index.
+    #[inline(never)]
+    pub fn fy_swaps_only(stream: &[u8; 512], out: &mut Line) {
+        for (k, p) in out.0.iter_mut().enumerate() {
+            *p = k as u8;
+        }
+        for i in (1..64).rev() {
+            let j = draw(stream, i);
+            out.0.swap(i, j);
+        }
+    }
+
+    /// Control for [`fy_swaps_only`]: the same draws and the same swaps,
+    /// but at the public index `i - 1` (the draw is computed and kept live,
+    /// then not used as an address).
+    #[inline(never)]
+    pub fn fy_swaps_public(stream: &[u8; 512], out: &mut Line) {
+        for (k, p) in out.0.iter_mut().enumerate() {
+            *p = k as u8;
+        }
+        for i in (1..64).rev() {
+            core::hint::black_box(draw(stream, i));
+            out.0.swap(i, i - 1);
+        }
+    }
+
+    /// The permutation the builders build for `stream`, computed outside
+    /// any measured region, to feed [`inverse_fill_only`].
+    pub fn permutation_for(stream: &[u8; 512]) -> Line {
+        let mut l = Line([0u8; 64]);
+        fy_swaps_only(stream, &mut l);
+        l
+    }
+
+    /// The reference builder's inverse fill alone: `inverse[perm[k]] = k`,
+    /// stores at secret offsets.
+    #[inline(never)]
+    pub fn inverse_fill_only(perm: &Line, out: &mut Line) {
+        for (index, val) in perm.0.iter().enumerate() {
+            out.0[*val as usize & 63] = index as u8;
+        }
+    }
+
+    /// Control for [`inverse_fill_only`]: the same loads and stores, at the
+    /// public offset `index` (the loaded value is kept live, not used as an
+    /// address).
+    #[inline(never)]
+    pub fn inverse_fill_public(perm: &Line, out: &mut Line) {
+        for (index, val) in perm.0.iter().enumerate() {
+            core::hint::black_box(*val);
+            out.0[index] = index as u8;
+        }
+    }
+}
 pub use crate::encrypt::OreEncrypt;
 use primitives::PrpError;
 use std::cmp::Ordering;
