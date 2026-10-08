@@ -62,14 +62,14 @@ impl Hash for Aes128Z2Hash {
 /// random-permutation model (BHKR13; GKWY20; Guo–Katz–Wang–Weng–Yu, eprint
 /// 2019/1168).
 ///
-/// The orthomorphism `σ` is the only departure from plain MMO and is adopted
-/// as cheap defense-in-depth, not to fix a present weakness: the known attacks
-/// on fixed-key MMO (GKWY; the half-gates attack of eprint 2019/1168) require
-/// *known, Free-XOR-correlated* hash inputs plus a recoverable global offset —
-/// neither of which ORE has, since its `H` inputs are independent **secret**
-/// PRF outputs and there is no global offset. `σ` makes the construction
-/// secure by matching the named BHKR/Zahur hash rather than by a usage
-/// argument. The cryptanalysis of round-reduced AES hashing (eprint 2025/792)
+/// `H`'s first input is not always secret: a left ciphertext publishes the RO
+/// key at its own symbol, and the comparator hashes it. For the *unrevealed*
+/// RO keys, `σ(k) ⊕ r` is a secret shared across ciphertexts plus public
+/// per-ciphertext nonces, which is the BHKR correlation-robustness setting;
+/// security rests on its multi-instance bound (about `p·C/2^128` for `p`
+/// offline `π` queries against `C` targeted keys), not on the inputs being
+/// secret. The orthomorphism `σ` is what puts the construction in that named
+/// setting. See review brief A1 (restated, pending sign-off). The cryptanalysis of round-reduced AES hashing (eprint 2025/792)
 /// targets collision/preimage/one-wayness — properties this 1-bit hash does
 /// not rely on — and never reaches full-round AES-128.
 ///
