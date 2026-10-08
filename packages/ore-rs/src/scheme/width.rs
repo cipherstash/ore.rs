@@ -166,7 +166,6 @@ pub struct Bit6;
 
 impl BlockWidth for Bit6 {
     const BITS: usize = 6;
-    const DOMAIN: usize = 64;
     type RightBlock = RightBlock8;
     // Fixed-draw Fisher–Yates, not the rejection-sampled Knuth shuffle:
     // Bit6's wire format is not frozen, so it adopts the constant-time,
