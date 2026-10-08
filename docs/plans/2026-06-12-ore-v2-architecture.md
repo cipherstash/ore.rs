@@ -370,9 +370,11 @@ the first differing bit is localised to an **8-bit window** under Bit8 (8 blocks
 **6-bit window** under Bit6 (11 blocks) — Bit6 sharpens an online inference adversary's
 divergence-point/density estimation by ~1.33×. It is an incremental sharpening, not the
 categorical jump to CLWW, but it is real and it is the one axis the library cannot fix.
-This sits opposite the **encrypt-side** advantage of Bit6 (the one-cache-line PRP; see
+This sits opposite the **encrypt-side** advantage of Bit6 (the 64-entry PRP; see
 Open Q1 / the A4 review brief): cheap constant-time key generation that Bit8 cannot get
-for free. The two pull in opposite directions and live in different threat models:
+for free. *(Updated 2026-10-09: Bit6 key generation is now oblivious by default, through
+a register-resident Fisher–Yates builder that is faster on aarch64 than the indexed one
+it replaced; review brief A4, "Status".)* The two pull in opposite directions and live in different threat models:
 
 - They do **not** net out: the leakage axis is an *online/query-time* property against an
   inference adversary; the encrypt-side axis is a *side-channel* property against an
@@ -380,8 +382,13 @@ for free. The two pull in opposite directions and live in different threat model
   reveal nothing), so there Bit6's win is free.
 - The encrypt-side axis is a **cost** difference, not "constant-time vs not": full
   oblivious constant-time is available at *both* widths via oblivious-swap Fisher–Yates,
-  just ~12× cheaper at Bit6 (≈44k ct-ops/u64 vs ≈522k at Bit8). The leakage axis is the
-  **fundamental, unfixable** one.
+  just ~12× cheaper at Bit6 (≈44k ct-ops/u64 vs ≈522k at Bit8, counted for the
+  byte-at-a-time full-scan form). The leakage axis is the **fundamental, unfixable** one.
+  *(2026-10-09: at Bit6 the oblivious builder is now the default, not a cost to opt
+  into. It keeps both tables in vector registers, so a step is a few register ops, not
+  64 byte selects: 199 ns per block PRP against 248 ns for the indexed builder on an
+  Apple M4 (NEON), 710 ns for the portable SWAR fallback. Bit8's legacy Knuth PRP is
+  wire-frozen and has no oblivious build.)*
 
 Because leakage is unfixable and encrypt-side CT is purchasable at either width, the
 lower-leakage width (Bit8) is the conservative **default**, with Bit6 an explicit opt-in.
@@ -392,7 +399,7 @@ threat model, not a global default:
 |---|---|---|
 | At-rest exfiltration (right-only) | any | **Bit6** — leakage tie, take the smaller ciphertext + cheap CT |
 | Online inference on the plaintext distribution | trusted / dedicated | **Bit8** — encrypt-side moot, take the lower leakage |
-| Online inference | hostile / multi-tenant | **Bit8 + oblivious-swap-FY** (low leakage *and* CT, ~522k ct-ops), or Bit6 if perf-bound and 2 bits of resolution is acceptable |
+| Online inference | hostile / multi-tenant | **Bit8 + oblivious-swap-FY** (low leakage *and* CT, ~522k ct-ops; not built: the legacy Bit8 PRP has no oblivious form), or Bit6, whose key generation is oblivious by default, if 2 bits of resolution is acceptable |
 
 Default numerics to Bit8 (lower leakage, and it is the wire-frozen compatible scheme);
 strings pick width per the size/leakage trade in the PR 6 design. This supersedes the
@@ -574,7 +581,9 @@ PR 2's trait change, which should be called out in the changelog).
      exact statistical distance ≤ 2⁻⁵⁵ from a uniformly random permutation — the
      object Lewi-Wu already models — so it adds a pure statistical term, no new
      assumption. One review item: secret-indexed swaps, defended by the
-     one-cache-line argument (64-byte `#[repr(align(64))]` table).
+     one-cache-line argument (64-byte `#[repr(align(64))]` table). *(Resolved
+     2026-10-09 differently: a measured timing dependence on the swaps made the
+     oblivious builder the default; review brief A4, "Status".)*
    - **Swap-or-not is REJECTED for this setting**, not on speed but on proof: the
      right ciphertext exposes a block PRP's full codebook across encryptions
      sharing a prefix, so the honest query budget is q = N, where the HMR bound
