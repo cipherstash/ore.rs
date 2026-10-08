@@ -93,21 +93,34 @@ impl CmacAccumulator {
 
     /// Extend the prefix chain: `S ← E_k(S ⊕ block)` (a CBC step, no subkey —
     /// not a published tag).
+    ///
+    /// The mixed input is encrypted in place: the one buffer that held
+    /// `S ⊕ block` holds the new `S` afterwards, so there is no plaintext
+    /// temporary to wipe (and no per-call fence on the hot path).
     #[inline]
     pub(crate) fn absorb(&mut self, block: &[u8; 16]) {
-        let mixed = u128::from_be_bytes(self.state) ^ u128::from_be_bytes(*block);
-        self.state = self.encrypt(mixed.to_be_bytes());
+        let mut mixed =
+            (u128::from_be_bytes(self.state) ^ u128::from_be_bytes(*block)).to_be_bytes();
+        self.cipher
+            .encrypt_block(GenericArray::from_mut_slice(&mut mixed));
+        self.state = mixed;
     }
 
     /// CMAC tag of `prefix-so-far ‖ final_block`: `E_k(S ⊕ final_block ⊕ K1)`.
     /// Does not change the chain, so all outputs at a given position finalize
     /// from the one cached `S`.
+    ///
+    /// Encrypted in place for the same reason as [`absorb`](Self::absorb):
+    /// the buffer that held `S ⊕ final_block ⊕ K1` is overwritten by the tag.
     #[inline]
     pub(crate) fn finalize(&self, final_block: &[u8; 16]) -> [u8; 16] {
-        let mixed = u128::from_be_bytes(self.state)
+        let mut mixed = (u128::from_be_bytes(self.state)
             ^ u128::from_be_bytes(*final_block)
-            ^ u128::from_be_bytes(self.k1);
-        self.encrypt(mixed.to_be_bytes())
+            ^ u128::from_be_bytes(self.k1))
+        .to_be_bytes();
+        self.cipher
+            .encrypt_block(GenericArray::from_mut_slice(&mut mixed));
+        mixed
     }
 
     #[cfg(test)]
