@@ -41,7 +41,7 @@ pub trait Prp<T>: Sized {
 
     /// XOR the indicator mask for `data` into `out`: bit `j` of the mask is
     /// `1` iff `invert(j) > data`. Bit order matches
-    /// `RightBitVec::set_bit` (LSB-first within each byte). `out.len() * 8`
+    /// `RightBlock32::set_bit` (LSB-first within each byte). `out.len() * 8`
     /// must equal the permutation domain.
     ///
     /// This is the bulk form of the per-`j` `invert`-and-compare loop the
