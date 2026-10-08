@@ -31,3 +31,36 @@ rustc 1.87.0, `cargo bench --bench oreaes128`.
   model and a large headroom signal for PRs 3–5.
 - `serialize-8` at ~472 ns reflects the per-block `Vec` allocations in
   `to_bytes`; not a target of this program but cheap to improve in passing.
+
+## Addendum (2026-10-08): result elimination check
+
+The benchmark helpers in `benches/oreaes128.rs` returned `()`, so no result
+reached Criterion's `black_box` and the inputs were literal constants. That
+permits the optimiser to elide work whose result is unused. The helpers now
+return their results and the inputs are black-boxed.
+
+The M1 Max above is not available to re-record on, so the effect was measured
+as an A/B on one machine instead (Apple M4, same commit, `--warm-up-time 2
+--measurement-time 5`, old helpers saved as a Criterion baseline, then the
+fixed helpers compared against it):
+
+| Benchmark | Old helpers | Fixed helpers | Change |
+|---|---|---|---|
+| encrypt-8 | 475.3 µs | 479.8 µs | +0.9% |
+| encrypt-left-8 | 107.2 µs | 111.3 µs | +3.3% |
+| compare-8 | 1.023 µs | 1.023 µs | no change (p = 0.33) |
+| compare-8-slice | 1.028 µs | 1.030 µs | +0.4% |
+| serialize-8 | 658.4 ns | 656.9 ns | +0.5% |
+| deserialize-8 | 72.2 ns | 133.6 ns | **+82.8%** |
+| encrypt-4 | 236.2 µs | 238.3 µs | +0.8% |
+| encrypt-left-4 | 53.6 µs | 55.8 µs | +4.0% |
+| compare-4 | 922.3 ns | 931.6 ns | no change (p = 0.35) |
+
+The encrypt, compare and serialize figures above are not materially affected:
+the 0–4% moves are the cost of producing and dropping each result inside the
+timed loop. **`deserialize-8` was under-measured by about 1.8×**: scaled by the
+ratio measured here, roughly 60 ns on the M1 Max rather than the 34 ns
+recorded above. Later PRs' benchmark results
+were taken with the old helpers; the same caveat applies to their
+deserialization figures only.
+
