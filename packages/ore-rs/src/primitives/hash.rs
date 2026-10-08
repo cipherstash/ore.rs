@@ -32,11 +32,17 @@ impl Hash for Aes128Z2Hash {
     }
 
     fn hash_all_into(&self, data: &mut [AesBlock], out: &mut [u8]) {
-        debug_assert_eq!(out.len() * 8, data.len());
+        // A real assert: the scalar pack below zips `out` with `data`, so a
+        // mismatch would silently truncate the mask in a release build.
+        assert_eq!(
+            out.len() * 8,
+            data.len(),
+            "hash_all_into: out.len() * 8 must equal data.len()"
+        );
         self.cipher.encrypt_blocks(data);
 
         // Pack the Z2 (1-bit) outputs LSB-first, eight blocks per byte —
-        // the same bit order as `RightBitVec::set_bit`. The 256-block case
+        // the same bit order as `RightBlock32::set_bit`. The 256-block case
         // (Bit8's per-block RO output) has a vectorised gather; other sizes
         // use the scalar pack.
         if data.len() == 256 {

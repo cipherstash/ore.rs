@@ -11,7 +11,7 @@
 //!   gather over AES outputs) into a 32-byte bitvector.
 //!
 //! Bit order everywhere is LSB-first within each byte, matching
-//! `RightBitVec::set_bit`.
+//! `RightBlock32::set_bit`.
 //!
 //! # Dispatch
 //!
@@ -36,7 +36,10 @@ use super::AesBlock;
 /// `out[j/8] ^= ((table[j] > x) as u8) << (j%8)`.
 #[inline]
 pub(crate) fn gt_mask_xor_256(table: &[u8; 256], x: u8, out: &mut [u8]) {
-    debug_assert_eq!(out.len(), 32);
+    // A real assert, so every backend sees the same contract in release: the
+    // scalar path would otherwise silently truncate, and the vector paths
+    // would panic only on a short slice.
+    assert_eq!(out.len(), 32);
 
     #[cfg(target_arch = "aarch64")]
     // SAFETY: NEON is baseline on aarch64; `out` length asserted above.
@@ -104,6 +107,11 @@ pub(crate) mod scalar {
     /// Length-generic scalar LSB pack: `blocks.len()` must be a multiple
     /// of 8 and equal to `out.len() * 8`.
     pub(crate) fn lsb_mask(blocks: &[AesBlock], out: &mut [u8]) {
+        assert_eq!(
+            out.len() * 8,
+            blocks.len(),
+            "lsb_mask: out.len() * 8 must equal blocks.len()"
+        );
         for (slot, chunk) in out.iter_mut().zip(blocks.chunks_exact(8)) {
             let mut byte = 0u8;
             for (bit, block) in chunk.iter().enumerate() {
@@ -233,6 +241,21 @@ mod tests {
             scalar::gt_mask_xor_256(&table, x, &mut b);
             assert_eq!(a, b);
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "lsb_mask: out.len() * 8 must equal blocks.len()")]
+    fn scalar_lsb_mask_rejects_a_short_output() {
+        let blocks = [AesBlock::default(); 64];
+        let mut out = [0u8; 7];
+        scalar::lsb_mask(&blocks, &mut out);
+    }
+
+    #[test]
+    #[should_panic]
+    fn gt_mask_xor_256_rejects_a_short_output() {
+        let mut out = [0u8; 31];
+        gt_mask_xor_256(&[0u8; 256], 0, &mut out);
     }
 
     #[test]
