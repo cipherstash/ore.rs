@@ -72,8 +72,9 @@ impl RightBitVec for RightBlock32 {
 pub trait BlockWidth: sealed::Sealed + 'static {
     /// Bits of plaintext per block.
     const BITS: usize;
-    /// Block domain size: `1 << BITS`. Block values are `0..DOMAIN`.
-    const DOMAIN: usize;
+    /// Block domain size. Block values are `0..DOMAIN`. Derived from
+    /// [`BITS`](Self::BITS) so the two cannot disagree.
+    const DOMAIN: usize = 1 << Self::BITS;
     /// Right-ciphertext block: a `DOMAIN`-bit masked truth-table row.
     type RightBlock: CipherTextBlock + RightBitVec;
     /// PRP over the block domain.
@@ -89,7 +90,6 @@ pub struct Bit8;
 
 impl BlockWidth for Bit8 {
     const BITS: usize = 8;
-    const DOMAIN: usize = 256;
     type RightBlock = RightBlock32;
     type Prp = crate::primitives::prp::KnuthShufflePRP<u8, 256>;
     type RoKeyBuf = [AesBlock; 256];
