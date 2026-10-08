@@ -5,6 +5,14 @@
 **Branch:** `feat/ore-v2-bit6` (#82), aarch64 host, `--cfg aes_armv8` (hardware AES)
 **Verdict:** **Clean — no new zeroization gaps in #82's crypto code.**
 
+> **Amended 2026-10-08** (review of #90): the verdict missed one gap.
+> `LemireFyPrp::from_stream` copies each 8-byte keystream draw into a local
+> `draw` array and decodes it into `x`, and wiped neither, so the `stream`
+> and `blocks` wipes did not clear every source-level copy of the keystream.
+> Fixed on #82 in "harden(prp): wipe the per-draw keystream copy in
+> from_stream". Like the other wipes, it removes the source-level copy; it
+> cannot rule out copies the compiler keeps in registers or spills.
+
 ## Scope
 
 #82 adds the crypto core: `LemireFyPrp` (`primitives/prp.rs`), the `OreAes128Bit6`
@@ -18,7 +26,7 @@ All new secret-bearing code zeroizes correctly:
 
 | Type | Status |
 |---|---|
-| `LemireFyPrp<N>` (`prp.rs`) | OK — `Zeroize` + manual `Drop` + `ZeroizeOnDrop` marker (matches `KnuthShufflePRP`). The AES-CTR keystream built in `new()` is wiped after the permutation is constructed (`stream.zeroize()` + per-block `as_mut_slice().zeroize()`); the AES key schedule is covered by the `aes` crate's own `ZeroizeOnDrop`. |
+| `LemireFyPrp<N>` (`prp.rs`) | OK — `Zeroize` + manual `Drop` + `ZeroizeOnDrop` marker (matches `KnuthShufflePRP`). The AES-CTR keystream built in `new()` is wiped after the permutation is constructed (`stream.zeroize()` + per-block `as_mut_slice().zeroize()`); the AES key schedule is covered by the `aes` crate's own `ZeroizeOnDrop`. **Amended:** the per-draw `draw`/`x` copies in `from_stream` were not wiped; fixed (see the note above). |
 | `OreAes128Bit6` (`bit2_w6.rs`) | OK — `#[derive(ZeroizeOnDrop)]` over `prf1`/`prf2`; `rng` correctly `#[zeroize(skip)]`. `SeedBuf` wipes each seed `AesBlock` on `Drop`. |
 | Bit6 encrypt scratch | OK — per-block `template`/`work` RO-key buffers zeroized after the encrypt loop. |
 | `FixedPiZ2Hash` (`hash.rs`) | Correctly **not** flagged — `PI_KEY` is a fixed, public nothing-up-my-sleeve AES key; the `Hash::new` parameter is a per-ciphertext nonce. Neither is a secret. |

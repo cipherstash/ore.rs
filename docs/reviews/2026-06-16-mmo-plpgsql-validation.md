@@ -6,7 +6,10 @@ in pl/pgSQL / SQL using only the `pgcrypto` extension, as an interim before the
 Rust TLE lands? (The legacy bit2 comparator already lives in
 `cipherstash/encrypt-query-language`; domain types separate the operators, so
 this work targets the **new v2/MMO scheme**.)
-**Answer: yes — validated empirically (12/12 vectors match Rust).**
+**Answer: the σ-MMO 1-bit hash, the one primitive the comparator needs beyond
+plain SQL, is implementable and validated empirically (12/12 vectors match
+Rust). The full comparator is not implemented or tested here** (see Scope of
+the result).
 
 ## Key finding: the comparison needs no CMAC / PRP / key derivation
 
@@ -27,7 +30,7 @@ secrets during encryption.
 |---|---|
 | π (fixed public-key AES-128) | `encrypt(m, 'ORE-rs.v2.H-pi.1'::bytea, 'aes-ecb/pad:none')` (pgcrypto) — `pad:none` for a raw single block; the `PI_KEY` is public, so it's embedded |
 | σ = GF(2¹²⁸) doubling | ~10 lines of pl/pgSQL: byte-wise shift-left-1 + conditional `# 0x87` (`gf128_double` below) — the only non-pgcrypto-native op |
-| `m = σ(f) ⊕ nonce`, feedforward, LSB | byte XOR (`get_byte`/`set_byte`/`#`) + `& 1` |
+| `m = σ(f) ⊕ nonce`, feedforward, output bit | byte XOR (`get_byte`/`set_byte`/`#`) + `get_byte(·, 0) & 1` |
 | prefix scan, bit read | plain SQL (`substring`, `get_bit`) |
 
 ## Empirical result
@@ -44,10 +47,28 @@ the Rust `FixedPiZ2Hash::hash` on 12 `(f, nonce)` vectors (H mix
 
 Byte-for-byte agreement. (Postgres 15.12 + pgcrypto.)
 
+**The output bit is a fixed coordinate, not the integer LSB.** The construction
+is written `LSB(π(m) ⊕ m)`, but both Rust (`block[0] & 1`) and this SQL take
+bit 0 of byte 0 of the 16-byte block, which for the big-endian field element is
+bit 120. They agree with each other and with the frozen legacy bit2 hash, which
+uses the same coordinate; any fixed output bit is equivalent for security. The
+spec now names the coordinate rather than calling it the LSB.
+
+## Scope of the result
+
+Only `mmo_hash_bit` was implemented and checked. The rest of a comparator —
+header and length handling, the prefix scan over `xt` and the `f` tags, the
+shorter-sorts-first rule for prefixes, and the right-block bit read at
+`xt[l]` — is plain SQL in principle (`substring`, `get_bit`, byte equality),
+but none of it is implemented or executed here. A comparator built from these
+pieces needs end-to-end comparison vectors (pairs of ciphertexts with their
+expected order, including equal values, shared prefixes and different
+lengths) before it can be called correct.
+
 ## Caveat — constant-time
 
-The pl/pgSQL comparator computes the correct order, but pl/pgSQL is **not a
-constant-time environment**: the cache-line/sub-line obliviousness the Rust
+A pl/pgSQL comparator built on this would not be constant-time: pl/pgSQL is
+**not a constant-time environment**, and the cache-line/sub-line obliviousness the Rust
 comparator gets from `ct_select_byte`/`ct_bit` and the no-early-exit prefix scan
 is not realistically achievable in SQL. The interim SQL comparator therefore
 trades that hardening away; the Rust TLE restores it. Whether that's acceptable
@@ -56,6 +77,8 @@ ciphertexts) — flagged, not decided here.
 
 ## Conclusion
 
-The requirement is met: the v2 σ-MMO comparison is implementable in pl/pgSQL with
-pgcrypto. The encryption-side work (single-key derivation, CMAC accumulator, PRP)
+The blocking question is answered: the only cryptographic primitive the v2
+comparator needs, the σ-MMO 1-bit hash, is implementable in pl/pgSQL with
+pgcrypto and matches Rust. The comparator itself remains to be written and
+validated end to end. The encryption-side work (single-key derivation, CMAC accumulator, PRP)
 is unaffected by it. Safe to resume the single-key change + Bit6 vector regen.
