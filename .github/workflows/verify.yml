@@ -1,0 +1,98 @@
+name: "Verify"
+# Dynamic and formal evidence for the v2 ORE implementation, beyond the unit
+# and property tests in `test.yml`:
+#
+#   * ct-taint: the ctgrind-style Valgrind run (packages/ct-taint). Key and
+#     plaintext are marked undefined; every secret-dependent branch or
+#     secret-indexed access memcheck reports fails the job unless it is one of
+#     the documented exceptions in packages/ct-taint/valgrind.supp.
+#   * fuzz: the libFuzzer targets (packages/ore-rs/fuzz) for the ciphertext
+#     parsers and raw comparators, time-boxed per pull request.
+#   * kani: the bounded model-checking harnesses (`#[cfg(kani)]`) for the pure
+#     building blocks.
+#
+# Like test.yml, this runs on every pull request regardless of base branch, so
+# the stacked PRs get it too.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash -l {0}
+
+jobs:
+  ct-taint:
+    runs-on: ubuntu-latest
+    name: "🔍 Valgrind taint"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            packages/ct-taint/target/
+          key: ${{ runner.os }}-ct-taint-${{ hashFiles('packages/ct-taint/Cargo.lock', 'packages/ore-rs/src/**') }}
+
+      # crabgrind binds the Valgrind client-request header at build time.
+      - name: install valgrind
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq valgrind clang libclang-dev
+
+      - name: taint run
+        run: scripts/ct-taint.sh
+
+  fuzz:
+    runs-on: ubuntu-latest
+    name: "🧬 fuzz (${{ matrix.target }})"
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [chained_parse, chained_compare, bit6_parse, bit8_parse]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup nightly (cargo-fuzz requires it)
+        uses: dtolnay/rust-toolchain@nightly
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            ~/.cargo/bin/cargo-fuzz
+            packages/ore-rs/fuzz/target/
+          key: ${{ runner.os }}-fuzz-${{ hashFiles('packages/ore-rs/fuzz/Cargo.lock', 'packages/ore-rs/src/**') }}
+
+      - name: install cargo-fuzz
+        run: command -v cargo-fuzz >/dev/null || cargo install cargo-fuzz --locked
+
+      - name: fuzz
+        run: scripts/fuzz.sh 120 ${{ matrix.target }}
+
+      - name: keep any crashing input
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: packages/ore-rs/fuzz/artifacts/
+          if-no-files-found: ignore
+
+  kani:
+    runs-on: ubuntu-latest
+    name: "✅ Kani"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: model-checking/kani-github-action@v1.1
+        with:
+          args: -p ore-rs
