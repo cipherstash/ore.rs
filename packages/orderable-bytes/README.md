@@ -80,7 +80,7 @@ Pipeline:
 
 `1`, `1.0`, `1.00` all become the same canonical `(significand=1, leading_exp=0)`:
 
-```
+```text
 1     :  (scale=0, mantissa=1)    → significand=1, trailing=0, leading_exp=0
 1.0   :  (scale=1, mantissa=10)   → significand=1, trailing=1, leading_exp = 1-1+1-1 = 0
 1.00  :  (scale=2, mantissa=100)  → significand=1, trailing=2, leading_exp = 1-1+2-2 = 0
@@ -88,7 +88,7 @@ Pipeline:
 
 All three produce the identical byte sequence:
 
-```
+```text
 192   0  32  79 206  94  62  37   2  97  16   0   0   0
 ```
 
@@ -100,7 +100,7 @@ Byte 0 = 192 = 128 + 64 (sign bit + biased_exp 64 = leading_exp 0). Bytes 1..=13
 
 This is the subtle part. Consider `1`, `1.05`, `1.5` — all three have `leading_exp = 0`, so they share byte 0. The discriminator is the mantissa region. If we packed the *raw* significand (right-justified) we'd get:
 
-```
+```text
 1     →  significand=1   →  …   0   0   1
 1.05  →  significand=105 →  …   0   0 105
 1.5   →  significand=15  →  …   0   0  15
@@ -110,7 +110,7 @@ Byte-compare those: `1 < 15 < 105`, but numerically `1 < 1.05 < 1.5`. **Wrong or
 
 Padding fixes it. We multiply each significand by `10^(29 − digit_count)`, left-justifying the leading digit at decimal position 28:
 
-```
+```text
 1    × 10^28  =  10000000000000000000000000000
 1.05 × 10^27  ×  ... (i.e. 105 × 10^26 = 10500000000000000000000000000)
 1.5  × 10^27  ×  ... (i.e. 15  × 10^27 = 15000000000000000000000000000)
@@ -118,7 +118,7 @@ Padding fixes it. We multiply each significand by `10^(29 − digit_count)`, lef
 
 These three now compare correctly as plain unsigned integers. In bytes:
 
-```
+```text
 1     :  192   0 |  32  79 206  94  62  37   2  97  16   0   0   0
 1.05  :  192   0 |  33 237 101 124 142  13  66 127 132   0   0   0
 1.5   :  192   0 |  48 119 181 141  93  55 131 145 152   0   0   0
@@ -132,7 +132,7 @@ The `Decimal` mantissa is u96 (29 decimal digits max), and `10^29` needs ~97 bit
 
 `0.001`, `1`, `100` all have `significand = 1` and so share the same mantissa region. Only byte 0 distinguishes them:
 
-```
+```text
 0.001 :  189   0 |  32  79 ...     biased_exp = 61   (leading_exp = -3)
 1     :  192   0 |  32  79 ...     biased_exp = 64   (leading_exp =  0)
 100   :  194   0 |  32  79 ...     biased_exp = 66   (leading_exp =  2)
@@ -144,7 +144,7 @@ Byte 0 strictly increases with the value.
 
 `Decimal::MAX = 79228162514264337593543950335` — a 29-digit positive integer. `leading_exp = 28`, biased = 92, byte 0 = 220. The 96-bit mantissa nearly fills the 13-byte region:
 
-```
+```text
 220   0 | 255 255 255 255 255 255 255 255 255 255 255 255
 ```
 
@@ -152,7 +152,7 @@ Byte 0 strictly increases with the value.
 
 `-1` is the bitwise NOT of `1` everywhere except the sign bit:
 
-```
+```text
 +1 :  192   0 |  32  79 206  94  62  37   2  97  16   0   0   0
 -1 :   63 255 | 223 176  49 161 193 218 253 158 239 255 255 255
 ```
@@ -177,7 +177,7 @@ So `byte0 < 128 ⇔ negative`, `byte0 == 128 ⇔ zero`, `byte0 > 128 ⇔ positiv
 
 Much simpler. `NaiveDate::num_days_from_ce()` returns an `i32` whose ordering matches chronological order. We sign-flip to `u32` (XOR with `1u32 << 31`) so big-endian byte serialisation gives a 4-byte plaintext where lex order = chronological order.
 
-```
+```text
 NaiveDate::MIN  →  i32 = -95,746,129  →  u32 = 0x7A4B07AF  →  bytes [122,  75,   7, 175]
 year 1, day 1   →  i32 = 1            →  u32 = 0x80000001  →  bytes [128,   0,   0,   1]
 1970-01-01      →  i32 = 719,163      →  u32 = 0x800AF93B  →  bytes [128,  10, 249,  59]
@@ -193,7 +193,7 @@ The sign-flip puts the most-negative valid `i32` (the lower bound of `chrono`'s 
 - Bytes 0..=7: `secs ^ (1u64 << 63)` as big-endian — sign-flips the i64 timestamp the same way `NaiveDate` does, putting all valid timestamps in `[0, u64::MAX]` ordered chronologically.
 - Bytes 8..=11: `subsec_nanos` as big-endian — strict tiebreaker within a whole second. `chrono` returns values in `0..2_000_000_000` (the upper half is for leap-second moments), which fits in `u32` and preserves order.
 
-```
+```text
 1970-01-01T00:00:00Z              →  secs=0, nanos=0          →  [128,0,0,0,0,0,0,0,   0,0,0,0]
 1970-01-01T00:00:00.000000001Z    →  secs=0, nanos=1          →  [128,0,0,0,0,0,0,0,   0,0,0,1]
 1970-01-01T00:00:01Z              →  secs=1, nanos=0          →  [128,0,0,0,0,0,0,1,   0,0,0,0]

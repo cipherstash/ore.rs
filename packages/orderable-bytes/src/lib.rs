@@ -27,6 +27,12 @@ pub mod variable;
 #[macro_use]
 extern crate quickcheck;
 
+// Runs the README's Rust examples as doctests, so the README cannot drift
+// from the API. Its example uses `Decimal`, so it needs that feature.
+#[cfg(all(doctest, feature = "decimal"))]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
+
 /// Maps a value to its canonical, order-preserving byte encoding.
 ///
 /// Implementors guarantee, for any `a` and `b` of the implementing type:
