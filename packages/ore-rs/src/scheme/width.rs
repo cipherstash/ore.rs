@@ -79,10 +79,30 @@ pub(crate) fn ct_select_byte(block: &[u8], idx: usize) -> u8 {
     let mut acc = 0u8;
     for (i, &b) in block.iter().enumerate() {
         // `i` is the public loop counter; `idx` is secret. Both index a block
-        // of ≤ 32 bytes, so the u8 cast is lossless.
+        // or table of ≤ 256 bytes, so the u8 cast is lossless.
         acc.conditional_assign(&b, (i as u8).ct_eq(&(idx as u8)));
     }
     acc
+}
+
+/// Oblivious conditional copy: `dst = src` when `choice` is set, otherwise
+/// `dst` is left as it was; every byte of both is touched either way.
+///
+/// The comparators use this to *latch* the first differing block while the
+/// constant-time prefix scan is still running: at each block `n` the scan
+/// knows whether `n` is the first difference, and copies that block's left
+/// tag, permuted symbol and right bitvector under that choice. Nothing after
+/// the scan is then loaded at an address derived from the position of the
+/// first difference. A direct `right[l]` after the scan would be the one load
+/// whose cache state depends on `l` (the scan never touches the right blocks),
+/// which a timing attacker can read; `docs/reviews/` records the measurement.
+#[inline]
+pub(crate) fn ct_assign_bytes(dst: &mut [u8], src: &[u8], choice: subtle_ng::Choice) {
+    use subtle_ng::ConditionallySelectable;
+    debug_assert_eq!(dst.len(), src.len());
+    for (d, s) in dst.iter_mut().zip(src) {
+        d.conditional_assign(s, choice);
+    }
 }
 
 /// Oblivious extraction of bit `pos` (`0..8`) of `byte` — used right after
