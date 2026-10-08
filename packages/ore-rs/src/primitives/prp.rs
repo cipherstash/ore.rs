@@ -1,3 +1,4 @@
+pub(crate) mod oblivious;
 pub mod prng;
 use crate::primitives::prp::prng::Aes128Prng;
 use crate::primitives::{AesBlock, Prp, PrpError, PrpResult};
@@ -133,20 +134,21 @@ impl_knuth_shuffle_prp!(256, crate::primitives::simd::gt_mask_xor_256);
 ///
 /// New (non-wire-frozen) schemes only.
 ///
-/// Layout note (constant-time): key generation performs two secret-indexed
-/// writes — the Fisher–Yates `permutation.swap(i, j)` (secret `j`) and the
-/// `inverse[val] = …` fill (secret `val`). The one-cache-line argument that
-/// defends these (any access within a single 64-byte line leaks nothing
-/// through the cache) requires each table to occupy exactly one line. At
-/// `N = 64` each `[u8; N]` is 64 bytes, so `#[repr(C, align(64))]` places
-/// `permutation` at offset 0 (line 0) and `inverse` at offset 64 (line 1):
-/// `repr(C)` pins field order (default `repr(Rust)` may reorder), `align(64)`
-/// puts the struct on a cache-line boundary. The argument only holds for
-/// `N ≤ 64`; the sole instantiation is `LemireFyPrp<64>`.
+/// Constant-time construction: key generation goes through the oblivious
+/// builders in [`oblivious`] (NEON on aarch64, SSSE3 on x86_64 when the CPU
+/// has it, portable SWAR elsewhere), which never use a secret value as a
+/// memory address. Textbook Fisher–Yates swaps at the secret draw-derived
+/// index and fills `inverse` at the secret permutation values; those
+/// offsets stay within one cache line, but dudect measured a timing
+/// dependence on the swap sequence on Apple M4, which the one-cache-line
+/// argument does not cover (review brief A4). The oblivious builders apply
+/// the same draws and swaps, so the tables, and every ciphertext, are
+/// byte-identical to the textbook form's.
 ///
-/// **Under review** — see `docs/reviews/2026-06-14-ore-v2-crypto-review-brief.md`
-/// (A4). If the cache-line argument is rejected, this is replaced by a strictly
-/// constant-time (oblivious-swap) construction.
+/// Layout: `#[repr(C, align(64))]` places `permutation` at offset 0 (line 0)
+/// and `inverse` at offset 64 (line 1); `repr(C)` pins field order and
+/// `align(64)` puts the struct on a cache-line boundary. The lookups
+/// (`permute`, `invert`) read every entry either way.
 #[derive(Zeroize)]
 #[repr(C, align(64))]
 pub struct LemireFyPrp<const N: usize> {
@@ -168,14 +170,12 @@ impl<const N: usize> ZeroizeOnDrop for LemireFyPrp<N> {}
 /// bulk indicator kernel for the domain.
 macro_rules! impl_lemire_fy_prp {
     ($domain:literal, $stream_blocks:literal, $gt_mask:path) => {
-        // The one-cache-line constant-time argument for the secret-indexed
-        // key-generation writes (see the struct docs / review brief A4) holds
-        // only when each `[u8; N]` table fits a single 64-byte cache line. A
-        // larger domain silently spans multiple lines and loses the property,
-        // so make it a compile error rather than a comment.
+        // The oblivious builders are written for exactly 64 entries (four
+        // 16-byte registers, eight 64-bit words per table); make another
+        // domain a compile error rather than a type mismatch deep inside.
         const _: () = assert!(
-            $domain <= 64,
-            "LemireFyPrp: the one-cache-line constant-time argument requires domain <= 64"
+            $domain == oblivious::DOMAIN,
+            "LemireFyPrp: the oblivious builders are written for a 64-entry domain"
         );
 
         impl Prp<u8> for LemireFyPrp<$domain> {
@@ -199,31 +199,17 @@ macro_rules! impl_lemire_fy_prp {
                     stream[i * 16..(i + 1) * 16].copy_from_slice(b);
                 }
 
+                // Fisher–Yates with Lemire-reduced wide draws: draw `d`
+                // (8 bytes) drives step `$domain - 1 - d`. Fixed trip count,
+                // branch-free index reduction, and no secret-dependent
+                // address: the oblivious builder keeps both tables in
+                // registers (or masked words) and maintains the inverse
+                // alongside the swaps. It wipes its copies of each draw.
                 let mut perm = Self {
                     permutation: [0u8; $domain],
                     inverse: [0u8; $domain],
                 };
-                for (i, p) in perm.permutation.iter_mut().enumerate() {
-                    *p = i as u8;
-                }
-
-                // Fisher–Yates with Lemire-reduced wide draws: draw `d`
-                // (8 bytes) drives step `i`. Fixed trip count, branch-free
-                // index reduction (the swap address is secret — defended by
-                // the single-cache-line argument; the table is `$domain`
-                // bytes).
-                for i in (1..$domain).rev() {
-                    let d = $domain - 1 - i;
-                    let mut draw = [0u8; 8];
-                    draw.copy_from_slice(&stream[d * 8..d * 8 + 8]);
-                    let x = u64::from_le_bytes(draw);
-                    let j = ((x as u128 * (i as u128 + 1)) >> 64) as usize;
-                    perm.permutation.swap(i, j);
-                }
-
-                for (index, val) in perm.permutation.iter().enumerate() {
-                    perm.inverse[*val as usize] = index as u8;
-                }
+                oblivious::build(&stream, &mut perm.permutation, &mut perm.inverse);
 
                 // The keystream determined the permutation — wipe it.
                 stream.zeroize();
