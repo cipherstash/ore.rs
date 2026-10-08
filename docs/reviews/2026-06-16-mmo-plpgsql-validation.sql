@@ -23,6 +23,9 @@ BEGIN
 END; $$ LANGUAGE plpgsql IMMUTABLE;
 
 -- BHKR σ-MMO 1-bit hash: m = σ(f) ⊕ nonce; H = lsb(π(m)) ⊕ lsb(m).
+-- "lsb" is a fixed output coordinate, not the integer LSB: bit 0 of byte 0
+-- of the 16-byte block, i.e. bit 120 of the big-endian field element. This
+-- matches the Rust `block[0] & 1` (and the frozen legacy bit2 hash).
 -- π = AES-128-ECB under the fixed public key "ORE-rs.v2.H-pi.1".
 CREATE OR REPLACE FUNCTION mmo_hash_bit(f bytea, nonce bytea) RETURNS int AS $$
 DECLARE m bytea; pim bytea;

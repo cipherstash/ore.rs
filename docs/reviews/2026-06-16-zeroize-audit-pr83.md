@@ -5,6 +5,15 @@
 **Branch:** `feat/ore-v2-chained` (#83), aarch64 host, `--cfg aes_armv8`
 **Verdict:** two new gaps found and **fixed** in `f498990`; no remaining new gaps.
 
+> **Amended 2026-10-08** (review of #90): the verdict missed two more gaps.
+> `CmacAccumulator::absorb` and `finalize` each build an owned `mixed` value
+> from the chain state (and, in `finalize`, `K1`) and returned without
+> wiping it; and `from_stream`'s per-draw keystream copy (see the #82 audit)
+> applies here too. Both are fixed: on #83 in "harden(cmac): wipe the mixed
+> state temporaries in absorb and finalize", and on #82. The wipes remove the
+> source-level copies; they cannot rule out copies the compiler keeps in
+> registers or spills, and no IR evidence was gathered for them.
+
 ## Scope
 
 #83 adds the CMAC accumulator (`primitives/cmac.rs`) and the chained
@@ -18,9 +27,10 @@ wiped, on the struct Drop and in the per-block local buffers.
 | Item | Status |
 |---|---|
 | `CmacAccumulator` Drop (`k1`, `state`) | ✅ wiped; `cipher` via aes `ZeroizeOnDrop` |
+| **`CmacAccumulator::absorb` / `finalize` `mixed` temporaries** | ❌→✅ **was a gap** (missed by this audit) — state/`K1`-derived values left on the stack. **Fixed** on #83 (see the note above). |
 | chained `k_acc` Drop | ✅ wiped |
 | chained `stream` (PRP keystream, `prp_at`) | ✅ `stream.zeroize()` |
-| `from_stream` consumed stream | ✅ caller-owned; both callers wipe |
+| `from_stream` consumed stream | ✅ caller-owned; both callers wipe. **Amended:** the per-draw `draw`/`x` copies inside `from_stream` were not wiped; fixed on #82. |
 | **`L = E_k(0)` in `CmacAccumulator::new`** | ❌→✅ **was a gap** — `K1 = dbl(L)`'s source, left on the stack. **Fixed:** `l.zeroize()` after deriving `k1`. |
 | **chained `ro` RO-tag buffer (`encrypt_var`)** | ❌→✅ **was a gap** — 64 key-derived CMAC tags, never wiped (the sibling `bit2_w6` wipes its `template`/`work`). **Fixed:** per-block `ro` wipe after the right block is built. |
 
