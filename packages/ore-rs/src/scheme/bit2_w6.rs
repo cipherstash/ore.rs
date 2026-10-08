@@ -9,7 +9,8 @@
 //! (vs 408) including the 4-byte v2 wire header.
 //!
 //! The packed prefix caps `N` at 14 (`prefix ≤ 13 ‖ value ‖ index` plus
-//! the block count in byte 15 must fit one AES block), which covers all
+//! the block count in byte 15 must fit one AES block; seeds also use byte
+//! 14 for the block index), which covers all
 //! primitives up to 64 bits. `u128`/`i128`/`Decimal` stay on the legacy
 //! scheme until the chained-prefix construction lands (plan §5).
 //!
@@ -18,6 +19,10 @@
 //! flipping [`Z2Hash`] re-keys the right ciphertexts without any other
 //! code change. Do not store ciphertexts produced by this scheme until
 //! the review lands and vectors are pinned.
+//!
+//! **Keys:** PRF₁ and PRF₂ run under keys derived from the caller's
+//! (see `PRF1_LABEL`), never the raw keys, so sharing keys with the
+//! legacy scheme does not let legacy ciphertexts reveal Bit6 masking keys.
 
 use crate::{
     ciphertext::*,
@@ -91,17 +96,45 @@ impl<const N: usize> Drop for SeedBuf<N> {
     }
 }
 
+/// Labels for deriving this scheme's PRF keys from the caller's keys:
+/// `k1' = AES_{k1}(PRF1_LABEL)` and `k2' = AES_{k2}(PRF2_LABEL)`.
+///
+/// Bit6 must not evaluate PRF₁/PRF₂ under the caller's raw keys, because
+/// the legacy scheme does, and its inputs cover Bit6's: a legacy `N = 15`
+/// left ciphertext publishes exactly the PRF₁ outputs Bit6 uses as its
+/// masking keys. Deriving separate keys separates the schemes.
+///
+/// The labels themselves must never be a legacy PRF input, or a legacy
+/// ciphertext would publish the derived key. Every legacy PRF₁ input has
+/// byte 15 in `0..=14` (the block index at `N = 15`, else `0`) and every
+/// legacy PRF₂ input has byte 15 `= 0`; these labels end in ASCII `'1'`
+/// and `'2'` (`0x31`, `0x32`), so they are outside both.
+const PRF1_LABEL: [u8; 16] = *b"ORE.v2.bit6.prf1";
+const PRF2_LABEL: [u8; 16] = *b"ORE.v2.bit6.prf2";
+
+/// `Aes128Prf` keyed by `AES_k(label)`, wiping the derived key bytes.
+fn derive_prf(k: &[u8; 16], label: &[u8; 16]) -> Aes128Prf {
+    let kdf: Aes128Prf = Prf::new(GenericArray::from_slice(k));
+    let mut derived = [AesBlock::clone_from_slice(label)];
+    kdf.encrypt_all(&mut derived);
+    let prf = Prf::new(&derived[0]);
+    derived[0].as_mut_slice().zeroize();
+    prf
+}
+
 impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
-    /// Per-block PRP seeds: `PRF₂(x[0..n] ‖ 0… ‖ N)`. Unlike the legacy
-    /// scheme, the block count is bound into byte 15 (domain separation
-    /// across plaintext shapes under shared keys, plan §4) — though the
-    /// per-block index is still absent by construction (prefix-equal
-    /// plaintexts must share seeds only up to the first differing block;
-    /// binding the *count* keeps cross-type prefixes apart).
+    /// Per-block PRP seeds: `PRF₂(x[0..n] ‖ 0… ‖ n@14 ‖ N@15)`. The block
+    /// count in byte 15 separates plaintext shapes (plan §4); the block
+    /// index in byte 14 separates positions, so a prefix padded with zero
+    /// blocks no longer collides with a shorter prefix (which gave every
+    /// position of an all-zero plaintext the same permutation). Prefixes
+    /// equal up to block `n` still share `seed_n`, as the comparator needs.
+    /// `N ≤ 14` puts the prefix in bytes `0..=12`, so byte 14 is free.
     fn derive_prp_seeds<const N: usize>(&self, x: &PlainText<N>) -> SeedBuf<N> {
         let mut seeds = [AesBlock::default(); N];
         for (n, block) in seeds.iter_mut().enumerate() {
             block[0..n].clone_from_slice(&x[0..n]);
+            block[14] = n as u8;
             block[15] = N as u8;
         }
         self.prf2.encrypt_all(&mut seeds);
@@ -123,8 +156,8 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128Bit6<R> {
         let rng: R = SeedableRng::from_entropy();
 
         Ok(OreAes128Bit6 {
-            prf1: Prf::new(GenericArray::from_slice(k1)),
-            prf2: Prf::new(GenericArray::from_slice(k2)),
+            prf1: derive_prf(k1, &PRF1_LABEL),
+            prf2: derive_prf(k2, &PRF2_LABEL),
             rng: RefCell::new(rng),
         })
     }
@@ -443,6 +476,54 @@ mod tests {
         rng.fill(&mut k2);
 
         OreCipher::init(&k1, &k2).unwrap()
+    }
+
+    /// Cross-scheme regression (review of #82): under keys shared with the
+    /// legacy scheme, a legacy `N = 15` left ciphertext must never publish
+    /// one of Bit6's PRF₁ tags. Bit6's `f[0]` for an 11-block value has PRF₁
+    /// input `xt[0] ‖ 0×10 ‖ 0@11 ‖ 0×3 ‖ 11@15`; legacy block 11 of
+    /// `(xt[0], 0×10, c, 0×3)` has input `xt[0] ‖ 0×10 ‖ xt'[11] ‖ 0×3 ‖
+    /// 11@15`, which matches whenever `c` permutes to 0. Search every `c`.
+    #[test]
+    fn legacy_ciphertexts_never_publish_bit6_tags() {
+        use crate::scheme::bit2::OreAes128ChaCha20;
+
+        let mut k1 = [0u8; 16];
+        let mut k2 = [0u8; 16];
+        let mut rng = ChaCha20Rng::from_entropy();
+        rng.fill(&mut k1);
+        rng.fill(&mut k2);
+        let bit6: Ore = OreCipher::init(&k1, &k2).unwrap();
+        let legacy: OreAes128ChaCha20 = OreCipher::init(&k1, &k2).unwrap();
+
+        let target = bit6.encrypt_left(&[0u8; 11]).unwrap();
+        let tag = target.f[0];
+
+        let mut probe = [0u8; 15];
+        probe[0] = target.xt[0];
+        for c in 0..=255u8 {
+            probe[11] = c;
+            let left = legacy.encrypt_left(&probe).unwrap();
+            assert!(
+                !bool::from(left.f[11].ct_eq(&tag)),
+                "legacy block 11 reproduced a Bit6 tag (c = {})",
+                c
+            );
+        }
+    }
+
+    /// Position-binding regression (review of #82): every position of an
+    /// all-zero plaintext must get its own permutation, so its `xt` bytes
+    /// are not all equal (they were, when seeds bound only the count).
+    #[test]
+    fn zero_blocks_use_distinct_permutations_per_position() {
+        let ore = init_ore();
+        let left = ore.encrypt_left(&[0u8; 11]).unwrap();
+        let first = left.xt[0];
+        assert!(
+            left.xt.iter().any(|&s| s != first),
+            "all 11 positions produced the same symbol"
+        );
     }
 
     quickcheck! {

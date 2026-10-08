@@ -229,11 +229,17 @@ bytes 4..   : left ‖ right   (existing layout per block width)
   mis-order. Legacy v1 slices are only ever handled by the legacy type. (A v1 ciphertext
   could in principle collide with a v2 length; since each *type* only parses its own
   format, no runtime ambiguity arises.)
-- **Domain separation:** the scheme id byte is also mixed into the PRF input layout
-  decision space — concretely, Bit6 writes `block_count` into the otherwise-unused byte
-  15 of the left-tag input so that identical prefixes under Bit6 and Bit8 can never
-  produce related tags under the same keys. (Cheap insurance; needs a nod from crypto
-  review.)
+- **Domain separation:** Bit6 writes `block_count` into byte 15 of its PRF inputs, but
+  **that alone does not separate it from Bit8**, contrary to what this bullet first
+  claimed. Legacy `N = 15` puts the block index in byte 15 and uses every other byte,
+  so a legacy left ciphertext can reproduce the PRF₁ input of any Bit6 masking key: a
+  legacy query under shared keys then acts as a Bit6 query token (found in review of
+  #82 and demonstrated by a test). No input layout can fix this, because legacy owns
+  the whole 16-byte input space at `N = 15`. Bit6 therefore runs PRF₁/PRF₂ under
+  **derived keys**, `AES_{k1}("ORE.v2.bit6.prf1")` and `AES_{k2}("ORE.v2.bit6.prf2")`;
+  the labels end in a byte no legacy PRF input can have (byte 15 is `0..=14` for
+  PRF₁ and `0` for PRF₂), so legacy never evaluates them. Bit6 seeds also bind the
+  block index in byte 14, so zero-padded prefixes no longer collide across positions.
 
 ### 5. Variable block counts / string encryption (goal 4)
 
@@ -519,6 +525,8 @@ PR 2's trait change, which should be called out in the changelog).
 - [ ] PRP seeds (PRF₂ outputs) structurally separated from serializable `Left` state;
       no code path can write seed material into a ciphertext (PR 2).
 - [ ] Domain separation between Bit8/Bit6/chained schemes under shared keys (PR 5, 6).
+      Bit8/Bit6: done by key derivation (§4), with a cross-scheme regression test.
+      Chained: to confirm in PR 6.
 - [x] H instantiation (§6) selected and signed off (2026-06-15): BHKR σ-MMO,
       random-permutation model; see §6 and review brief A1.
 - [ ] Selected §5(b) accumulator candidate reviewed and signed off (before PR 6).
