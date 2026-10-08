@@ -6,6 +6,25 @@ use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
 use aes::Aes128;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
+/// Read `table[index]` without a secret-dependent memory access: every
+/// entry is read and the wanted one selected in constant time. `index` is
+/// a plaintext symbol (`permute`) or a candidate (`invert`); an aligned
+/// table only defends cache-line granularity, and sub-line timing would
+/// otherwise reveal which part of the table was read.
+///
+/// Out-of-range `index` is an error, decided by a comparison against the
+/// public table length.
+#[inline]
+fn oblivious_lookup(table: &[u8], index: u8) -> PrpResult<u8> {
+    if usize::from(index) >= table.len() {
+        return Err(PrpError);
+    }
+    Ok(crate::scheme::width::ct_select_byte(
+        table,
+        usize::from(index),
+    ))
+}
+
 #[derive(Zeroize)]
 pub struct KnuthShufflePRP<T: Zeroize, const N: usize> {
     permutation: [T; N],
@@ -72,25 +91,15 @@ macro_rules! impl_knuth_shuffle_prp {
              * Forward permutations are only used once in the ORE scheme so this is OK
              */
             fn permute(&self, input: u8) -> PrpResult<u8> {
-                let index = usize::from(input);
-
-                match self.inverse.get(index) {
-                    Some(i) => Ok(*i),
-                    None => Err(PrpError),
-                }
+                oblivious_lookup(&self.inverse, input)
             }
 
             /*
              * Performs the inverse permutation in constant time.
              */
             fn invert(&self, input: u8) -> PrpResult<u8> {
-                let index = usize::from(input);
-
-                // Forward an inverse permutations are reversed for historical reasons
-                match self.permutation.get(index) {
-                    Some(i) => Ok(*i),
-                    None => Err(PrpError),
-                }
+                // Forward and inverse permutations are reversed for historical reasons
+                oblivious_lookup(&self.permutation, input)
             }
 
             fn indicator_mask_xor(&self, data: u8, out: &mut [u8]) {
@@ -221,17 +230,11 @@ macro_rules! impl_lemire_fy_prp {
             }
 
             fn permute(&self, input: u8) -> PrpResult<u8> {
-                match self.inverse.get(usize::from(input)) {
-                    Some(i) => Ok(*i),
-                    None => Err(PrpError),
-                }
+                oblivious_lookup(&self.inverse, input)
             }
 
             fn invert(&self, input: u8) -> PrpResult<u8> {
-                match self.permutation.get(usize::from(input)) {
-                    Some(i) => Ok(*i),
-                    None => Err(PrpError),
-                }
+                oblivious_lookup(&self.permutation, input)
             }
 
             fn indicator_mask_xor(&self, data: u8, out: &mut [u8]) {

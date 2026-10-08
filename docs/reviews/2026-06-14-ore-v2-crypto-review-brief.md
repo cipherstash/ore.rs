@@ -333,13 +333,29 @@ constant-time-selects the target byte, so the access address is independent of
 still leaks at sub-line (MemJam) granularity, whereas the full scan closes both
 line and sub-line channels. Cost is ≤ 32 byte-ops per comparison — negligible
 beside the per-comparison AES hash. Results are unchanged (compat + comparison
-vectors pass), so it does **not** touch the wire format. The block-*selection*
-index `l` is left as a direct index because `l` (first-differing-block) is leaked
-by ORE's definition anyway.
-- **Severity it addressed was low** (both `l` and `a[l]` are already in the
-  ciphertexts the comparator holds; the channel only matters to an attacker who
-  can time the comparator's cache but not read its memory), but the oblivious
-  read is cheap and removes the question entirely.
+vectors pass), so it does **not** touch the wire format.
+
+The block-*selection* index `l` was at first left as a direct index, on the
+argument that `l` (first-differing-block) is leaked by ORE's definition anyway.
+That argument is about who holds the ciphertexts; it says nothing about who can
+only *time* the comparator. A dudect run (2026-10-09, recorded in
+`docs/reviews/2026-10-09-ore-v2-dynamic-verification.md`) found that the
+post-scan loads at `l` do leak it through timing: the scan reads every left
+block, so `f[l]` and `a[l]` are cache-resident whatever `l` is, but it never
+touches the right blocks, so whether `right[l]` hits depends on `l`. On a
+23-block chained ciphertext that was 2 % of the timing spread; on Bit6, whose
+whole ciphertext spans five lines, it was at the edge of detection.
+
+**Fix applied (2026-10-09):** the scan now *latches* `a[l]`, `f[l]` and
+`right[l]` while it runs, with `width::ct_assign_bytes` under the choice "this
+block is the first difference" (true for exactly one block). The resolution
+step hashes and bit-selects from the latched copies, so no load after the scan
+is indexed by `l`. Cost is one 8-byte right-block read and ≈ 25 masked byte
+copies per block, on a scan that already compares 17 bytes per block.
+- **Severity of both compare-side channels was low** (`l` and `a[l]` are in
+  the ciphertexts the comparator holds; the channels only matter to an attacker
+  who can time the comparator but not read its memory), but the oblivious forms
+  are cheap and remove the question entirely.
 - **Scope note:** production comparison runs in the Postgres extension / proxy
   (separate codebase) and must adopt the same oblivious read (or `ore.rs`'s
   comparator) — tracked separately; this repo's `compare_raw_slices` and typed
