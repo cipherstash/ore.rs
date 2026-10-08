@@ -170,7 +170,7 @@ number; AES remains the floor.)
 
 | Op | Shape | x86_64 | aarch64 |
 |---|---|---|---|
-| Indicator mask | bytewise `>` vs broadcast, pack to bitmask | `vpcmpgtb` + `vpmovmskb` (AVX2: 8 iters for 256 lanes; SSE2 fallback: 16) | `cmgt.16b` + bit-narrowing (no movemask; use `ushr`+`addv` or the `vshrn` trick) |
+| Indicator mask | bytewise **unsigned** `>` vs broadcast, pack to bitmask | `vpcmpgtb` + `vpmovmskb` on operands biased by `0x80` (AVX2 has only signed byte compares; XOR-ing `0x80` into both sides maps unsigned `>` onto signed `>`) (AVX2: 8 iters for 256 lanes; SSE2 fallback: 16) | `cmhi.16b` (`vcgtq_u8`, unsigned) + bit-narrowing (no movemask; use `ushr`+`addv` or the `vshrn` trick) |
 | Hash-LSB mask | strided bit gather from AES output blocks | shifts + `vpmovmskb` on gathered bytes | shifts + narrowing |
 | Compare: first-differing-block scan | 16-byte tag equality across blocks | `vpcmpeqb` + movemask, branch-free fold | `cmeq` + fold |
 
