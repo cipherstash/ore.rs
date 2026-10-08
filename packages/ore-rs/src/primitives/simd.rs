@@ -67,7 +67,9 @@ pub(crate) fn gt_mask_xor_256(table: &[u8; 256], x: u8, out: &mut [u8]) {
 /// loop's ~9 ns); only NEON is dispatched.
 #[inline]
 pub(crate) fn gt_mask_xor_64(table: &[u8; 64], x: u8, out: &mut [u8]) {
-    debug_assert_eq!(out.len(), 8);
+    // A real assert, as for `gt_mask_xor_256`: the same contract on every
+    // backend in release.
+    assert_eq!(out.len(), 8);
 
     #[cfg(target_arch = "aarch64")]
     // SAFETY: NEON is baseline on aarch64; `out` length asserted above.

@@ -167,6 +167,11 @@ impl<S: OreCipher, const N: usize> Left<S, N> {
         }
         let mut out = Self::init();
         out.xt.copy_from_slice(&data[0..N]);
+        // `xt` is public, so this check may branch. A symbol outside the
+        // scheme's domain would index past the right block in the comparator.
+        if out.xt.iter().any(|&s| usize::from(s) >= S::SYMBOL_DOMAIN) {
+            return Err(ParseError);
+        }
         for i in 0..N {
             let block_start_index = N + (i * S::LeftBlockType::BLOCK_SIZE);
             out.f[i] = S::LeftBlockType::from_bytes(
