@@ -215,6 +215,25 @@ macro_rules! impl_lemire_fy_prp {
 
                 Ok(perm)
             }
+
+            /// [`Self::from_stream`] through a named builder whatever the
+            /// target: the reference builder or one of the portable
+            /// oblivious ones. For the `ct-bench` timing hooks only.
+            #[cfg(feature = "ct-bench")]
+            pub(crate) fn from_stream_with(
+                stream: &[u8],
+                build: fn(&[u8], &mut [u8; $domain], &mut [u8; $domain]),
+            ) -> PrpResult<Self> {
+                if stream.len() < ($domain - 1) * 8 {
+                    return Err(PrpError);
+                }
+                let mut perm = Self {
+                    permutation: [0u8; $domain],
+                    inverse: [0u8; $domain],
+                };
+                build(stream, &mut perm.permutation, &mut perm.inverse);
+                Ok(perm)
+            }
         }
 
         impl Prp<u8> for LemireFyPrp<$domain> {

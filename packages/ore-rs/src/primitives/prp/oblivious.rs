@@ -16,8 +16,8 @@
 //! - `swar` holds each table as eight `u64` words and does every
 //!   secret-indexed read and write as a masked pass over the words, with
 //!   exact SWAR byte-equality masks. Portable fallback.
-//! - `scalar` (tests only) is the same construction a byte at a time with
-//!   `subtle_ng` choices.
+//! - `scalar` (tests and benches only) is the same construction a byte at
+//!   a time with `subtle_ng` choices.
 //! - `neon` (aarch64) holds both tables in eight 16-byte registers for the
 //!   whole build: `tbl` fetches `perm[j]` by a broadcast index, and
 //!   compare-and-select against a constant index vector writes back.
@@ -101,9 +101,10 @@ pub(crate) fn build(stream: &[u8], perm: &mut [u8; DOMAIN], inverse: &mut [u8; D
 /// The reference builder: textbook Fisher–Yates, swapping at the
 /// draw-derived index, then `inverse[perm[k]] = k`. Both use a secret value
 /// as an address, which is the timing channel the oblivious builders close,
-/// so it is never compiled into the library: it exists only as the
-/// specification the oblivious builders are tested against.
-#[cfg(test)]
+/// so it is never compiled into a shipped build: it exists only as the
+/// specification the oblivious builders are tested against, and for the
+/// `ct-bench` before/after timing hooks.
+#[cfg(any(test, feature = "ct-bench"))]
 pub(crate) mod reference {
     use super::*;
 
@@ -124,9 +125,10 @@ pub(crate) mod reference {
 /// Byte-at-a-time oblivious builder with `subtle_ng` choices: full-scan
 /// reads and masked full-table writes, the inverse maintained alongside.
 /// The most direct form of the construction, kept as a second reference
-/// for the tests; `subtle_ng`'s per-choice optimisation barrier makes it
-/// about 17x slower than [`swar`], which the dispatcher uses instead.
-#[cfg(test)]
+/// for the tests and the timing benches; `subtle_ng`'s per-choice
+/// optimisation barrier makes it about 17x slower than [`swar`], which the
+/// dispatcher uses instead.
+#[cfg(any(test, feature = "ct-bench"))]
 pub(crate) mod scalar {
     use super::*;
     use subtle_ng::{ConditionallySelectable, ConstantTimeEq};
@@ -171,7 +173,7 @@ pub(crate) mod scalar {
 /// a public bound). The inverse is updated on the value side, as in the
 /// NEON builder. Pure integer arithmetic with no `subtle_ng` optimisation barrier
 /// per byte, so the compiler can keep the tables in registers.
-#[cfg(any(not(target_arch = "aarch64"), test))]
+#[cfg(any(not(target_arch = "aarch64"), test, feature = "ct-bench"))]
 pub(crate) mod swar {
     use super::*;
 

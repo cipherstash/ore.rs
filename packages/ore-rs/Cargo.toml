@@ -31,6 +31,11 @@ chrono = ["dep:chrono", "orderable-bytes/chrono"]
 # order-preserving encoding fed into the existing fixed-N ORE machinery.
 # The encoder lives in the sibling `orderable-bytes` crate.
 decimal = ["dep:rust_decimal", "orderable-bytes/decimal"]
+# Exposes `ct_bench`, timing-measurement entry points to otherwise private
+# primitives, for the detached `packages/ct-dudect` crate. Not part of the
+# public API: a feature rather than a `cfg` so it never trips
+# `unexpected_cfgs`, and never enabled by a dependant.
+ct-bench = []
 
 [dependencies]
 aes = { version = "0.8.2", features = ["zeroize"] }
