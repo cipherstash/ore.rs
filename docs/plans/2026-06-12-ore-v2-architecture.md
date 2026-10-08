@@ -466,18 +466,20 @@ key / left tag, `r` = nonce):
 |---|---|---|---|---|
 | 1 | `LSB(AES_r(x))` — status quo | ideal cipher | — | key is public, so AES's standard PRP assumption gives nothing; security is an ideal-cipher assertion |
 | 2 | `LSB(AES_r(x) ⊕ x)` — MMO feedforward | ideal cipher | +1 XOR | matches the analyzed blockcipher-hashing shape; feedforward removes the invertible-public-permutation structure; the minimal upgrade |
-| 3 | **SELECTED:** `LSB(π(σ(x) ⊕ r) ⊕ σ(x) ⊕ r)`, `π = AES_{K₀}`, `σ(x)=2x` | random permutation | **faster** — zero key schedules ever | BHKR/Zahur σ-MMO. GKWY/half-gates attacks (eprint 2019/1168) need *known* inputs + a global offset; ORE has independent *secret* PRF inputs and no offset, so they don't port. σ is cheap defense-in-depth. 2025/792 attacks (collision/preimage) target unused properties and are round-reduced |
+| 3 | **SELECTED:** `LSB(π(σ(x) ⊕ r) ⊕ σ(x) ⊕ r)`, `π = AES_{K₀}`, `σ(x)=2x` | random permutation | **faster** — zero key schedules ever | BHKR/Zahur σ-MMO. Published left tags *are* `H` inputs, so the GKWY multi-instance shape applies to the unrevealed RO keys (secret shared across ciphertexts, public nonces as offsets); security rests on the BHKR bound `≈ p·C/2^128` (review brief A1, restated and signed off 2026-10-09). 2025/792 attacks (collision/preimage) target unused properties and are round-reduced |
 | 4 | `LSB(AES_x(r))` — RO key as AES key | **standard model** (PRF) | ~2–4× right-encryption: one key schedule per `(i, j)` | what the old TODO was reaching for; the honest price of standard-model security; composes poorly with accumulator Candidate A (both pay per-block schedules) |
 | 5 | SHA-256 (HW) / Blake3 over `x ‖ r` | random oracle | 2–5× encrypt path | comparator computes H once per comparison, so query latency is unaffected — only encryption throughput pays |
 
 Decision (2026-06-15): **#3 with the BHKR orthomorphism `σ(x)=2x`** — `H(x,r) =
 LSB(π(σ(x)⊕r) ⊕ σ(x)⊕r)`. The known fixed-key-MMO attacks (GKWY; the half-gates
 multi-instance attack of eprint 2019/1168) require the adversary to know the hash
-inputs and recover a global Free-XOR offset — ORE's inputs are independent *secret*
-PRF outputs and there is no global offset, so neither precondition holds and the
-`O(p·C/2^k)` degradation does not arise. The orthomorphism is not strictly needed
-in this setting; it is adopted as nearly-free defense-in-depth so security holds by
-matching the named BHKR/Zahur construction rather than by a usage argument. The
+inputs and recover a global Free-XOR offset. This decision first said ORE's inputs
+are secret, so the `O(p·C/2^k)` degradation does not arise; that was wrong (review of
+#82): every published left tag is an `H` input, and each unrevealed RO key is a secret
+shared across ciphertexts with public nonces as offsets, which is the multi-instance
+setting. Security rests on the BHKR bound, about `p·C/2^128`, negligible for realistic
+`p` and `C` (review brief A1, restated and signed off 2026-10-09). The orthomorphism is what
+places the construction in that analysed setting. The
 tight tweak-as-key variant (2019/1168 Thm 2) is declined: rekeying per evaluation
 conflicts with the keyless-comparator / performance requirement and addresses a
 degradation absent here. AES-hashing cryptanalysis (eprint 2025/792) targets
@@ -551,8 +553,9 @@ PR 2's trait change, which should be called out in the changelog).
    choice (6 vs 8) for strings is a ciphertext-size trade-off left to the PR 6 design.
 6. **H = BHKR σ-MMO with fixed public AES key (§6, A1 RESOLVED 2026-06-15):**
    `LSB(π(σ(x)⊕r) ⊕ σ(x)⊕r)`, `σ(x)=2x`. Bit6 ships with this rather than inheriting
-   nonce-as-key. GKWY/half-gates attacks don't port (secret independent inputs, no
-   global offset); tweak-as-key declined (rekeying); 2025/792 hits only unused
+   nonce-as-key. Security rests on the BHKR multi-instance bound `≈ p·C/2^128`
+   (published left tags are `H` inputs; A1 restated and signed off 2026-10-09); tweak-as-key
+   declined (rekeying); 2025/792 hits only unused
    properties on round-reduced AES. Legacy Bit8 keeps the status quo forever.
 7. **Accumulator choice is a decision rule, not a fixed pick:** cascade/GGM if NEON
    key-expansion overhead measures under ~10–15% on Bit6 strings, else CMAC with

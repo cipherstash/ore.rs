@@ -98,10 +98,37 @@ exact reason from the literature:
   multi-instance garbling setting with success `O(p·C/2^k)` — but the attack
   works by **recovering a global Free-XOR offset `R` from *known* hash inputs**
   (the evaluator holds wire labels `Wa` and gate ids `j`, learns
-  `H(Wa⊕R, j)`, then meet-in-the-middles over `π`). **ORE has neither
-  precondition:** its `H` inputs are independent **secret** PRF outputs (the
-  adversary never learns them, sees only 1-bit masks), and there is **no global
-  offset**. So the multi-instance degradation mechanism is structurally absent.
+  `H(Wa⊕R, j)`, then meet-in-the-middles over `π`).
+
+  > **Restated 2026-10-08 — signed off 2026-10-09 (Dan Draper)** (review of #82). The original
+  > text said ORE has neither precondition because its `H` inputs are secret
+  > and the adversary never learns them. That premise is false: `Left.f[n]`
+  > *is* the RO key at the published symbol `xt[n]`, and the comparator feeds
+  > it straight to `H`. Every left ciphertext or query token reveals one `H`
+  > input per block, by design: those are the bits it exists to unmask.
+  >
+  > The right model: for block `n` with prefix `p`, each candidate `j` has an
+  > RO key `k_{p,j}`, a secret PRF output shared by every ciphertext with that
+  > prefix; each stored ciphertext `i` has a public nonce `r_i`; the right block
+  > publishes `ind_j ⊕ H(k_{p,j}, r_i)`. Revealed tags are independent PRF
+  > outputs, so they say nothing about the *unrevealed* keys. For an
+  > unrevealed `k`, since `σ` is linear, `σ(k) ⊕ r_i` is a secret shared across
+  > instances plus known per-instance offsets: exactly the BHKR
+  > correlation-robustness setting, with `k` in the role of the global offset
+  > `R`. So GKWY's multi-instance shape **is** present, not structurally
+  > absent, and the honest statement is their bound: an attacker making `p`
+  > offline `π` queries against `C` targeted unrevealed keys succeeds with
+  > probability about `p·C/2^128`. Testing a guess needs known indicator bits
+  > (known or chosen plaintexts) for that key, since `H` outputs one bit.
+  > Success against one key unmasks candidate `j` in every stored ciphertext
+  > with that prefix, the same capability as one extra query token.
+  >
+  > The conclusion stands for realistic `p` and `C` (for example `p = 2^80`,
+  > `C = 2^32` gives `2^-16`, and the per-key verification cost rises with the
+  > one-bit output), but it rests on that bound, not on the inputs being
+  > secret. Theorem 2's re-keyed variant would remove the multi-instance
+  > factor; it is still declined for the comparator-speed reason below, now as
+  > a trade-off against a stated bound rather than against a non-issue.
 - Their tight fix (Theorem 2, `E(i, σ(x))⊕σ(x)` — tweak as the AES *key*) is
   **deliberately not adopted**: it requires rekeying per evaluation, which breaks
   the keyless-comparator/performance requirement, and it fixes a degradation ORE
@@ -280,10 +307,18 @@ assert!(N <= 64)` guard is proposed to make a larger instantiation a compile
 error.
 
 ### Context
-- The **read** paths are already constant-time: `permute`/`invert` are table
-  lookups returning the value, and `indicator_mask_xor` scans the *entire*
-  permutation table via a branch-free `gt_mask` kernel (`prp.rs:225-228`). Only
-  the **key-generation writes** (above) are secret-indexed.
+- The **read** paths were *not* all constant-time, contrary to what this item
+  first said (review of #82). `indicator_mask_xor` scans the *entire*
+  permutation table via a branch-free `gt_mask` kernel, but `permute` read
+  `inverse[x[n]]` indexed by the **plaintext symbol**, and `invert` read
+  `permutation[j]`. Alignment defends only cache-line granularity, and the
+  sub-line MemJam channel below would reveal plaintext bits directly through
+  `permute`. Both now read every entry and select in constant time
+  (`oblivious_lookup` in `prp.rs`, also applied to the legacy Bit8 PRP with
+  identical output). The **key-generation writes** (above) remain the
+  secret-indexed accesses, and the high-assurance tier must cover both the
+  writes and these reads: an oblivious-swap builder alone would not make the
+  tier oblivious if the reads were left indexed.
 - Same class of issue exists in **vitaminc** (filed cipherstash/vitaminc#198)
   and in the legacy Bit8 Knuth path (wire-frozen — documented, not fixed).
 - **Two fallback forms, only one is wire-compatible** (this matters — see "MemJam
@@ -429,8 +464,10 @@ None of (a)–(d) changes ciphertexts, so Bit6 vectors are gated only by A1.
 
 **Gate 1 — before #82 merges / Bit6 vectors pinned:**
 - [x] **A1** H construction resolved (2026-06-15): keep fixed public-key AES,
-      upgraded to the BHKR σ-MMO `LSB(π(σ(x)⊕r)⊕σ(x)⊕r)`, σ(x)=2x. GKWY/half-gates
-      attacks shown not to port (secret independent inputs, no global offset);
+      upgraded to the BHKR σ-MMO `LSB(π(σ(x)⊕r)⊕σ(x)⊕r)`, σ(x)=2x. Argument
+      restated 2026-10-08 (published left tags are `H` inputs, so the GKWY
+      multi-instance shape applies; security rests on the `≈ p·C/2^128` bound)
+      and signed off 2026-10-09;
       tweak-as-key (2019/1168 Thm 2) explicitly declined; 2025/792 targets
       properties we don't use and is round-reduced.
 - [ ] **A4** ratify the applied construction-side fix `#[repr(C, align(64))]`
