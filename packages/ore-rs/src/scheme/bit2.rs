@@ -229,9 +229,17 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
         let left_size = Self::LeftBlockType::BLOCK_SIZE;
         let right_size = Self::RightBlockType::BLOCK_SIZE;
 
-        // TODO: This calculation slows things down a bit - maybe store the number of blocks in the
-        // first byte?
-        let num_blocks = (a.len() - NONCE_SIZE) / (left_size + right_size + 1);
+        // The legacy wire has no header: the block count is implied by the
+        // length, `n·(1 + left + right) + nonce`. Anything that does not fit
+        // that shape exactly (too short for a nonce, a partial block, or no
+        // blocks at all) is not a ciphertext of this scheme, and the slicing
+        // below would panic on it.
+        let body = a.len().checked_sub(NONCE_SIZE)?;
+        let per_block = left_size + right_size + 1;
+        if body == 0 || body % per_block != 0 {
+            return None;
+        }
+        let num_blocks = body / per_block;
 
         let mut is_equal = Choice::from(1);
         let mut l: u64 = 0; // Unequal block
@@ -361,6 +369,28 @@ mod tests {
         rng.fill(&mut k2);
 
         OreCipher::init(&k1, &k2).unwrap()
+    }
+
+    /// The legacy wire has no header, so the comparator infers the block
+    /// count from the length. Lengths that do not fit `n·(1 + 16 + 32) + 16`
+    /// must be refused, not indexed: two empty slices used to underflow the
+    /// nonce subtraction, and a partial block to slice past the end.
+    #[test]
+    fn compare_raw_slices_refuses_malformed_lengths() {
+        let ore = init_ore();
+        let good = 42u64.encrypt(&ore).unwrap().to_bytes();
+        assert!(Ore::compare_raw_slices(&good, &good).is_some());
+
+        assert_eq!(Ore::compare_raw_slices(&[], &[]), None);
+        let nonce_only = vec![0u8; NONCE_SIZE];
+        assert_eq!(Ore::compare_raw_slices(&nonce_only, &nonce_only), None);
+        let short = vec![0u8; NONCE_SIZE - 1];
+        assert_eq!(Ore::compare_raw_slices(&short, &short), None);
+        let partial = &good[..good.len() - 1];
+        assert_eq!(Ore::compare_raw_slices(partial, partial), None);
+        let mut longer = good.clone();
+        longer.push(0);
+        assert_eq!(Ore::compare_raw_slices(&longer, &longer), None);
     }
 
     quickcheck! {
