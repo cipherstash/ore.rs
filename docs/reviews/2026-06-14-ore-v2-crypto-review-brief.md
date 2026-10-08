@@ -18,11 +18,13 @@ Four crypto decisions gate the v2 work. Two block a PR that is already open
 | **A1** | 1-bit hash `H` instantiation | random-permutation (BHKR σ-MMO) | ✅ **RESOLVED** — `FixedPiZ2Hash` = `LSB(π(σ(x)⊕r)⊕σ(x)⊕r)`, σ(x)=2x | — (was the Bit6-vector gate; now cleared) |
 | **A2** | Chained-prefix accumulator = AES-CMAC cached-state | CMAC PRF (standard) + 3 auditable claims | designed, not yet coded | PR 6 (variable-length / strings) |
 | **A3** | PRP keystream from the accumulator (shape ii) | statistical (≤2⁻⁵⁵) + branch-family soundness | shape (i) shipped; (ii) deferred | PR 6 perf; couples to A2 |
-| **A4** | Secret-indexed swap in PRP key-gen — ratify alignment + MemJam posture? | constant-time / cache-line (sub-line = oblivious tier) | `#[repr(C, align(64))]` + oblivious compare read + `N≤64` guard **applied** (uncommitted) | nothing — fixes are byte-stable; A1 alone gates vectors |
+| **A4** | Secret-indexed swap in PRP key-gen — ratify alignment + MemJam posture? | ~~constant-time / cache-line (sub-line = oblivious tier)~~ **oblivious key generation, every target** (2026-10-09) | oblivious builder (NEON / SSSE3 / SWAR) is the default, byte-identical tables; oblivious table reads and compare read; `N = 64` guard | nothing — fixes are byte-stable; A1 alone gates vectors |
 
 **Recommended sequencing:** **A1 is resolved** (BHKR σ-MMO) — Bit6 vectors can now
 be generated and pinned against it. **A4 is a ratification** of changes already
-applied (none of which alter ciphertexts), plus a posture call on MemJam. Then
+applied (none of which alter ciphertexts); the MemJam posture call it carried
+was overtaken on 2026-10-09, when a measured timing dependence made the
+oblivious builder the default rather than a tier (§5, "Status"). Then
 **A2 + A3 as one pass** (they gate PR 6, and A3 only exists inside A2's
 accumulator).
 
@@ -269,6 +271,56 @@ PR 6 PRP perf target (~3.3 µs). No effect on #82 (which ships shape (i)).
 
 ## 5. A4 — secret-indexed swap in PRP key generation  (Open Q1; couples to Bit6 vectors)
 
+### Status (2026-10-09): superseded — oblivious key generation is the default
+The rest of this section records what was believed and decided before
+2026-10-09; read it as history. What changed:
+
+- **Measured.** A dudect run on Apple M4 (2026-10-09,
+  `docs/reviews/2026-10-09-ore-v2-dynamic-verification.md` §4.2) found the
+  builder's time depending on *which* permutation it builds, on a core with no
+  SMT sibling and no co-tenant: fixed stream A against fixed stream B reached
+  |t| = 65 at 100 k samples. Isolating the two halves of the builder put the
+  whole signal in the Fisher–Yates swap loop; the inverse fill alone, and both
+  halves redone at public addresses, showed none. That is consistent with
+  store-to-load forwarding and memory disambiguation on byte-granular accesses
+  at secret offsets inside one L1-resident line: whether a load overlaps a
+  store still in flight depends on the draws. The one-cache-line argument
+  below is about which *line* is touched and does not cover it, and "ARM: this
+  mechanism does not apply" in the MemJam analysis is true of MemJam but not
+  of this: it needs no co-tenant, only a clock.
+- **Changed.** Key generation now goes through oblivious builders that never
+  use a secret value as an address (`primitives/prp/oblivious.rs`): both
+  tables live in registers, `perm[j]` is fetched by a table lookup on a
+  broadcast `j` and written back by compare-and-select, and the inverse is kept
+  by exchanging the *values* `i` and `j` in it at each step, which needs
+  neither swapped entry and replaces the separate fill. Step `i` is public and
+  `j ≤ i`, so only the chunks covering `0..=i` are searched. The draws and the
+  swap sequence are the same, so the tables are **byte-identical** and no
+  vector moves. Dispatch: **NEON** on aarch64 (baseline, no runtime check),
+  **SSSE3** (`pshufb`) on x86_64 when the CPU reports it, a **u64 SWAR** form
+  everywhere else. The textbook builder survives only as a test-only
+  reference that the others are property-tested (and, for SWAR, Kani-proved)
+  equal to.
+- **Cost.** On aarch64 the oblivious builder is *faster* than the indexed one
+  it replaced, so there is no tier and nothing for a deployment to opt into.
+  Apple M4 on mains power, criterion medians, per 512-byte stream: indexed
+  248 ns, **NEON 199 ns (−20%)**, SWAR 710 ns (2.9×). End to end the NEON
+  builder takes 6–10% off every encrypt (Bit6 u64 8.59 → 7.89 µs, left-only
+  6.33 → 5.77 µs; full tables in
+  `docs/benchmarks/2026-06-13-bit6-prp-results.md`, addendum 2026-10-09).
+  The SWAR fallback costs 58–95% end to end on targets with neither NEON nor
+  SSSE3. SSSE3 timing on real x86 hardware has not been measured.
+- **After.** dudect, same machine and session, fixed A against fixed B with a
+  fresh pair per 100 k-sample run: the indexed builder |t| = 17 to 83 over
+  five runs, the NEON builder at most 1.9 (and −0.8 pooled over 92 M samples
+  in 150 s); the end-to-end left-only Bit6 test that showed |t| = 21.6 now
+  stays under 2.4. Figures in the verification doc.
+
+So the recommendation below (default = line-granularity; oblivious-swap FY as
+a paranoid tier at ~3×) is **withdrawn**: the oblivious builder is the only
+builder, on every target. Sort-by-random-key stays rejected (see its
+subsection). The checklist item is resolved accordingly.
+
 ### The question
 FY key generation performs a swap whose **address is secret-derived**:
 
@@ -397,6 +449,12 @@ copies per block, on a scan that already compares 17 bytes per block.
   `cmp` are now fixed.
 
 ### MemJam & the oblivious tier — risk, CPU scope, and wire compatibility
+> **Superseded (2026-10-09).** The analysis below stands as an account of
+> MemJam, but it is no longer the deciding argument: a timing dependence on
+> the swaps was measured on Apple M4 with no co-tenant, and the oblivious
+> builder is now the default everywhere (see "Status" at the top of §5).
+> Kept for the record of what was believed and why.
+
 This is the one open judgement call on the construction-side (encryptor) swap.
 The shipped `#[repr(C, align(64))]` fix makes the swap **line-uniform**, which
 closes the broad cache-line channel for everyone (AMD, ARM, and non-SMT Intel).
@@ -430,7 +488,8 @@ sidesteps it entirely. Marginal leakage is small regardless — the swap address
 reveal partial info about a permutation whose codebook the ciphertext already
 largely exposes (the same fact that sank swap-or-not).
 
-**Recommendation.**
+**Recommendation (withdrawn 2026-10-09 — the oblivious builder is now the
+default on every target, and faster on aarch64 than the indexed one).**
 1. **Default:** ship the `#[repr(C, align(64))]` fix; document that the
    constant-time guarantee is at **cache-line granularity**, and that sub-line
    (MemJam/CacheBleed) resistance on SMT-enabled Intel needs either SMT-off /
@@ -443,6 +502,61 @@ This matches field practice — aligned-constant-time is the standard bar,
 oblivious is the paranoid tier — and lets the deployment, not the library, pay
 the 3× only when it needs to.
 
+The "~3×" was the byte-at-a-time full-scan form. The register-resident form
+that shipped instead (value-side inverse update, public `0..=i` search bound)
+costs 199 ns against the indexed builder's 248 ns on the M4, so the trade the
+tier existed to offer no longer exists.
+
+### Alternative considered for the tier: sort-by-random-key — rejected (2026-10-08)
+vitaminc's `permutation` crate now builds its keys the djbsort / NTRU Prime
+way: tag each index with a random 64-bit word, sort the words through a Batcher
+odd–even merge network of branchless compare-exchanges, and read the
+permutation off the sorted order. Its instruction and memory trace is a function
+of N alone, so it was prototyped inside `LemireFyPrp::from_stream` and
+benchmarked as a candidate for the tier in place of oblivious-swap FY (Apple M4,
+rustc 1.94.1, criterion, N = 64, 543 gates; full tables in
+`docs/benchmarks/2026-06-13-bit6-prp-results.md`, addendum).
+
+| builder | `from_stream` | bit6-encrypt-u64 | bit6-encrypt-left-u64 |
+|---|---:|---:|---:|
+| `LemireFyPrp` (shipped) | 210 ns | 8.39 µs | 6.12 µs |
+| sort, 56-bit key `(w<<8)\|i` (vitaminc's packing) | 494 ns (+135%) | +41% | +61% |
+| sort, 64-bit key + index tie-break | 663 ns (+215%) | +73% | +102% |
+
+**Still rejected after the oblivious builder shipped (2026-10-09).** The
+sort removes a secret address by the same means the oblivious FY builder does,
+running every compare-exchange whatever the data, so it buys no stronger
+property; and the FY form is now cheaper still (199 ns against the sort's
+494–663 ns, both on the M4), keeps the inverse maintained alongside the swaps
+rather than needing a second pass, and leaves every ciphertext unchanged.
+
+Rejected, for three reasons that compound:
+1. **It costs what oblivious-swap FY costs and buys less.** 2.3–3.2× on the
+   builder is the same band as the ~3× spiked for oblivious-swap FY (the
+   register-resident form that shipped later is faster than either), but the
+   sort removes only the secret-indexed *swaps*: the inverse-table fill
+   (`inverse[perm[i]] = i`) is still a secret-indexed write, and making it
+   oblivious needs a second network or an O(N²) scatter — at which point it is
+   slower than oblivious-swap FY, which already covers both.
+2. **It changes the permutation,** so it changes every Bit6 and chained
+   ciphertext (8 of 14 Bit6 compat vectors fail). Oblivious-swap FY is
+   byte-identical and can be enabled per build with no re-pin — the property
+   "Relationship to vector pinning" below relies on.
+3. **Uniformity is no better.** With a 64-bit key the only deviation from
+   uniform is a key tie broken by index, C(64,2)·2⁻⁶⁴ ≈ 2⁻⁵³ per permutation,
+   marginally worse than Lemire FY's ≤ 2⁻⁵⁵. vitaminc's 56-bit packing is
+   ≈ 2⁻⁴⁵, which is why it restarts on a collision.
+
+One rule from it **is** adopted, for every PRP builder including the
+oblivious-swap tier: **no retry path.** vitaminc redraws from its RNG when two
+keys collide. Here a query's left half and a stored value's right half are
+produced in separate calls from `(key, prefix, n)` alone and must agree, so the
+stream→permutation map must be a deterministic function with a trace fixed by N.
+A tie, or any other "bad draw", is resolved by a fixed, documented rule
+(ascending index), never by consuming more stream, and the resulting deviation is
+stated as a statistical term as above. A reimplementation (Go, Node) has to
+reproduce that rule exactly, or its left halves will not compare against ours.
+
 ### Relationship to vector pinning (revised)
 The MemJam tier does **not** gate Bit6 vector pinning, *provided the oblivious
 fallback is the oblivious-swap FY form* (recommended): it yields the identical
@@ -453,6 +567,9 @@ swap-or-not would change ciphertexts and force a re-pin — another reason to
 prefer oblivious-swap FY.)
 
 ### Decision & what it unblocks
+*(As first proposed; (a) and (d) are overtaken by the oblivious builder, see
+"Status" at the top of this section. (b) and the guard stand, the guard now
+pinning `N = 64`, the width the oblivious builders are written for.)*
 Ratify: (a) `#[repr(C, align(64))]` as the default construction-side fix; (b) the
 oblivious compare-side read; (c) the `N≤64` compile guard; and (d) the MemJam
 posture (document scope + offer oblivious-swap FY as the high-assurance build).
@@ -470,14 +587,20 @@ None of (a)–(d) changes ciphertexts, so Bit6 vectors are gated only by A1.
       and signed off 2026-10-09;
       tweak-as-key (2019/1168 Thm 2) explicitly declined; 2025/792 targets
       properties we don't use and is round-reduced.
-- [ ] **A4** ratify the applied construction-side fix `#[repr(C, align(64))]`
-      (covers both secret-indexed writes; line-uniform at N ≤ 64).
-- [ ] **A4** ratify the `const _ = assert!(N <= 64)` compile guard (applied).
+- [x] **A4** ~~ratify the applied construction-side fix `#[repr(C, align(64))]`
+      (covers both secret-indexed writes; line-uniform at N ≤ 64).~~
+      Superseded 2026-10-09: key generation has no secret-indexed write left
+      (oblivious builder); the alignment stays as layout only.
+- [x] **A4** compile guard (applied), now `assert!(N == 64)`: the oblivious
+      builders are written for 64 entries.
 - [ ] **A4** ratify the oblivious compare-side read `width::ct_select_byte`
       (applied; all four `get_bit` sites; results unchanged).
-- [ ] **A4** MemJam posture: accept "default = line-granularity CT; sub-line
-      resistance via SMT-off / core-isolation or the oblivious-swap-FY build."
-      Decide whether to build the oblivious-swap-FY tier now or on demand.
+- [x] **A4** MemJam posture — **resolved 2026-10-09, not as proposed.** A
+      dudect run measured a timing dependence on the swaps with no co-tenant,
+      so the oblivious builder (NEON / SSSE3 / SWAR, byte-identical tables)
+      is the default on every target, not a tier; on aarch64 it is faster than
+      the indexed builder. Sort-by-random-key stays rejected (2026-10-08); its
+      no-retry rule is adopted — see A4.
 - [ ] Bit6 byte vectors regenerated and pinned **after A1** (all A4 fixes are
       byte-stable; production comparator adopts `ct_select_byte` separately).
 
