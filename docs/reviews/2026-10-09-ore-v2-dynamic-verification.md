@@ -285,18 +285,46 @@ pair has its own sign, so pooling dilutes it (the old builder's +8.6 here,
 against |t| up to 83 in a single pair). The per-pair runs are the test, and
 there the dependence is gone.
 
-`prp_build_const_vs_random` keeps a small residual (tau 0.0005), and it is
-not explained. An earlier version of this paragraph put it down to the
+`prp_build_const_vs_random` keeps a small residual (tau 0.0005 in the table
+above, 0.0012–0.0016 in the DIT runs below), and it is not explained. An earlier version of this paragraph put it down to the
 classes' footprints, one repeated input against a 256 KB pool. That is
 wrong: the `Left` pool is 512 copies of the fixed stream, indexed at random
 exactly as the `Right` pool of 512 random streams is, so the two classes
 have the same footprint and access pattern and differ only in content. The
 NEON builder has no secret-dependent branch or address (§1), so the
 candidates are content-dependent microarchitecture, the data
-memory-dependent prefetcher first. DIT disables that on M3 and later, and
-this bench did not get DIT before (above), so a continuous run with
-`CT_DUDECT_DIT=1` on the M4 is the next measurement. Fixed A against fixed
-B, where both classes repeat one input, shows nothing. The first pass of these measurements, in Low
+memory-dependent prefetcher first.
+
+**DIT test: not the prefetcher.** DIT disables the prefetcher on M3 and
+later, and this bench did not get DIT before (above), so it was run
+continuously at `daf0344`, 150 s per run, DIT off and on alternately. Apple
+M4 (`FEAT_DIT` = 1), macOS 26.5.2 (25F84), mains power with the battery
+charged, Low Power Mode off; one other Claude Code session was open but
+idle. With `CT_DUDECT_DIT=1` the harness reads the bit back and panics if it
+did not stick; both DIT runs completed.
+
+| run, in order | DIT | n | max t | max tau |
+|---|---|---|---|---|
+| off-1 | off | 240 M | +20.4 | +0.0013 |
+| on-1 | on | 189 M | +21.6 | +0.0016 |
+| off-2 | off | 251 M | +19.6 | +0.0012 |
+| on-2 | on | 191 M | +21.8 | +0.0016 |
+
+The residual is there both ways and DIT does not reduce it; tau is a
+little higher with DIT on, which also runs about 20% slower (fewer samples
+in the same 150 s). So on this evidence the data memory-dependent
+prefetcher does not explain it. Four runs are evidence, not proof, and the
+residual stays open. tau holds steady through each run from 50 M samples
+on (0.0013–0.0014 off, 0.0015–0.0017 on), so t grows with √n: a constant
+offset, not drift. The signal is larger than the first measurement (+7.7 at
+239 M, tau 0.0005), but the builder and harness at the commit of that
+measurement (`6760707`), run in the same session with DIT off, gave +31.4
+at 215 M (tau 0.0021). The larger figures therefore come from this
+session's conditions, not from the code changes since `6760707`.
+
+Fixed A against fixed B, where both classes repeat one input, shows nothing
+either way: five batch runs each, DIT off −0.9, +2.3, −2.0, +1.5, +2.2, DIT
+on −2.4, −1.6, −1.7, +0.4, +1.6. The first pass of these measurements, in Low
 Power Mode on battery, gave the same per-pair picture (its pooled old-builder
 figure was larger, −45 at 135 M).
 
@@ -321,4 +349,7 @@ seen through a fixed versus varying permutation sequence.
   now builds on aarch64 Linux (the DIT write uses the generic system
   register encoding), so Graviton needs no changes.
 - The `prp_build_const_vs_random` residual on the NEON builder (§4.2) is
-  open.
+  open. On the M4 it is the same with DIT on and off (t ≈ +20, tau
+  0.0012–0.0016, four 150 s runs), so on that evidence it is not the data
+  memory-dependent prefetcher. A run on another core would show whether it
+  is specific to Apple's.
