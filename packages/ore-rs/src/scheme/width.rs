@@ -11,9 +11,10 @@
 //! as associated types instead.
 
 use crate::ciphertext::CipherTextBlock;
-use crate::primitives::{AesBlock, Prp};
+use crate::primitives::{AesBlock, Hash, Prp};
 use crate::scheme::bit2::block_types::RightBlock32;
 use crate::scheme::bit2_w6::block_types::RightBlock8;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 mod sealed {
     pub trait Sealed {}
@@ -127,6 +128,52 @@ pub(crate) fn ct_bit(byte: u8, pos: u8) -> u8 {
     out.conditional_assign(&((byte >> 6) & 1), pos.ct_eq(&6));
     out.conditional_assign(&((byte >> 7) & 1), pos.ct_eq(&7));
     out
+}
+
+/// The first differing block of a comparator's prefix scan: `a`'s permuted
+/// symbol `xt` and PRF tag `f`, and `b`'s `R`-byte right bitvector.
+///
+/// The scan calls [`Self::latch`] for every block, under the choice "this is
+/// the first difference", so nothing after the scan is loaded at an address
+/// derived from that position (see [`ct_assign_bytes`]). The copies are
+/// zeroized on drop, on every return path, so they do not outlive the
+/// comparison on the stack.
+#[derive(Zeroize, ZeroizeOnDrop)]
+pub(crate) struct FirstDiff<const R: usize> {
+    xt: u8,
+    f: [u8; 16],
+    right: [u8; R],
+}
+
+impl<const R: usize> FirstDiff<R> {
+    pub(crate) fn new() -> Self {
+        Self {
+            xt: 0,
+            f: [0; 16],
+            right: [0; R],
+        }
+    }
+
+    /// Copy one block's values in when `first` is set; every byte of the
+    /// latch and the inputs is touched either way.
+    #[inline]
+    pub(crate) fn latch(&mut self, xt: u8, f: &[u8], right: &[u8], first: subtle_ng::Choice) {
+        use subtle_ng::ConditionallySelectable;
+        self.xt.conditional_assign(&xt, first);
+        ct_assign_bytes(&mut self.f, f, first);
+        ct_assign_bytes(&mut self.right, right, first);
+    }
+
+    /// The resolution step: bit `xt` of the right bitvector XOR the random
+    /// oracle on `f`. `1` means `a > b`. The bit is read with
+    /// [`ct_select_byte`] and [`ct_bit`], so its address does not depend on
+    /// `xt` either.
+    #[inline]
+    pub(crate) fn resolve<H: Hash>(&self, hasher: &H) -> u8 {
+        debug_assert!(usize::from(self.xt) < R * 8);
+        let byte = ct_select_byte(&self.right, usize::from(self.xt / 8));
+        ct_bit(byte, self.xt % 8) ^ hasher.hash(&self.f)
+    }
 }
 
 /// Per-block bitvector operations on a Right ciphertext block, one bit per

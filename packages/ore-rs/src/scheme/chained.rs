@@ -42,7 +42,7 @@ use crate::primitives::hash::FixedPiZ2Hash;
 use crate::primitives::prp::LemireFyPrp;
 use crate::primitives::{AesBlock, Hash, HashKey, Prp};
 use crate::scheme::decompose::{decompose_6bit, num_blocks_6bit};
-use crate::scheme::width::{ct_assign_bytes, ct_bit, ct_select_byte};
+use crate::scheme::width::FirstDiff;
 use crate::OreError;
 
 const VERSION: u8 = 0x02;
@@ -394,16 +394,12 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     fn compare_views(a: &[u8], ca: usize, b: &[u8], cb: usize) -> Ordering {
         let min_count = ca.min(cb);
         let mut is_equal = Choice::from(1u8);
-        let mut sel_xt = 0u8;
-        let mut sel_f = [0u8; F_LEN];
-        let mut sel_right = [0u8; RIGHT_LEN];
+        let mut diff = FirstDiff::<RIGHT_LEN>::new();
         for n in 0..min_count {
             let differs = !xt_at(a, n).ct_eq(&xt_at(b, n)) | !f_at(a, ca, n).ct_eq(f_at(b, cb, n));
             // Set for exactly one `n`: the first differing block.
             let first = is_equal & differs;
-            sel_xt.conditional_assign(&xt_at(a, n), first);
-            ct_assign_bytes(&mut sel_f, f_at(a, ca, n), first);
-            ct_assign_bytes(&mut sel_right, right_at(b, cb, n), first);
+            diff.latch(xt_at(a, n), f_at(a, ca, n), right_at(b, cb, n), first);
             is_equal.conditional_assign(&Choice::from(0u8), first);
         }
 
@@ -413,10 +409,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         }
 
         let hasher = FixedPiZ2Hash::new(HashKey::from_slice(nonce_at(b, cb)));
-        let h = hasher.hash(&sel_f);
-        let byte = ct_select_byte(&sel_right, (sel_xt / 8) as usize);
-        let test = ct_bit(byte, sel_xt % 8) ^ h;
-        if test == 1 {
+        if diff.resolve(&hasher) == 1 {
             Ordering::Greater
         } else {
             Ordering::Less

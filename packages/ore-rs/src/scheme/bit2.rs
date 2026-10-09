@@ -9,7 +9,7 @@ use crate::{
     primitives::{
         hash::Aes128Z2Hash, prf::Aes128Prf, AesBlock, Hash, HashKey, Prf, Prp, NONCE_SIZE,
     },
-    scheme::width::{ct_assign_bytes, AesBlockBuf, Bit8, BlockWidth, RightBitVec},
+    scheme::width::{AesBlockBuf, Bit8, BlockWidth, FirstDiff, RightBitVec},
     OreCipher, OreError, PlainText,
 };
 
@@ -251,9 +251,7 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
         // touch, so a direct `right[l]` afterwards hits or misses the cache
         // according to `l`; measured as a timing signal, see `docs/reviews/`.
         // The wire format is unchanged.
-        let mut sel_xt = 0u8;
-        let mut sel_f = [0u8; LeftBlock16::BLOCK_SIZE];
-        let mut sel_right = [0u8; RightBlock32::BLOCK_SIZE];
+        let mut diff = FirstDiff::<{ RightBlock32::BLOCK_SIZE }>::new();
 
         // Slices for the PRF ("f") blocks and the right half.
         let a_f = &a[num_blocks..];
@@ -268,9 +266,12 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
             // Set for exactly one `n`: the first differing block.
             let first = is_equal & condition;
 
-            sel_xt.conditional_assign(&a[n], first);
-            ct_assign_bytes(&mut sel_f, left_block(a_f, n), first);
-            ct_assign_bytes(&mut sel_right, right_block(b_right_blocks, n), first);
+            diff.latch(
+                a[n],
+                left_block(a_f, n),
+                right_block(b_right_blocks, n),
+                first,
+            );
             is_equal.conditional_assign(&Choice::from(0), first);
         }
 
@@ -280,11 +281,8 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
 
         let hash_key = HashKey::from_slice(&b_right[0..NONCE_SIZE]);
         let hash: Aes128Z2Hash = Hash::new(hash_key);
-        let h = hash.hash(&sel_f);
 
-        let test = get_bit(&sel_right, sel_xt as usize) ^ h;
-
-        if test == 1 {
+        if diff.resolve(&hash) == 1 {
             return Some(Ordering::Greater);
         }
 
@@ -305,16 +303,6 @@ fn right_block(input: &[u8], n: usize) -> &[u8] {
     &input[f_pos..(f_pos + RightBlock32::BLOCK_SIZE)]
 }
 
-#[inline]
-fn get_bit(block: &[u8], bit: usize) -> u8 {
-    debug_assert!(block.len() == RightBlock32::BLOCK_SIZE);
-    debug_assert!(bit < 256);
-    // `bit` is the secret permuted symbol; read the byte obliviously so the
-    // access address does not depend on it. See `width::ct_select_byte`.
-    let byte = crate::scheme::width::ct_select_byte(block, bit / 8);
-    crate::scheme::width::ct_bit(byte, (bit % 8) as u8)
-}
-
 impl<const N: usize> PartialEq for CipherText<OreAes128ChaCha20, N> {
     fn eq(&self, b: &Self) -> bool {
         matches!(self.cmp(b), Ordering::Equal)
@@ -327,9 +315,7 @@ impl<const N: usize> Ord for CipherText<OreAes128ChaCha20, N> {
         // Latch the first differing block during the scan, as in
         // `compare_raw_slices`: no load after the loop is indexed by its
         // position.
-        let mut sel_xt = 0u8;
-        let mut sel_f = LeftBlock16::default();
-        let mut sel_right = RightBlock32::default();
+        let mut diff = FirstDiff::<{ RightBlock32::BLOCK_SIZE }>::new();
 
         for n in 0..N {
             let condition: Choice =
@@ -337,9 +323,12 @@ impl<const N: usize> Ord for CipherText<OreAes128ChaCha20, N> {
             // Set for exactly one `n`: the first differing block.
             let first = is_equal & condition;
 
-            sel_xt.conditional_assign(&self.left.xt[n], first);
-            ct_assign_bytes(&mut sel_f, &self.left.f[n], first);
-            ct_assign_bytes(sel_right.bytes_mut(), b.right.data[n].bytes(), first);
+            diff.latch(
+                self.left.xt[n],
+                &self.left.f[n],
+                b.right.data[n].bytes(),
+                first,
+            );
             is_equal.conditional_assign(&Choice::from(0), first);
         }
 
@@ -348,10 +337,7 @@ impl<const N: usize> Ord for CipherText<OreAes128ChaCha20, N> {
         }
 
         let hash: Aes128Z2Hash = Hash::new(AesBlock::from_slice(&b.right.nonce));
-        let h = hash.hash(&sel_f);
-
-        let test = sel_right.get_bit(sel_xt as usize) ^ h;
-        if test == 1 {
+        if diff.resolve(&hash) == 1 {
             return Ordering::Greater;
         }
 
