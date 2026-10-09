@@ -193,3 +193,52 @@ impl BlockWidth for Bit6 {
     type Prp = crate::primitives::prp::LemireFyPrp<64>;
     type RoKeyBuf = [AesBlock; 64];
 }
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// `ct_select_byte(block, idx) == block[idx]` for every block of length
+    /// 1..=256 (the stated domain) and every in-range `idx`.
+    #[kani::proof]
+    #[kani::unwind(257)]
+    fn ct_select_byte_equals_index_up_to_256() {
+        let buf: [u8; 256] = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len >= 1 && len <= 256);
+        let idx: usize = kani::any();
+        kani::assume(idx < len);
+        let block = &buf[..len];
+        assert_eq!(ct_select_byte(block, idx), block[idx]);
+    }
+
+    /// `ct_select_byte(block, idx) == block[idx]` for the two right-block
+    /// sizes the comparators use (8 and 32 bytes), all contents, all
+    /// in-range `idx`.
+    #[kani::proof]
+    #[kani::unwind(33)]
+    fn ct_select_byte_equals_index_right_blocks() {
+        let b8: [u8; 8] = kani::any();
+        let i8: usize = kani::any();
+        kani::assume(i8 < 8);
+        assert_eq!(ct_select_byte(&b8, i8), b8[i8]);
+
+        let b32: [u8; 32] = kani::any();
+        let i32: usize = kani::any();
+        kani::assume(i32 < 32);
+        assert_eq!(ct_select_byte(&b32, i32), b32[i32]);
+    }
+
+    /// `ct_bit(byte, pos) == (byte >> pos) & 1` for every byte and every
+    /// `pos` in `0..8`, and is 0 for every `pos >= 8` (exhaustive).
+    #[kani::proof]
+    fn ct_bit_equals_shift() {
+        let byte: u8 = kani::any();
+        let pos: u8 = kani::any();
+        if pos < 8 {
+            assert_eq!(ct_bit(byte, pos), (byte >> pos) & 1);
+        } else {
+            assert_eq!(ct_bit(byte, pos), 0);
+        }
+    }
+}

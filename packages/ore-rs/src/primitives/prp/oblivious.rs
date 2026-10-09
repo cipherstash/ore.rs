@@ -79,15 +79,18 @@ fn lemire_draw(stream: &[u8], i: usize) -> u8 {
 pub(crate) fn build(stream: &[u8], perm: &mut [u8; DOMAIN], inverse: &mut [u8; DOMAIN]) {
     assert!(stream.len() >= STREAM_BYTES);
 
-    #[cfg(target_arch = "aarch64")]
+    // Kani cannot model the NEON and SSSE3 intrinsics, so under `cargo kani`
+    // every target dispatches to the SWAR builder, which the harnesses prove
+    // equal to the reference builder.
+    #[cfg(all(target_arch = "aarch64", not(kani)))]
     // SAFETY: NEON is baseline on aarch64; `stream` length asserted above.
     unsafe {
         neon::build(stream, perm, inverse)
     }
 
-    #[cfg(not(target_arch = "aarch64"))]
+    #[cfg(any(not(target_arch = "aarch64"), kani))]
     {
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(all(target_arch = "x86_64", not(kani)))]
         if is_x86_feature_detected!("ssse3") {
             // SAFETY: SSSE3 presence just checked; `stream` length asserted.
             unsafe { ssse3::build(stream, perm, inverse) };
@@ -102,9 +105,9 @@ pub(crate) fn build(stream: &[u8], perm: &mut [u8; DOMAIN], inverse: &mut [u8; D
 /// draw-derived index, then `inverse[perm[k]] = k`. Both use a secret value
 /// as an address, which is the timing channel the oblivious builders close,
 /// so it is never compiled into a shipped build: it exists only as the
-/// specification the oblivious builders are tested against, and for the
-/// `ct-bench` before/after timing hooks.
-#[cfg(any(test, feature = "ct-bench"))]
+/// specification the oblivious builders are tested and proved (Kani)
+/// against, and for the `ct-bench` before/after timing hooks.
+#[cfg(any(test, kani, feature = "ct-bench"))]
 pub(crate) mod reference {
     use super::*;
 
@@ -173,7 +176,7 @@ pub(crate) mod scalar {
 /// a public bound). The inverse is updated on the value side, as in the
 /// NEON builder. Pure integer arithmetic with no `subtle_ng` optimisation barrier
 /// per byte, so the compiler can keep the tables in registers.
-#[cfg(any(not(target_arch = "aarch64"), test, feature = "ct-bench"))]
+#[cfg(any(not(target_arch = "aarch64"), kani, test, feature = "ct-bench"))]
 pub(crate) mod swar {
     use super::*;
 
@@ -254,7 +257,7 @@ pub(crate) mod swar {
     }
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(target_arch = "aarch64", not(kani)))]
 mod neon {
     use super::{lemire_draw, DOMAIN};
     use core::arch::aarch64::*;
@@ -351,7 +354,7 @@ mod neon {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", not(kani)))]
 mod ssse3 {
     use super::{lemire_draw, DOMAIN};
     use core::arch::x86_64::*;

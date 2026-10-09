@@ -110,3 +110,103 @@ mod tests {
         assert_eq!(out, [0b111111, 0b000000, 0b111100]);
     }
 }
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// Inputs up to this many bytes are covered by the bounded harnesses.
+    const MAX_LEN: usize = 16;
+    /// `num_blocks_6bit(MAX_LEN)`.
+    const MAX_BLOCKS: usize = 22;
+
+    /// Bit `k` (MSB-first) of `bytes`, or 0 past the end.
+    fn input_bit(bytes: &[u8], k: usize) -> u8 {
+        if k / 8 < bytes.len() {
+            (bytes[k / 8] >> (7 - k % 8)) & 1
+        } else {
+            0
+        }
+    }
+
+    /// `num_blocks_6bit(n)` is the least `b` with `6b >= 8n`, for every `n`
+    /// with `8n` representable in `usize` (full domain of non-overflowing `n`).
+    #[kani::proof]
+    fn num_blocks_6bit_is_ceil_8n_over_6() {
+        let n: usize = kani::any();
+        kani::assume(n <= usize::MAX / 8);
+        let b = num_blocks_6bit(n);
+        assert!(6 * (b as u128) >= 8 * (n as u128));
+        if b > 0 {
+            assert!(6 * ((b - 1) as u128) < 8 * (n as u128));
+        }
+    }
+
+    /// For every input of length `0..=16`: every output symbol is `< 64`, and
+    /// bit `5 - t` of block `i` is plaintext bit `6i + t` (MSB-first, zero
+    /// past the end) — the exact packing spec, which implies round-trip.
+    #[kani::proof]
+    #[kani::unwind(23)]
+    fn decompose_6bit_matches_bit_spec() {
+        let buf: [u8; MAX_LEN] = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len <= MAX_LEN);
+        let bytes = &buf[..len];
+        let nb = num_blocks_6bit(len);
+        let mut out_buf = [0u8; MAX_BLOCKS];
+        let out = &mut out_buf[..nb];
+        decompose_6bit(bytes, out);
+
+        let i: usize = kani::any();
+        kani::assume(i < nb);
+        assert!(out[i] < 64);
+        let t: usize = kani::any();
+        kani::assume(t < 6);
+        assert_eq!((out[i] >> (5 - t)) & 1, input_bit(bytes, 6 * i + t));
+    }
+
+    /// For any two inputs of lengths `0..=16`, equal decompositions (same
+    /// block count and same symbols) imply equal inputs: decomposition is
+    /// injective on that domain.
+    #[kani::proof]
+    #[kani::unwind(23)]
+    fn decompose_6bit_injective() {
+        let a_buf: [u8; MAX_LEN] = kani::any();
+        let b_buf: [u8; MAX_LEN] = kani::any();
+        let a_len: usize = kani::any();
+        let b_len: usize = kani::any();
+        kani::assume(a_len <= MAX_LEN && b_len <= MAX_LEN);
+        let a = &a_buf[..a_len];
+        let b = &b_buf[..b_len];
+
+        let mut a_out = [0u8; MAX_BLOCKS];
+        let mut b_out = [0u8; MAX_BLOCKS];
+        let a_nb = num_blocks_6bit(a_len);
+        let b_nb = num_blocks_6bit(b_len);
+        decompose_6bit(a, &mut a_out[..a_nb]);
+        decompose_6bit(b, &mut b_out[..b_nb]);
+
+        if a_out[..a_nb] == b_out[..b_nb] {
+            assert!(a == b);
+        }
+    }
+
+    /// For any two inputs of the same length `0..=16`, lexicographic order
+    /// of the block values equals lexicographic order of the bytes.
+    #[kani::proof]
+    #[kani::unwind(23)]
+    fn decompose_6bit_preserves_order() {
+        let a_buf: [u8; MAX_LEN] = kani::any();
+        let b_buf: [u8; MAX_LEN] = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len <= MAX_LEN);
+        let a = &a_buf[..len];
+        let b = &b_buf[..len];
+        let nb = num_blocks_6bit(len);
+        let mut a_out = [0u8; MAX_BLOCKS];
+        let mut b_out = [0u8; MAX_BLOCKS];
+        decompose_6bit(a, &mut a_out[..nb]);
+        decompose_6bit(b, &mut b_out[..nb]);
+        assert!(a.cmp(b) == a_out[..nb].cmp(&b_out[..nb]));
+    }
+}

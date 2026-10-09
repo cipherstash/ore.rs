@@ -275,3 +275,39 @@ mod tests {
         assert_eq!(b, want);
     }
 }
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// Reference GF(2^128) doubling on a big-endian byte string (NIST SP
+    /// 800-38B `dbl`): shift left one bit across bytes, then XOR `0x87`
+    /// into the last byte iff the dropped MSB was set.
+    fn dbl_reference(b: [u8; 16]) -> [u8; 16] {
+        let mut out = [0u8; 16];
+        for k in 0..16 {
+            let next_msb = if k + 1 < 16 { b[k + 1] >> 7 } else { 0 };
+            out[k] = (b[k] << 1) | next_msb;
+        }
+        if b[0] & 0x80 != 0 {
+            out[15] ^= 0x87;
+        }
+        out
+    }
+
+    /// `gf128_double_u128` and the in-place `gf128_double` both equal the
+    /// bytewise reference `dbl` for every 128-bit input (full domain).
+    #[kani::proof]
+    #[kani::unwind(17)]
+    fn gf128_double_matches_reference() {
+        let b: [u8; 16] = kani::any();
+        let expected = dbl_reference(b);
+        assert_eq!(
+            gf128_double_u128(u128::from_be_bytes(b)).to_be_bytes(),
+            expected
+        );
+        let mut in_place = b;
+        gf128_double(&mut in_place);
+        assert_eq!(in_place, expected);
+    }
+}
