@@ -59,7 +59,7 @@ pub(crate) const STREAM_BYTES: usize = (DOMAIN - 1) * 8;
 /// `63 - i`, as a little-endian u64, mapped to `0..=i` by multiply-high.
 /// Identical to the indexed builder's reduction.
 #[inline(always)]
-fn lemire_draw(stream: &[u8], i: usize) -> u8 {
+pub(crate) fn lemire_draw(stream: &[u8], i: usize) -> u8 {
     let d = DOMAIN - 1 - i;
     let mut draw = [0u8; 8];
     draw.copy_from_slice(&stream[d * 8..d * 8 + 8]);

@@ -199,17 +199,17 @@ pub mod ct_bench {
     #[repr(C, align(64))]
     pub struct Line(pub [u8; 64]);
 
-    /// Lemire draw for step `i`, reduced to `0..=i`, as the builders do.
+    /// Lemire draw for step `i`, reduced to `0..=i`: the builders' own
+    /// [`oblivious::lemire_draw`], so the benches cannot drift from it.
     #[inline(always)]
     fn draw(stream: &[u8; 512], i: usize) -> usize {
-        let d = 63 - i;
-        let mut b = [0u8; 8];
-        b.copy_from_slice(&stream[d * 8..d * 8 + 8]);
-        ((u64::from_le_bytes(b) as u128 * (i as u128 + 1)) >> 64) as usize
+        usize::from(oblivious::lemire_draw(stream, i))
     }
 
     /// The reference builder's Fisher–Yates swap loop alone (no inverse
-    /// fill): swaps at the secret draw-derived index.
+    /// fill): swaps at the secret draw-derived index. The loop is
+    /// [`oblivious::reference::build`]'s, restated so it can be timed
+    /// without the fill; a test pins it to that builder's permutation.
     #[inline(never)]
     pub fn fy_swaps_only(stream: &[u8; 512], out: &mut Line) {
         for (k, p) in out.0.iter_mut().enumerate() {
@@ -236,10 +236,12 @@ pub mod ct_bench {
     }
 
     /// The permutation the builders build for `stream`, computed outside
-    /// any measured region, to feed [`inverse_fill_only`].
+    /// any measured region by the reference builder itself, to feed
+    /// [`inverse_fill_only`].
     pub fn permutation_for(stream: &[u8; 512]) -> Line {
         let mut l = Line([0u8; 64]);
-        fy_swaps_only(stream, &mut l);
+        let mut inverse = [0u8; 64];
+        oblivious::reference::build(stream, &mut l.0, &mut inverse);
         l
     }
 
@@ -260,6 +262,33 @@ pub mod ct_bench {
         for (index, val) in perm.0.iter().enumerate() {
             core::hint::black_box(*val);
             out.0[index] = index as u8;
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// The isolated swap loop and inverse fill build exactly what the
+        /// reference builder builds, so the isolation benches time the real
+        /// construction.
+        #[test]
+        fn isolation_halves_match_the_reference_builder() {
+            for seed in 0u8..16 {
+                let stream: [u8; 512] =
+                    core::array::from_fn(|k| (k as u8).wrapping_mul(167) ^ seed.wrapping_mul(29));
+                let mut want_perm = [0u8; 64];
+                let mut want_inverse = [0u8; 64];
+                oblivious::reference::build(&stream, &mut want_perm, &mut want_inverse);
+
+                let mut swaps = Line([0u8; 64]);
+                fy_swaps_only(&stream, &mut swaps);
+                assert_eq!(swaps.0, want_perm);
+
+                let mut inverse = Line([0u8; 64]);
+                inverse_fill_only(&permutation_for(&stream), &mut inverse);
+                assert_eq!(inverse.0, want_inverse);
+            }
         }
     }
 }
