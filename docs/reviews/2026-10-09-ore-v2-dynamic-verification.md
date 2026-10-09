@@ -98,13 +98,18 @@ raw bytes, and `chained_compare` fuzzes that.
 
 ## 3. Kani — proofs for the pure building blocks
 
-Eighteen harnesses, all verified (full run 1 324 s before the oblivious PRP
-builder; the exhaustive-length `ct_select_byte` harness, about 9 minutes of
-that, runs only with the `kani-full` feature; the PRP harnesses were
-re-timed one at a time after it, and the default set now takes about 25
-minutes). With `Symbol`, the out-of-range `oblivious_lookup` cases no longer
-exist to prove, so the any-length lookup harness was dropped and a
-`Symbol` harness added. Kani cannot execute AES symbolically, so nothing keyed
+Seventeen harnesses, all verified. Fifteen run in CI; the two heaviest run
+only with the `kani-full` feature, by hand: the exhaustive-length
+`ct_select_byte` harness (about 9 minutes) and the SWAR-builder equivalence
+harness (872 s on the M4). The latter is out of CI because it never fit:
+on GitHub's `ubuntu-latest` runners it was cancelled 26 to 32 minutes in on
+five of six runs, and the sixth took 57 minutes. The default set takes
+8 m 50 s on an M1 Max (about 15 minutes expected in CI, which runs about
+1.7 times slower); the job has a 30-minute timeout. With `Symbol`, the
+out-of-range `oblivious_lookup` cases no longer exist to prove, so the
+any-length lookup harness was dropped and a `Symbol` harness added; the
+`from_stream` length check, a 335 s harness (552 s in CI) for 504 cases, is
+now an exhaustive unit test. Kani cannot execute AES symbolically, so nothing keyed
 is in scope; these are the pieces where a wrong implementation would hide
 behind matching known-answer vectors.
 
@@ -116,8 +121,7 @@ behind matching known-answer vectors.
 | `Symbol::<64>::from_low_bits(b)` is `< 64`, and is `b` for `b < 64` | every `u8` | < 1 s |
 | `oblivious::lemire_draw` itself reads step `i`'s draw from bytes `(63−i)·8 ..+ 8` (little-endian) and returns `(x·(i+1)) >> 64 ≤ i` | every 504-byte stream, every step `1..64` | 113 s (M1 Max) |
 | the reference (textbook Fisher–Yates) builder yields a permutation of 0..64 with a correct inverse | first 6 of 63 draws symbolic, the rest fixed (all 63 symbolic did not finish in 30 min) | 200 s |
-| the SWAR oblivious builder's `permutation` and `inverse` equal the reference builder's (under Kani `from_stream` dispatches to SWAR: Kani cannot model the NEON or SSSE3 intrinsics) | same stream shape | 872 s |
-| `from_stream` rejects streams shorter than 504 bytes | every short length | 335 s (101 s before the oblivious builder) |
+| the SWAR oblivious builder's `permutation` and `inverse` equal the reference builder's (under Kani `from_stream` dispatches to SWAR: Kani cannot model the NEON or SSSE3 intrinsics) | same stream shape (`kani-full`) | 872 s |
 | `num_blocks_6bit(n)` is the least `b` with `6b ≥ 8n` | every `n ≤ usize::MAX / 8` | < 1 s |
 | `decompose_6bit`: symbols < 64, bit `5−t` of block `i` is plaintext bit `6i+t`; injective; order-preserving for any two lengths (a proper prefix sorts first, the chained scheme's string order) | inputs ≤ 16 bytes | 5 s; 8 s; 31 s (M1 Max; equal lengths only, 9 s, before) |
 | `final_block` and `prefix_block` injective, and disjoint from each other | full domains | < 1 s each |
