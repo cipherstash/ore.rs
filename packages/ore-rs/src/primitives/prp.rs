@@ -1,7 +1,7 @@
 pub(crate) mod oblivious;
 pub mod prng;
 use crate::primitives::prp::prng::Aes128Prng;
-use crate::primitives::{AesBlock, Prp, PrpError, PrpResult};
+use crate::primitives::{AesBlock, Prp, PrpError, PrpResult, Symbol};
 use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
 use aes::Aes128;
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -12,16 +12,14 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 /// table only defends cache-line granularity, and sub-line timing would
 /// otherwise reveal which part of the table was read.
 ///
-/// Out-of-range `index` is an error, decided by a comparison against the
-/// public table length.
+/// `index` is in range by type, so there is no range check to branch on.
+/// The tables are permutations of `0..D`, so every entry is itself a symbol;
+/// `from_low_bits` is the identity on it.
 #[inline]
-fn oblivious_lookup(table: &[u8], index: u8) -> PrpResult<u8> {
-    if usize::from(index) >= table.len() {
-        return Err(PrpError);
-    }
-    Ok(crate::scheme::width::ct_select_byte(
+fn oblivious_lookup<const D: usize>(table: &[u8; D], index: Symbol<D>) -> Symbol<D> {
+    Symbol::from_low_bits(crate::scheme::width::ct_select_byte(
         table,
-        usize::from(index),
+        usize::from(index.get()),
     ))
 }
 
@@ -49,7 +47,7 @@ impl<T: Zeroize, const N: usize> ZeroizeOnDrop for KnuthShufflePRP<T, N> {}
 /// schemes only.
 macro_rules! impl_knuth_shuffle_prp {
     ($domain:literal, $gt_mask:path) => {
-        impl Prp<u8> for KnuthShufflePRP<u8, $domain> {
+        impl Prp<Symbol<$domain>> for KnuthShufflePRP<u8, $domain> {
             /*
              * Initialize a ($domain element) PRP using a KnuthShuffle
              * seeded from a 16-byte key
@@ -90,26 +88,26 @@ macro_rules! impl_knuth_shuffle_prp {
              *
              * Forward permutations are only used once in the ORE scheme so this is OK
              */
-            fn permute(&self, input: u8) -> PrpResult<u8> {
+            fn permute(&self, input: Symbol<$domain>) -> Symbol<$domain> {
                 oblivious_lookup(&self.inverse, input)
             }
 
             /*
              * Performs the inverse permutation in constant time.
              */
-            fn invert(&self, input: u8) -> PrpResult<u8> {
+            fn invert(&self, input: Symbol<$domain>) -> Symbol<$domain> {
                 // Forward and inverse permutations are reversed for historical reasons
                 oblivious_lookup(&self.permutation, input)
             }
 
-            fn indicator_mask_xor(&self, data: u8, out: &mut [u8]) {
+            fn indicator_mask_xor(&self, data: Symbol<$domain>, out: &mut [u8]) {
                 debug_assert_eq!(out.len() * 8, $domain);
 
                 // `invert(j)` is `self.permutation[j]` (see `invert`
                 // above), so the mask is one pass over the table: a
                 // bytewise `> data` compare packed to bits — vectorised
                 // where the target supports it.
-                $gt_mask(&self.permutation, data, out);
+                $gt_mask(&self.permutation, data.get(), out);
             }
         }
     };
@@ -236,7 +234,7 @@ macro_rules! impl_lemire_fy_prp {
             }
         }
 
-        impl Prp<u8> for LemireFyPrp<$domain> {
+        impl Prp<Symbol<$domain>> for LemireFyPrp<$domain> {
             fn new(key: &[u8]) -> PrpResult<Self> {
                 if key.len() < 16 {
                     return Err(PrpError);
@@ -269,17 +267,17 @@ macro_rules! impl_lemire_fy_prp {
                 Ok(perm)
             }
 
-            fn permute(&self, input: u8) -> PrpResult<u8> {
+            fn permute(&self, input: Symbol<$domain>) -> Symbol<$domain> {
                 oblivious_lookup(&self.inverse, input)
             }
 
-            fn invert(&self, input: u8) -> PrpResult<u8> {
+            fn invert(&self, input: Symbol<$domain>) -> Symbol<$domain> {
                 oblivious_lookup(&self.permutation, input)
             }
 
-            fn indicator_mask_xor(&self, data: u8, out: &mut [u8]) {
+            fn indicator_mask_xor(&self, data: Symbol<$domain>, out: &mut [u8]) {
                 debug_assert_eq!(out.len() * 8, $domain);
-                $gt_mask(&self.permutation, data, out);
+                $gt_mask(&self.permutation, data.get(), out);
             }
         }
     };
@@ -308,11 +306,11 @@ mod tests {
             let prp: KnuthShufflePRP<u8, 256> = Prp::new(&key[0..16]).unwrap();
 
             let mut mask = [0u8; 32];
-            prp.indicator_mask_xor(x, &mut mask);
+            prp.indicator_mask_xor(Symbol::from(x), &mut mask);
 
             let mut reference = [0u8; 32];
             for j in 0..=255u8 {
-                let indicator = u8::from(prp.invert(j).unwrap() > x);
+                let indicator = u8::from(prp.invert(Symbol::from(j)).get() > x);
                 reference[(j / 8) as usize] |= indicator << (j % 8);
             }
 
@@ -324,10 +322,11 @@ mod tests {
     fn test_invert() -> Result<(), PrpError> {
         let prp = init_prp()?;
 
-        for i in 0..=255 {
+        for i in 0..=255u8 {
+            let i = Symbol::from(i);
             assert_eq!(
                 i,
-                prp.invert(prp.permute(i)?)?,
+                prp.invert(prp.permute(i)),
                 "permutation round-trip failed"
             );
         }
@@ -338,6 +337,11 @@ mod tests {
     // -----------------------------------------------------------------
     // LemireFyPrp (Bit6 PRP)
     // -----------------------------------------------------------------
+
+    fn sym64(v: u8) -> Symbol<64> {
+        assert!(v < 64, "test symbol in 0..64");
+        Symbol::from_low_bits(v)
+    }
 
     fn init_fy(seed_byte: u8) -> LemireFyPrp<64> {
         Prp::new(&[seed_byte; 16]).unwrap()
@@ -350,7 +354,7 @@ mod tests {
             // Every value 0..64 appears exactly once in `permutation`.
             let mut seen = [false; 64];
             for v in 0..64u8 {
-                let mapped = prp.invert(v).unwrap();
+                let mapped = prp.invert(sym64(v)).get();
                 assert!(mapped < 64);
                 assert!(
                     !seen[mapped as usize],
@@ -361,8 +365,9 @@ mod tests {
             }
             // Forward/inverse round-trip both directions.
             for v in 0..64u8 {
-                assert_eq!(v, prp.invert(prp.permute(v).unwrap()).unwrap());
-                assert_eq!(v, prp.permute(prp.invert(v).unwrap()).unwrap());
+                let v = sym64(v);
+                assert_eq!(v, prp.invert(prp.permute(v)));
+                assert_eq!(v, prp.permute(prp.invert(v)));
             }
         }
     }
@@ -372,16 +377,16 @@ mod tests {
         let a = init_fy(7);
         let b = init_fy(7);
         for v in 0..64u8 {
-            assert_eq!(a.permute(v).unwrap(), b.permute(v).unwrap());
+            assert_eq!(a.permute(sym64(v)), b.permute(sym64(v)));
         }
         // A different seed gives a different permutation (overwhelmingly).
         let c = init_fy(8);
-        assert!((0..64u8).any(|v| a.permute(v).unwrap() != c.permute(v).unwrap()));
+        assert!((0..64u8).any(|v| a.permute(sym64(v)) != c.permute(sym64(v))));
     }
 
     #[test]
     fn fy_rejects_short_key() {
-        assert!(<LemireFyPrp<64> as Prp<u8>>::new(&[0u8; 8]).is_err());
+        assert!(<LemireFyPrp<64> as Prp<Symbol<64>>>::new(&[0u8; 8]).is_err());
     }
 
     quickcheck! {
@@ -392,13 +397,14 @@ mod tests {
                 return quickcheck::TestResult::discard();
             }
             let prp: LemireFyPrp<64> = Prp::new(&key[0..16]).unwrap();
+            let x = Symbol::<64>::from_low_bits(x);
 
             let mut mask = [0u8; 8];
             prp.indicator_mask_xor(x, &mut mask);
 
             let mut reference = [0u8; 8];
             for j in 0..64u8 {
-                let indicator = u8::from(prp.invert(j).unwrap() > x);
+                let indicator = u8::from(prp.invert(sym64(j)).get() > x.get());
                 reference[(j / 8) as usize] |= indicator << (j % 8);
             }
 
@@ -411,49 +417,39 @@ mod tests {
 mod kani_proofs {
     use super::*;
 
-    /// `oblivious_lookup` over a 64-entry table returns `Ok(table[i])` for
-    /// every `i < 64` and `Err` for every `i >= 64` (all tables, all `u8`).
+    /// `oblivious_lookup` over a 64-entry table returns `table[i]` for every
+    /// symbol `i` (all tables whose entries are in the domain, as a
+    /// permutation's are).
     #[kani::proof]
     #[kani::unwind(65)]
     fn oblivious_lookup_64_matches_index() {
         let table: [u8; 64] = kani::any();
-        let index: u8 = kani::any();
+        kani::assume(table.iter().all(|&v| v < 64));
+        let index = Symbol::<64>::from_low_bits(kani::any());
         let got = oblivious_lookup(&table, index);
-        if index < 64 {
-            assert!(matches!(got, Ok(v) if v == table[index as usize]));
-        } else {
-            assert!(got.is_err());
-        }
+        assert_eq!(got.get(), table[usize::from(index.get())]);
     }
 
-    /// `oblivious_lookup` over a 256-entry table returns `Ok(table[i])` for
-    /// every `u8` index (all tables; no index is out of range).
+    /// `oblivious_lookup` over a 256-entry table returns `table[i]` for every
+    /// symbol `i` (all tables).
     #[kani::proof]
     #[kani::unwind(257)]
     fn oblivious_lookup_256_matches_index() {
         let table: [u8; 256] = kani::any();
-        let index: u8 = kani::any();
-        assert!(matches!(oblivious_lookup(&table, index), Ok(v) if v == table[index as usize]));
+        let index = Symbol::<256>::from(kani::any::<u8>());
+        let got = oblivious_lookup(&table, index);
+        assert_eq!(got.get(), table[usize::from(index.get())]);
     }
 
-    /// `oblivious_lookup` over a table of any length 0..=256 returns
-    /// `Ok(table[i])` when `i < len` and `Err` otherwise.
-    // Every length 0..=256 takes about seven minutes; the two lengths in
-    // use are proved above, so this runs only with `kani-full`.
-    #[cfg(feature = "kani-full")]
+    /// `Symbol::<64>::from_low_bits` always yields a value in `0..64`, and
+    /// is the identity on `0..64` (all `u8`).
     #[kani::proof]
-    #[kani::unwind(257)]
-    fn oblivious_lookup_any_len_matches_index() {
-        let buf: [u8; 256] = kani::any();
-        let len: usize = kani::any();
-        kani::assume(len <= 256);
-        let table = &buf[..len];
-        let index: u8 = kani::any();
-        let got = oblivious_lookup(table, index);
-        if usize::from(index) < len {
-            assert!(matches!(got, Ok(v) if v == table[index as usize]));
-        } else {
-            assert!(got.is_err());
+    fn symbol_64_from_low_bits_in_domain() {
+        let b: u8 = kani::any();
+        let s = Symbol::<64>::from_low_bits(b);
+        assert!(s.get() < 64);
+        if b < 64 {
+            assert_eq!(s.get(), b);
         }
     }
 

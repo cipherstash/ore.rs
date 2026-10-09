@@ -151,7 +151,7 @@ pub use crate::ciphertext::*;
 #[doc(hidden)]
 pub mod ct_bench {
     use crate::primitives::prp::{oblivious, LemireFyPrp};
-    use crate::primitives::Prp;
+    use crate::primitives::{Prp, Symbol};
 
     /// Build the 64-element Bit6 PRP from a 512-byte draw stream and return
     /// one permuted value, so the construction is observably used. This is
@@ -159,15 +159,15 @@ pub mod ct_bench {
     pub fn lemire_fy_prp_from_stream(stream: &[u8; 512]) -> u8 {
         LemireFyPrp::<64>::from_stream(stream)
             .expect("512 bytes is a full stream")
-            .permute(0)
-            .expect("0 is in the domain")
+            .permute(Symbol::from_low_bits(0))
+            .get()
     }
 
     fn from_stream_with(stream: &[u8; 512], build: fn(&[u8], &mut [u8; 64], &mut [u8; 64])) -> u8 {
         LemireFyPrp::<64>::from_stream_with(stream, build)
             .expect("512 bytes is a full stream")
-            .permute(0)
-            .expect("0 is in the domain")
+            .permute(Symbol::from_low_bits(0))
+            .get()
     }
 
     /// As [`lemire_fy_prp_from_stream`], through the reference builder:

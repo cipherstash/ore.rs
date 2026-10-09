@@ -7,7 +7,7 @@
 use crate::{
     ciphertext::*,
     primitives::{
-        hash::Aes128Z2Hash, prf::Aes128Prf, AesBlock, Hash, HashKey, Prf, Prp, NONCE_SIZE,
+        hash::Aes128Z2Hash, prf::Aes128Prf, AesBlock, Hash, HashKey, Prf, Prp, Symbol, NONCE_SIZE,
     },
     scheme::width::{AesBlockBuf, Bit8, BlockWidth, FirstDiff, RightBitVec},
     OreCipher, OreError, PlainText,
@@ -92,7 +92,7 @@ fn derive_prp_seeds<const N: usize>(prf2: &Aes128Prf, x: &PlainText<N>) -> SeedB
 pub(crate) fn encode_right_block<W: BlockWidth, H: Hash>(
     block: &mut W::RightBlock,
     prp: &W::Prp,
-    x: u8,
+    x: W::Symbol,
     hasher: &H,
     ro_blocks: &mut [AesBlock],
 ) {
@@ -116,7 +116,7 @@ impl<R: Rng + SeedableRng> OreAes128<R> {
     ) -> Result<(), OreError> {
         for n in 0..N {
             let prp: <Bit8 as BlockWidth>::Prp = Prp::new(&seeds.0[n])?;
-            left.xt[n] = prp.permute(x[n])?;
+            left.xt[n] = prp.permute(Symbol::from(x[n])).get();
 
             left.f[n][0..n].clone_from_slice(&x[0..n]);
             left.f[n][n] = left.xt[n];
@@ -187,7 +187,7 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
 
         for n in 0..N {
             let prp: <Bit8 as BlockWidth>::Prp = Prp::new(&seeds.0[n])?;
-            left.xt[n] = prp.permute(x[n])?;
+            left.xt[n] = prp.permute(Symbol::from(x[n])).get();
 
             left.f[n][0..n].clone_from_slice(&x[0..n]);
             left.f[n][n] = left.xt[n];
@@ -207,7 +207,13 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
             work.copy_from(&template);
             self.prf1.encrypt_all(work.as_mut_slice());
 
-            encode_right_block::<Bit8, _>(&mut right.data[n], &prp, x[n], &hasher, &mut work);
+            encode_right_block::<Bit8, _>(
+                &mut right.data[n],
+                &prp,
+                Symbol::from(x[n]),
+                &hasher,
+                &mut work,
+            );
         }
 
         self.prf1.encrypt_all(&mut left.f);
