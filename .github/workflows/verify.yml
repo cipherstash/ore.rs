@@ -9,7 +9,9 @@ name: "Verify"
 #   * fuzz: the libFuzzer targets (packages/ore-rs/fuzz) for the ciphertext
 #     parsers and raw comparators, time-boxed per pull request.
 #   * kani: the bounded model-checking harnesses (`#[cfg(kani)]`) for the pure
-#     building blocks.
+#     building blocks. The two exhaustive-length harnesses behind the
+#     `kani-full` feature are not run here (about 16 minutes); run
+#     `cargo kani -p ore-rs --features kani-full` by hand for the full set.
 #
 # Like test.yml, this runs on every pull request regardless of base branch, so
 # the stacked PRs get it too.
