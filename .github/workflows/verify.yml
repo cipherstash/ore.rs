@@ -100,6 +100,23 @@ jobs:
           path: packages/ore-rs/fuzz/artifacts/
           if-no-files-found: ignore
 
+  # The PRP builder that ships on Arm is NEON, which Kani cannot model, so
+  # its evidence is the equivalence tests against the reference builder
+  # (every step with every swap index, plus random and edge streams). test.yml
+  # runs on x86_64 only, where those tests exercise SSSE3; this runs them
+  # where the dispatcher picks NEON.
+  prp-builders-aarch64:
+    runs-on: ubuntu-24.04-arm
+    name: "🧮 PRP builders (aarch64)"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: builder equivalence tests
+        run: cargo test -p ore-rs --lib primitives::prp
+
   kani:
     runs-on: ubuntu-latest
     name: "✅ Kani"

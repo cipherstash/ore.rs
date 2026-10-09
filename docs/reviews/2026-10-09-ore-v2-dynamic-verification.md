@@ -114,7 +114,7 @@ behind matching known-answer vectors.
 | `ct_bit(byte, pos) == (byte >> pos) & 1`, and 0 for `pos ≥ 8` | exhaustive | < 1 s |
 | `oblivious_lookup(table, i) == table[i]` for every symbol `i` | every 64-entry table of in-domain values; every 256-entry table | 10 s; 29 s (M1 Max) |
 | `Symbol::<64>::from_low_bits(b)` is `< 64`, and is `b` for `b < 64` | every `u8` | < 1 s |
-| Lemire reduction `((x·(i+1)) >> 64) ≤ i` | every `u64` `x`, `i < 64` | < 1 s |
+| `oblivious::lemire_draw` itself reads step `i`'s draw from bytes `(63−i)·8 ..+ 8` (little-endian) and returns `(x·(i+1)) >> 64 ≤ i` | every 504-byte stream, every step `1..64` | 113 s (M1 Max) |
 | the reference (textbook Fisher–Yates) builder yields a permutation of 0..64 with a correct inverse | first 6 of 63 draws symbolic, the rest fixed (all 63 symbolic did not finish in 30 min) | 200 s |
 | the SWAR oblivious builder's `permutation` and `inverse` equal the reference builder's (under Kani `from_stream` dispatches to SWAR: Kani cannot model the NEON or SSSE3 intrinsics) | same stream shape | 872 s |
 | `from_stream` rejects streams shorter than 504 bytes | every short length | 335 s (101 s before the oblivious builder) |
@@ -124,6 +124,15 @@ behind matching known-answer vectors.
 | `gf128_double` matches the byte-wise NIST SP 800-38B `dbl` | every 128-bit input | < 1 s |
 
 No harness found a bug.
+
+The NEON and SSSE3 builders, the ones that ship, are outside Kani: it cannot
+model their intrinsics, so under `cargo kani` the dispatcher picks SWAR,
+which is what the equivalence harness proves. Their evidence is tests against
+the reference builder: random and edge streams, and every step `i` with every
+swap index `j ≤ i` (2 079 forced draws, each inside a full build). Those run
+on x86_64 in `test.yml` (SSSE3) and on an aarch64 runner in `verify.yml`
+(NEON). Until the `lemire_draw` harness above, the draw was proved only as a
+restated formula.
 
 ## 4. dudect — timing leakage
 
