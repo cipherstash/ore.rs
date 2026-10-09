@@ -204,8 +204,23 @@ the residual by more than half, shrinks both classes.) The NEON builder has
 no secret address or branch for it to come from, so the candidate is
 content-dependent microarchitecture such as the data memory-dependent
 prefetcher. DIT disables that on M3 and later, but the harness did not apply
-DIT to the builder benches until the verification review; a continuous run
-with `CT_DUDECT_DIT=1` on the M4 is the next measurement.
+DIT to the builder benches until the verification review. It has now been
+tested, at `daf0344`: continuous, 150 s per run, DIT off and on alternately,
+on the same M4 (macOS 26.5.2, mains power, Low Power Mode off).
+
+| run, in order | DIT | n | max t | max tau |
+|---|---|---|---|---|
+| off-1 | off | 240 M | +20.4 | +0.0013 |
+| on-1 | on | 189 M | +21.6 | +0.0016 |
+| off-2 | off | 251 M | +19.6 | +0.0012 |
+| on-2 | on | 191 M | +21.8 | +0.0016 |
+
+DIT does not remove or reduce it, so on four runs it is not the prefetcher,
+and it stays unexplained. The figures are larger than the +7.7 above, but
+the commit that measured +7.7 (`6760707`), rerun in the same session, gave
++31.4 at 215 M, so the change is in the session, not the code. Fixed A
+against fixed B stays under 2.5 both ways (five batch runs each). Details:
+verification doc, §4.2.
 
 ## Not measured
 
