@@ -195,33 +195,25 @@ macro_rules! impl_lemire_fy_prp {
             /// tables come from the oblivious builder ([`oblivious::build`]),
             /// so no address depends on the stream.
             pub(crate) fn from_stream(stream: &[u8]) -> PrpResult<Self> {
-                if stream.len() < ($domain - 1) * 8 {
-                    return Err(PrpError);
-                }
-
                 // Fisher–Yates with Lemire-reduced wide draws: draw `d`
                 // (8 bytes) drives step `$domain - 1 - d`. Fixed trip count,
                 // branch-free index reduction, and no secret-dependent
                 // address: the oblivious builder keeps both tables in
                 // registers (or masked words) and maintains the inverse
                 // alongside the swaps. It wipes its copies of each draw.
-                let mut perm = Self {
-                    permutation: [0u8; $domain],
-                    inverse: [0u8; $domain],
-                };
-                oblivious::build(stream, &mut perm.permutation, &mut perm.inverse);
-
-                Ok(perm)
+                Self::from_stream_with(stream, oblivious::build)
             }
 
-            /// [`Self::from_stream`] through a named builder whatever the
-            /// target: the reference builder or one of the portable
-            /// oblivious ones. For the `ct-bench` timing hooks only.
-            #[cfg(feature = "ct-bench")]
-            pub(crate) fn from_stream_with(
-                stream: &[u8],
-                build: fn(&[u8], &mut [u8; $domain], &mut [u8; $domain]),
-            ) -> PrpResult<Self> {
+            /// [`Self::from_stream`] through a given builder. The schemes
+            /// only ever use [`oblivious::build`]; the `ct-bench` timing
+            /// hooks pass the reference builder or a portable oblivious one,
+            /// so they time this same function. `build` is a generic
+            /// parameter, not a function pointer, so the scheme path is
+            /// monomorphised and the builder still inlines.
+            pub(crate) fn from_stream_with<F>(stream: &[u8], build: F) -> PrpResult<Self>
+            where
+                F: FnOnce(&[u8], &mut [u8; $domain], &mut [u8; $domain]),
+            {
                 if stream.len() < ($domain - 1) * 8 {
                     return Err(PrpError);
                 }
