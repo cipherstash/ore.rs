@@ -9,8 +9,8 @@ name: "Verify"
 #   * fuzz: the libFuzzer targets (packages/ore-rs/fuzz) for the ciphertext
 #     parsers and raw comparators, time-boxed per pull request.
 #   * kani: the bounded model-checking harnesses (`#[cfg(kani)]`) for the pure
-#     building blocks. The two exhaustive-length harnesses behind the
-#     `kani-full` feature are not run here (about 16 minutes); run
+#     building blocks. The exhaustive-length harness behind the `kani-full`
+#     feature is not run here (about 9 minutes); run
 #     `cargo kani -p ore-rs --features kani-full` by hand for the full set.
 #
 # Like test.yml, this runs on every pull request regardless of base branch, so
@@ -28,8 +28,19 @@ defaults:
 
 jobs:
   ct-taint:
-    runs-on: ubuntu-latest
-    name: "🔍 Valgrind taint"
+    # Both legs matter: `oblivious::build` dispatches to the SSSE3 builder on
+    # x86_64 and the NEON builder on aarch64, so each target's shipping
+    # builder is only taint-checked on its own runner.
+    runs-on: ${{ matrix.os }}
+    name: "🔍 Valgrind taint (${{ matrix.arch }})"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x86_64
+          - os: ubuntu-24.04-arm
+            arch: aarch64
     steps:
       - uses: actions/checkout@v4
 
@@ -43,7 +54,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             packages/ct-taint/target/
-          key: ${{ runner.os }}-ct-taint-${{ hashFiles('packages/ct-taint/Cargo.lock', 'packages/ore-rs/src/**') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-ct-taint-${{ hashFiles('packages/ct-taint/Cargo.lock', 'packages/ore-rs/src/**') }}
 
       # crabgrind binds the Valgrind client-request header at build time.
       - name: install valgrind
