@@ -82,5 +82,10 @@ required-features = ["chrono"]
 name = "chained"
 harness = false
 
+[[bench]]
+name = "prp_build"
+harness = false
+required-features = ["ct-bench"]
+
 [[example]]
 name = "encrypt"
