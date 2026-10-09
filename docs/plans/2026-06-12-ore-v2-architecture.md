@@ -174,7 +174,12 @@ number; AES remains the floor.)
 | Hash-LSB mask | strided bit gather from AES output blocks | shifts + `vpmovmskb` on gathered bytes | shifts + narrowing |
 | Compare: first-differing-block scan | 16-byte tag equality across blocks | `vpcmpeqb` + movemask, branch-free fold | `cmeq` + fold |
 
-AES itself already uses AES-NI / ARMv8-CE via the `aes` crate — no work needed there.
+AES itself uses AES-NI automatically on x86_64. **On aarch64 the `aes` crate (v0.8)
+requires `--cfg aes_armv8` in RUSTFLAGS to use the ARMv8 Cryptography Extensions;
+without it the software backend runs ~60× slower per block** (measured on M1 Max).
+The workspace now sets this in `.cargo/config.toml` (PR 3) and the README documents
+it for downstream builds — by far the largest single performance lever in this
+program for ARM users.
 
 **Mechanism:**
 
@@ -312,6 +317,14 @@ the doubling must be constant-time.
 rules out both. Whichever wins, **internal crypto review happens before PR 6 is
 written, not after.** The fixed-N schemes never use the accumulator, so review risk
 doesn't block goals 1–3.
+
+> **Benchmark gate result (2026-06-13, Apple M1 Max, hardware AES):** key expansion
+> costs ~172 ns ≈ 160 batched block encryptions (no key-schedule instruction on
+> aarch64), making Candidate A's per-block overhead **~84%** at Bit6 width (~35% at
+> Bit8) — roughly 6× over the threshold. The CMAC/XE-style control (one extra
+> encryption per block) measured ~0%. **The decision rule selects Candidate B (CMAC
+> with cached prefix state).** Spike code preserved at `/tmp/ore-keyexp-spike`
+> (re-runnable; numbers recorded here are the durable record).
 
 Cost shape is preserved in all candidates: the prefix is absorbed once per block, and
 the `DOMAIN` RO keys per block remain a single batched `encrypt_all` under one cipher
