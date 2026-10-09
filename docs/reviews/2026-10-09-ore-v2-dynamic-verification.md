@@ -153,7 +153,9 @@ latches `xt[l]`, `f[l]` and `right[l]` as it runs, with
 `width::ct_assign_bytes` under the choice "this is the first differing
 block" (set for exactly one `n`), and the resolution step hashes and
 bit-selects from the latched copies. Every load is now indexed by the public
-loop counter. The added cost is one 8-byte right-block read and about 25
+loop counter. Every comparator (legacy and Bit6, raw and typed, and
+chained) shares the latch as `width::FirstDiff`, which zeroizes the copies
+on drop. The added cost is one 8-byte right-block read and about 25
 masked byte copies per block, against a scan already comparing 17 bytes per
 block; the chained benchmarks in `docs/benchmarks/` were not re-run, since
 the comparator is not on the encrypt path they time. The legacy comparator
