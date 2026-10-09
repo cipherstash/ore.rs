@@ -346,10 +346,17 @@ data, because Lewi-Wu is a left/right scheme: a comparison is only ever evaluate
 between a left ciphertext and a right ciphertext, and a right ciphertext in isolation
 reveals nothing about order. Three threat tiers follow:
 
-- **Offline / at rest (right-only storage, the default deployment):** an attacker who
-  exfiltrates the database holds only right ciphertexts, has no left ciphertext to
-  compare against, and recovers nothing — not order, and a fortiori not common-prefix
-  length. The offline case is clean.
+- **Offline / at rest:** **right-only storage does not exist today**, so this tier is
+  *not* clean (corrected in review of #83). Every scheme here, legacy Bit8 included,
+  stores full ciphertexts, whose deterministic left half (`xt`, `f`) sits next to the
+  right half, and the right half is not usable on its own (`VarRight` has no
+  serialise/compare API; legacy has no left-versus-right-only comparison). So an
+  attacker who exfiltrates the database can compare any two stored rows with
+  `compare_raw_slices`, with no query, and recovers their **order** and, for strings,
+  their **common-prefix length**. This is the same exposure as legacy Bit8 today, not a
+  regression, but it is not the "recovers nothing" this tier first promised. Right-only
+  storage needs a left-versus-right comparator, likely a trinary indicator, which is a
+  format change tracked as its own design item.
 - **Query time (legitimate operator):** running a query emits a left ciphertext, and
   each comparison against the stored rights reveals first-differing-block (=
   common-prefix length for strings) for exactly the pairs that query touches.
@@ -357,8 +364,9 @@ reveals nothing about order. Three threat tiers follow:
   traffic accumulates those per-comparison leakages and can reconstruct prefix
   structure across the touched set.
 
-So the common-prefix disclosure is bounded to the **in-use / online** setting and never
-applies to data at rest. This must still be documented prominently on the string API,
+So, until right-only storage exists, the common-prefix disclosure applies to data at
+rest as well as in use: anyone holding two stored rows learns it. This must be
+documented prominently on the string API,
 and the residual query-time/online leakage is a product-level decision about acceptable
 leakage — but it is a narrower decision than the unscoped framing suggests, and not
 something the library can engineer away.
@@ -397,7 +405,7 @@ threat model, not a global default:
 
 | Dominant threat | Encryptor environment | Choose |
 |---|---|---|
-| At-rest exfiltration (right-only) | any | **Bit6** — leakage tie, take the smaller ciphertext + cheap CT |
+| At-rest exfiltration (right-only, once it exists; today stored rows compare offline, see §5(b)) | any | **Bit6** — leakage tie, take the smaller ciphertext + cheap CT |
 | Online inference on the plaintext distribution | trusted / dedicated | **Bit8** — encrypt-side moot, take the lower leakage |
 | Online inference | hostile / multi-tenant | **Bit8 + oblivious-swap-FY** (low leakage *and* CT, ~522k ct-ops; not built: the legacy Bit8 PRP has no oblivious form), or Bit6, whose key generation is oblivious by default, if 2 bits of resolution is acceptable |
 
@@ -511,6 +519,16 @@ PRs 3/4 and 5 are independent after PR 2, so they can proceed in parallel. Each 
 `main` releasable; release-plz handles version bumps (all semver-minor under 0.x except
 PR 2's trait change, which should be called out in the changelog).
 
+> **PR 6 status (2026-06-15): IMPLEMENTED** on `feat/ore-v2-chained` against the A2
+> design (crypto sign-off of A2 and A3 given 2026-10-09). Ships the
+> AES-CMAC accumulator (`primitives/cmac.rs`, validated vs NIST SP 800-38B),
+> `LemireFyPrp::from_stream` (shape ii), and `OreAes128Bit6Chained` (`scheme/chained.rs`)
+> with variable-length `Var*` types and string encryption. Lexicographic cross-length
+> comparison, equality-across-nonces, and >14-block plaintexts are tested; perf
+> `docs/benchmarks/2026-06-15-chained-results.md` (~0.69 µs/block, below fixed-N's ~0.81).
+> Not yet in: `u128`/`Decimal` via the const-N + accumulator path. Wire vectors are
+> pinned (`tests/compat_chained_vectors.rs`).
+
 ## Testing strategy
 
 - **Vectors (PR 1) as the refactor contract:** every later PR runs them unchanged for
@@ -535,15 +553,18 @@ PR 2's trait change, which should be called out in the changelog).
       no code path can write seed material into a ciphertext (PR 2).
 - [ ] Domain separation between Bit8/Bit6/chained schemes under shared keys (PR 5, 6).
       Bit8/Bit6: done by key derivation (§4), with a cross-scheme regression test.
-      Chained: to confirm in PR 6.
+      Chained: separated, its only key is `AES_{k1}("ORE.v2.chain.acc")`, whose last
+      byte is outside every legacy PRF input and whose label differs from Bit6's.
 - [x] H instantiation (§6) selected and signed off (2026-06-15): BHKR σ-MMO,
       random-permutation model; see §6 and review brief A1.
-- [ ] Selected §5(b) accumulator candidate reviewed and signed off (before PR 6).
+- [x] Selected §5(b) accumulator candidate reviewed and signed off (2026-10-09; review
+      brief A2 and A3).
 - [ ] Accumulator chain state treated as key material: zeroized, never serialized,
       never reachable from `Left`/`Right` types (PR 6).
 - [ ] GF(2^128) doubling constant-time, if Candidate C is chosen (PR 6).
-- [ ] String leakage profile documented and acknowledged at product level — scoped to
-      query-time/online (right-only-at-rest reveals nothing); see §5(b) (PR 6).
+- [ ] String leakage profile documented and acknowledged at product level. Stored full
+      ciphertexts compare offline, revealing order and common-prefix length, as legacy
+      does; right-only storage is a separate design item; see §5(b) (PR 6).
 
 ## Decisions taken (revisit if needed)
 

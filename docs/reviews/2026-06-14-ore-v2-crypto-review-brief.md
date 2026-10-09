@@ -16,8 +16,8 @@ Four crypto decisions gate the v2 work. Two block a PR that is already open
 | # | Decision | Model claimed | Status in code | Blocks |
 |---|----------|---------------|----------------|--------|
 | **A1** | 1-bit hash `H` instantiation | random-permutation (BHKR σ-MMO) | ✅ **RESOLVED** — `FixedPiZ2Hash` = `LSB(π(σ(x)⊕r)⊕σ(x)⊕r)`, σ(x)=2x | — (was the Bit6-vector gate; now cleared) |
-| **A2** | Chained-prefix accumulator = AES-CMAC cached-state | CMAC PRF (standard) + 3 auditable claims | designed, not yet coded | PR 6 (variable-length / strings) |
-| **A3** | PRP keystream from the accumulator (shape ii) | statistical (≤2⁻⁵⁵) + branch-family soundness | shape (i) shipped; (ii) deferred | PR 6 perf; couples to A2 |
+| **A2** | Chained-prefix accumulator = AES-CMAC cached-state | CMAC PRF (standard) + 3 auditable claims | ✅ **SIGNED OFF** 2026-10-09; implemented as `OreAes128Bit6Chained` | — |
+| **A3** | PRP keystream from the accumulator (shape ii) | statistical (≤2⁻⁵⁵) + branch-family soundness | ✅ **SIGNED OFF** 2026-10-09; shape (ii) ships in the chained scheme (`from_stream`), shape (i) in Bit6 | — |
 | **A4** | Secret-indexed swap in PRP key-gen — ratify alignment + MemJam posture? | ~~constant-time / cache-line (sub-line = oblivious tier)~~ **oblivious key generation, every target** (2026-10-09) | oblivious builder (NEON / SSSE3 / SWAR) is the default, byte-identical tables; oblivious table reads and compare read; `N = 64` guard | nothing — fixes are byte-stable; A1 alone gates vectors |
 
 **Recommended sequencing:** **A1 is resolved** (BHKR σ-MMO) — Bit6 vectors can now
@@ -26,7 +26,7 @@ applied (none of which alter ciphertexts); the MemJam posture call it carried
 was overtaken on 2026-10-09, when a measured timing dependence made the
 oblivious builder the default rather than a tier (§5, "Status"). Then
 **A2 + A3 as one pass** (they gate PR 6, and A3 only exists inside A2's
-accumulator).
+accumulator). A2 and A3 were signed off together on 2026-10-09.
 
 **What is explicitly *not* in scope:** the legacy Bit8 scheme is wire-frozen and
 byte-identical to v1 (`tests/compat_vectors`); it keeps all status-quo
@@ -605,10 +605,11 @@ None of (a)–(d) changes ciphertexts, so Bit6 vectors are gated only by A1.
       byte-stable; production comparator adopts `ct_select_byte` separately).
 
 **Gate 2 — before PR 6 is written:**
-- [ ] **A2** CMAC encoding fully specified and checked injective; many-outputs
+- [x] **A2** CMAC encoding fully specified and checked injective; many-outputs
       / chain-state-from-published-tag interaction cleared; impl-faithfulness +
-      zeroization test plan agreed.
-- [ ] **A3** PRP-stream-as-CMAC-branch-family domain separation approved.
+      zeroization test plan agreed. Signed off 2026-10-09 (Dan Draper).
+- [x] **A3** PRP-stream-as-CMAC-branch-family domain separation approved.
+      Signed off 2026-10-09 (Dan Draper).
 
 ---
 
