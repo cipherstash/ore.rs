@@ -42,20 +42,41 @@ fn pool_size() -> usize {
 const SAMPLES: usize = 100_000;
 
 /// With `CT_DUDECT_DIT=1`, set the ARMv8.4 DIT (data-independent timing)
-/// bit for this thread before measuring. On Apple Silicon this also disables
-/// the data memory-dependent prefetcher, whose behaviour depends on whether
-/// loaded *values* look like pointers; a difference that disappears under
-/// DIT is that microarchitectural effect, not a data-dependent code path.
+/// bit for this thread before measuring, and fail if it does not stick. On
+/// Apple M3 and later this also disables the data memory-dependent
+/// prefetcher, whose behaviour depends on whether loaded *values* look like
+/// pointers; a difference that disappears under DIT is that
+/// microarchitectural effect, not a data-dependent code path. (On M1 and M2
+/// DIT does not affect the prefetcher.)
+///
+/// Every bench calls this first, so the setting covers all of them.
 fn data_independent_timing() {
     if std::env::var_os("CT_DUDECT_DIT").is_none() {
         return;
     }
     #[cfg(target_arch = "aarch64")]
-    // SAFETY: `msr DIT, #1` only sets the per-thread timing control bit; it
-    // touches no memory and has no other architectural effect.
-    unsafe {
-        std::arch::asm!("msr DIT, #1", options(nomem, nostack));
+    {
+        assert!(
+            std::arch::is_aarch64_feature_detected!("dit"),
+            "CT_DUDECT_DIT is set but this CPU does not implement FEAT_DIT"
+        );
+        // PSTATE.DIT is bit 24 of system register S3_3_C4_C2_5. The generic
+        // encoding assembles without the ARMv8.4 `dit` target feature, which
+        // aarch64 Linux targets do not enable (only Apple's baseline does).
+        const DIT: u64 = 1 << 24;
+        let mut v: u64;
+        // SAFETY: reads and sets the per-thread timing control bit only; it
+        // touches no memory and has no other architectural effect. FEAT_DIT
+        // is checked above, so the register exists.
+        unsafe {
+            std::arch::asm!("mrs {v}, s3_3_c4_c2_5", v = out(reg) v, options(nomem, nostack));
+            std::arch::asm!("msr s3_3_c4_c2_5, {v}", v = in(reg) v | DIT, options(nomem, nostack));
+            std::arch::asm!("mrs {v}, s3_3_c4_c2_5", v = out(reg) v, options(nomem, nostack));
+        }
+        assert!(v & DIT != 0, "CT_DUDECT_DIT: the DIT bit did not stick");
     }
+    #[cfg(not(target_arch = "aarch64"))]
+    panic!("CT_DUDECT_DIT is set, but DIT is an aarch64 feature");
 }
 
 fn bit6() -> OreAes128Bit6ChaCha20 {
@@ -219,6 +240,7 @@ fn bit6_encrypt_left_const_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) 
 /// decides every Fisher–Yates swap, so this isolates the builder from
 /// everything else in the encryptor.
 fn prp_build_const_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
+    data_independent_timing();
     let mut fixed = [0u8; 512];
     for b in fixed.iter_mut() {
         *b = rng.random::<u8>();
@@ -252,6 +274,7 @@ fn prp_build_const_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
 /// same for each; a difference here means the time depends on *which*
 /// permutation is built, not merely on whether the input repeats.
 fn prp_build_fixed_a_vs_fixed_b(runner: &mut CtRunner, rng: &mut BenchRng) {
+    data_independent_timing();
     let mut a = [0u8; 512];
     let mut b = [0u8; 512];
     for x in a.iter_mut().chain(b.iter_mut()) {
@@ -316,6 +339,7 @@ fn stream_pair(rng: &mut BenchRng) -> ([u8; 512], [u8; 512]) {
 /// Mechanism isolation, swap half: the Fisher–Yates swap loop alone, at
 /// the secret draw-derived index, on two fixed streams.
 fn iso_swap_secret_fixed_a_vs_fixed_b(runner: &mut CtRunner, rng: &mut BenchRng) {
+    data_independent_timing();
     let (a, b) = stream_pair(rng);
     for _ in 0..SAMPLES {
         let c = class(rng);
@@ -330,6 +354,7 @@ fn iso_swap_secret_fixed_a_vs_fixed_b(runner: &mut CtRunner, rng: &mut BenchRng)
 
 /// Control for the swap half: the same draws and swaps at a public index.
 fn iso_swap_public_fixed_a_vs_fixed_b(runner: &mut CtRunner, rng: &mut BenchRng) {
+    data_independent_timing();
     let (a, b) = stream_pair(rng);
     for _ in 0..SAMPLES {
         let c = class(rng);
@@ -345,6 +370,7 @@ fn iso_swap_public_fixed_a_vs_fixed_b(runner: &mut CtRunner, rng: &mut BenchRng)
 /// Mechanism isolation, inverse half: the inverse fill alone, from the two
 /// permutations two fixed streams build (computed outside the measurement).
 fn iso_fill_secret_fixed_a_vs_fixed_b(runner: &mut CtRunner, rng: &mut BenchRng) {
+    data_independent_timing();
     let (a, b) = stream_pair(rng);
     let (pa, pb) = (ct_bench::permutation_for(&a), ct_bench::permutation_for(&b));
     for _ in 0..SAMPLES {
@@ -360,6 +386,7 @@ fn iso_fill_secret_fixed_a_vs_fixed_b(runner: &mut CtRunner, rng: &mut BenchRng)
 
 /// Control for the inverse half: the same loads and stores at public offsets.
 fn iso_fill_public_fixed_a_vs_fixed_b(runner: &mut CtRunner, rng: &mut BenchRng) {
+    data_independent_timing();
     let (a, b) = stream_pair(rng);
     let (pa, pb) = (ct_bench::permutation_for(&a), ct_bench::permutation_for(&b));
     for _ in 0..SAMPLES {
@@ -376,6 +403,7 @@ fn iso_fill_public_fixed_a_vs_fixed_b(runner: &mut CtRunner, rng: &mut BenchRng)
 /// `prp_build_fixed_a_vs_fixed_b` through the reference builder (textbook
 /// Fisher–Yates, secret-indexed), for before/after comparison in one binary.
 fn prp_build_reference_fixed_a_vs_fixed_b(runner: &mut CtRunner, rng: &mut BenchRng) {
+    data_independent_timing();
     let (a, b) = stream_pair(rng);
     for _ in 0..SAMPLES {
         let c = class(rng);
@@ -389,6 +417,7 @@ fn prp_build_reference_fixed_a_vs_fixed_b(runner: &mut CtRunner, rng: &mut Bench
 /// `prp_build_fixed_a_vs_fixed_b` through the portable scalar oblivious
 /// builder.
 fn prp_build_scalar_obl_fixed_a_vs_fixed_b(runner: &mut CtRunner, rng: &mut BenchRng) {
+    data_independent_timing();
     let (a, b) = stream_pair(rng);
     for _ in 0..SAMPLES {
         let c = class(rng);
@@ -404,6 +433,7 @@ fn prp_build_scalar_obl_fixed_a_vs_fixed_b(runner: &mut CtRunner, rng: &mut Benc
 /// `prp_build_fixed_a_vs_fixed_b` through the portable SWAR oblivious
 /// builder (the fallback on targets with neither NEON nor SSSE3).
 fn prp_build_swar_obl_fixed_a_vs_fixed_b(runner: &mut CtRunner, rng: &mut BenchRng) {
+    data_independent_timing();
     let (a, b) = stream_pair(rng);
     for _ in 0..SAMPLES {
         let c = class(rng);

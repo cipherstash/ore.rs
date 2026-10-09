@@ -22,21 +22,29 @@ each reproducible from the repository:
 The harness marks the key and the plaintext as undefined memory and runs each
 v2 encryptor (Bit6 full and left-only, chained full and left-only). Memcheck
 then reports every conditional jump and every memory address that depends on
-them. All four modes are clean except for two report classes, each listed
-with its reason in `packages/ct-taint/valgrind.supp`:
+them. All four modes are clean, and `packages/ct-taint/valgrind.supp` is
+empty. Two report classes came up along the way:
 
 1. **`oblivious_lookup`'s range check** (`index >= table.len()`) and its
    callers' test of the returned `Result`. A comparison on the plaintext
    symbol against a public length, whose direction is the same for every
    in-domain symbol, so it carries no information; the static analysis had
-   not listed it. Removing it means an infallible `permute` over a typed
-   in-domain symbol, which is an API change and is not done here.
+   not listed it. It was suppressed in the first runs, which needed a glob
+   over every `?` on a `Result<u8, PrpError>`. It is now removed at the
+   root: `permute` and `invert` take a `Symbol<D>`, a byte that is in the
+   domain by type, so they are infallible and the lookup has no range
+   branch. The encryptors take their symbols from the 6-bit decomposition,
+   which masks rather than checks. Callers that pass raw symbols
+   (`OreCipher::encrypt` for Bit6, chained `encrypt_var`) are checked once at
+   entry by `Blocks6::check`, still returning `OreError::PrpError`; no
+   harness mode takes that path.
 2. (Harness only, fixed.) `str::from_utf8`'s validation of the tainted
    string; the harness now builds the `&str` unchecked.
 
 Nothing is reported from the 6-bit decomposition, the CMAC accumulator, the
-σ-MMO hash, the SIMD indicator kernels, `ct_select_byte`, or AES. With the
-suppressions removed every mode fails, so the gate is live.
+σ-MMO hash, the SIMD indicator kernels, `ct_select_byte`, or AES. The gate
+is live: the commit before the `Symbol` change, run with the same empty
+suppression file, fails on exactly the range check.
 
 A third class, the Fisher–Yates swap at a keystream-derived index in
 `LemireFyPrp::from_stream` (a pointer-sized use of an undefined value), was
@@ -46,10 +54,13 @@ the PRP builder is now oblivious, and its suppression has been removed. The
 oblivious builders use the secret draws only as register operands (`tbl` /
 `pshufb` indices, compare-and-select masks, SWAR arithmetic), which memcheck
 propagates as undefined data without reporting, and touch memory only at
-public offsets (the stream reads and the two final 64-byte stores), so the
-run is expected to stay clean without it. That has not been run locally (no
-Valgrind on macOS, no container here); the `verify.yml` ct-taint job, on
-x86_64 Linux where the SSSE3 builder is dispatched, is the check.
+public offsets (the stream reads and the two final 64-byte stores). The run
+is clean without it on both shipping builders: NEON in an arm64 container,
+and SSSE3 in an amd64 container under emulation (the emulated CPU reports
+SSSE3, so the dispatcher picks it). The left-only ciphertexts from the two
+runs are byte-identical, as they must be. The `verify.yml` ct-taint job now
+runs on native x86_64 and aarch64 runners, so each builder is checked on its
+own target.
 
 The comparators are not tainted: their inputs are ciphertexts, which are
 public. Their timing question is §4's.
@@ -82,9 +93,12 @@ The corpora from these runs are committed as seeds.
 ## 3. Kani — proofs for the pure building blocks
 
 Eighteen harnesses, all verified (full run 1 324 s before the oblivious PRP
-builder; the two exhaustive-length harnesses, 16 minutes of that, run only
-with the `kani-full` feature; the PRP harnesses were re-timed one at a time
-after it, and the default set now takes about 25 minutes). Kani cannot execute AES symbolically, so nothing keyed
+builder; the exhaustive-length `ct_select_byte` harness, about 9 minutes of
+that, runs only with the `kani-full` feature; the PRP harnesses were
+re-timed one at a time after it, and the default set now takes about 25
+minutes). With `Symbol`, the out-of-range `oblivious_lookup` cases no longer
+exist to prove, so the any-length lookup harness was dropped and a
+`Symbol` harness added. Kani cannot execute AES symbolically, so nothing keyed
 is in scope; these are the pieces where a wrong implementation would hide
 behind matching known-answer vectors.
 
@@ -92,7 +106,8 @@ behind matching known-answer vectors.
 |---|---|---:|
 | `ct_select_byte(block, i) == block[i]` | every length ≤ 256, every `i` (`kani-full`); the 8- and 32-byte right blocks | 519 s; 1 s |
 | `ct_bit(byte, pos) == (byte >> pos) & 1`, and 0 for `pos ≥ 8` | exhaustive | < 1 s |
-| `oblivious_lookup(table, i)` is `Ok(table[i])` for `i < len`, `Err` otherwise | every 64- and 256-entry table; every length ≤ 256 (`kani-full`) | 2 s; 17 s; 439 s |
+| `oblivious_lookup(table, i) == table[i]` for every symbol `i` | every 64-entry table of in-domain values; every 256-entry table | 10 s; 29 s (M1 Max) |
+| `Symbol::<64>::from_low_bits(b)` is `< 64`, and is `b` for `b < 64` | every `u8` | < 1 s |
 | Lemire reduction `((x·(i+1)) >> 64) ≤ i` | every `u64` `x`, `i < 64` | < 1 s |
 | the reference (textbook Fisher–Yates) builder yields a permutation of 0..64 with a correct inverse | first 6 of 63 draws symbolic, the rest fixed (all 63 symbolic did not finish in 30 min) | 200 s |
 | the SWAR oblivious builder's `permutation` and `inverse` equal the reference builder's (under Kani `from_stream` dispatches to SWAR: Kani cannot model the NEON or SSSE3 intrinsics) | same stream shape | 872 s |
@@ -194,8 +209,12 @@ level the effect was real but very small (tau −0.0014). The only
 secret-dependent memory traffic in the builder was the Fisher–Yates swap at
 the draw-derived index and the inverse-table fill, so this was the A4 access
 pattern showing up as a within-process timing signature, on a core with no
-SMT and no co-tenant. Setting the ARM DIT bit changed nothing, so it is not
-the data-dependent prefetcher. The one-cache-line argument addresses
+SMT and no co-tenant. Setting the ARM DIT bit was taken to rule out the
+data memory-dependent prefetcher, but the harness only applied DIT through
+the cipher constructors, so the `prp_build_*` and `iso_*` benches ran
+without it whatever the environment said; for the builder-only measurements
+the prefetcher was not ruled out. The harness now applies DIT in every bench
+and fails if the bit does not stick. The one-cache-line argument addresses
 line-granularity cache leakage and says nothing about this.
 
 **Mechanism isolation.** Each half of the old builder, timed alone on two
@@ -245,11 +264,20 @@ builder, kept as a test-only reference):
 The pooled continuous figure is weak evidence either way: each 100 k-sample
 pair has its own sign, so pooling dilutes it (the old builder's +8.6 here,
 against |t| up to 83 in a single pair). The per-pair runs are the test, and
-there the dependence is gone. `prp_build_const_vs_random` keeps a small
-residual (tau 0.0005); that test compares one repeated input against a pool
-of 512 streams (256 KB, larger than L1), so its classes differ in where
-their *input* comes from, and the fixed-A-versus-fixed-B test that removes
-that difference shows nothing. The first pass of these measurements, in Low
+there the dependence is gone.
+
+`prp_build_const_vs_random` keeps a small residual (tau 0.0005), and it is
+not explained. An earlier version of this paragraph put it down to the
+classes' footprints, one repeated input against a 256 KB pool. That is
+wrong: the `Left` pool is 512 copies of the fixed stream, indexed at random
+exactly as the `Right` pool of 512 random streams is, so the two classes
+have the same footprint and access pattern and differ only in content. The
+NEON builder has no secret-dependent branch or address (§1), so the
+candidates are content-dependent microarchitecture, the data
+memory-dependent prefetcher first. DIT disables that on M3 and later, and
+this bench did not get DIT before (above), so a continuous run with
+`CT_DUDECT_DIT=1` on the M4 is the next measurement. Fixed A against fixed
+B, where both classes repeat one input, shows nothing. The first pass of these measurements, in Low
 Power Mode on battery, gave the same per-pair picture (its pooled old-builder
 figure was larger, −45 at 135 M).
 
@@ -270,4 +298,8 @@ seen through a fixed versus varying permutation sequence.
   that is exactly why the comparators are measured with dudect instead.
 - dudect was run on one Apple M4. x86 (with and without SMT, where the
   SSSE3 builder runs) and Graviton would be worth a run; the SSSE3
-  builder's timing has not been measured on real x86 hardware.
+  builder's timing has not been measured on real x86 hardware. The harness
+  now builds on aarch64 Linux (the DIT write uses the generic system
+  register encoding), so Graviton needs no changes.
+- The `prp_build_const_vs_random` residual on the NEON builder (§4.2) is
+  open.
