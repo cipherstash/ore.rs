@@ -3,9 +3,10 @@ on:
   push:
     branches:
       - main
+  # Run on every pull request regardless of base branch, so stacked PRs that
+  # target a feature/integration branch (e.g. the ore-v2 stack) get CI too —
+  # not only PRs into `main`.
   pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
 defaults:
