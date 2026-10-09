@@ -194,13 +194,18 @@ it. In the Low Power Mode pass the same test gave −45 at 135 M. The batch
 runs are the stronger evidence in both directions.
 
 `prp_build_const_vs_random` still shows a small difference (t = +7.7,
-tau 0.0005). That test compares one input repeated against inputs drawn from
-a pool of 512 streams (256 KB, larger than L1), so the two classes differ in
-where their *input* comes from; in the Low Power Mode pass, shrinking the
-pool to 4 entries (every input in L1) cut it by more than half. The fixed-A-versus-B
-test is designed to remove that difference, and there it is absent. The NEON
-builder has no secret address for it to come from; the residual is not
-explained further here.
+tau 0.0005), and it is not explained. An earlier version of this paragraph
+said the classes differ in where their input comes from, one repeated input
+against a 256 KB pool. They do not: the `Left` pool is 512 copies of the
+fixed stream, indexed at random like the `Right` pool of 512 random streams,
+so the classes have the same footprint and access pattern and differ only
+in content. (Shrinking the pool to 4, which in the Low Power Mode pass cut
+the residual by more than half, shrinks both classes.) The NEON builder has
+no secret address or branch for it to come from, so the candidate is
+content-dependent microarchitecture such as the data memory-dependent
+prefetcher. DIT disables that on M3 and later, but the harness did not apply
+DIT to the builder benches until the verification review; a continuous run
+with `CT_DUDECT_DIT=1` on the M4 is the next measurement.
 
 ## Not measured
 
@@ -209,8 +214,9 @@ explained further here.
   code; its speed and its timing behaviour on a real x86 core (with and
   without SMT) are unknown.
 - **Graviton or other Arm cores.**
-- **The Valgrind taint run** without the swap suppression: no Valgrind on
-  macOS, so it is left to the `verify.yml` job.
+- **The Valgrind taint run** without the swap suppression was not run in
+  this pass. It has since been run, clean, for both the NEON and the SSSE3
+  builders; see the verification doc, §1.
 - **AVX2.** An AVX2 form (two 32-byte registers per table) is a natural next
   step for x86_64 and was not tried.
 
