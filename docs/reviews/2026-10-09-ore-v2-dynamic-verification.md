@@ -119,7 +119,7 @@ behind matching known-answer vectors.
 | the SWAR oblivious builder's `permutation` and `inverse` equal the reference builder's (under Kani `from_stream` dispatches to SWAR: Kani cannot model the NEON or SSSE3 intrinsics) | same stream shape | 872 s |
 | `from_stream` rejects streams shorter than 504 bytes | every short length | 335 s (101 s before the oblivious builder) |
 | `num_blocks_6bit(n)` is the least `b` with `6b ≥ 8n` | every `n ≤ usize::MAX / 8` | < 1 s |
-| `decompose_6bit`: symbols < 64, bit `5−t` of block `i` is plaintext bit `6i+t`; injective; order-preserving for equal lengths | inputs ≤ 16 bytes | 5 s; 8 s; 9 s |
+| `decompose_6bit`: symbols < 64, bit `5−t` of block `i` is plaintext bit `6i+t`; injective; order-preserving for any two lengths (a proper prefix sorts first, the chained scheme's string order) | inputs ≤ 16 bytes | 5 s; 8 s; 31 s (M1 Max; equal lengths only, 9 s, before) |
 | `final_block` and `prefix_block` injective, and disjoint from each other | full domains | < 1 s each |
 | `gf128_double` matches the byte-wise NIST SP 800-38B `dbl` | every 128-bit input | < 1 s |
 
