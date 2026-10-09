@@ -51,7 +51,7 @@ use crate::primitives::cmac::{final_block, prefix_block, Branch, CmacAccumulator
 use crate::primitives::hash::FixedPiZ2Hash;
 use crate::primitives::prp::LemireFyPrp;
 use crate::primitives::{stack, AesBlock, Hash, HashKey, Prp};
-use crate::scheme::decompose::{decompose_6bit, num_blocks_6bit};
+use crate::scheme::decompose::{num_blocks_6bit, Blocks6};
 use crate::scheme::width::FirstDiff;
 use crate::OreError;
 
@@ -234,23 +234,19 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         Ok(prp)
     }
 
-    /// Full Left+Right ciphertext for `x` (one 6-bit symbol per element).
+    /// Full Left+Right ciphertext for `x` (one 6-bit symbol per element). A
+    /// value `>= 64` returns [`OreError::PrpError`].
     pub fn encrypt_var(&self, x: &[u8]) -> Result<VarCipherText, OreError> {
-        stack::scrubbed(|| self.encrypt_var_unscrubbed(x))
+        stack::scrubbed(|| self.encrypt_blocks(&Blocks6::check(x)?))
     }
 
-    /// Left-only ciphertext (smaller; for query plaintexts).
-    pub fn encrypt_left_var(&self, x: &[u8]) -> Result<VarLeft, OreError> {
-        stack::scrubbed(|| self.encrypt_left_var_unscrubbed(x))
-    }
-
-    /// [`Self::encrypt_var`] without the stack scrub. Every caller runs it
-    /// inside [`stack::scrubbed`]: building a block's PRP and running the
+    /// [`Self::encrypt_var`] over blocks already known to be in the 6-bit
+    /// domain, without the stack scrub. Every caller runs it inside
+    /// [`stack::scrubbed`]: building a block's PRP and running the
     /// accumulator leave their secrets in dead stack (see
     /// `primitives::stack`).
-    fn encrypt_var_unscrubbed(&self, x: &[u8]) -> Result<VarCipherText, OreError> {
+    fn encrypt_blocks<B: AsRef<[u8]>>(&self, x: &Blocks6<B>) -> Result<VarCipherText, OreError> {
         let count = x.len();
-        debug_assert!(x.iter().all(|&b| (b as usize) < DOMAIN));
         if count > u16::MAX as usize {
             return Err(OreError::TooManyBlocks);
         }
@@ -269,10 +265,11 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         // loop rather than once per block.
         let mut ro = [AesBlock::default(); DOMAIN];
 
-        for (n, &sym) in x.iter().enumerate() {
+        for n in 0..count {
+            let sym = x.symbol(n);
             let n16 = n as u16;
             let prp = self.prp_at(&acc, n16)?;
-            let permuted = prp.permute(sym)?;
+            let permuted = prp.permute(sym).get();
             xt.push(permuted);
 
             // ro_key for every domain value; f[n] = ro(n, xt[n]).
@@ -300,7 +297,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
             prp.indicator_mask_xor(sym, &mut rb);
             blocks.push(rb);
 
-            acc.absorb(&prefix_block(n16, sym));
+            acc.absorb(&prefix_block(n16, sym.get()));
         }
 
         // `ro` held key-derived RO_KEY tags (then H outputs) for the last block.
@@ -314,11 +311,16 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         })
     }
 
-    /// [`Self::encrypt_left_var`] without the stack scrub; see
-    /// [`Self::encrypt_var_unscrubbed`].
-    fn encrypt_left_var_unscrubbed(&self, x: &[u8]) -> Result<VarLeft, OreError> {
+    /// Left-only ciphertext (smaller; for query plaintexts). A value `>= 64`
+    /// returns [`OreError::PrpError`].
+    pub fn encrypt_left_var(&self, x: &[u8]) -> Result<VarLeft, OreError> {
+        stack::scrubbed(|| self.encrypt_left_blocks(&Blocks6::check(x)?))
+    }
+
+    /// [`Self::encrypt_left_var`] over blocks already known to be in the
+    /// 6-bit domain, without the stack scrub; see [`Self::encrypt_blocks`].
+    fn encrypt_left_blocks<B: AsRef<[u8]>>(&self, x: &Blocks6<B>) -> Result<VarLeft, OreError> {
         let count = x.len();
-        debug_assert!(x.iter().all(|&b| (b as usize) < DOMAIN));
         if count > u16::MAX as usize {
             return Err(OreError::TooManyBlocks);
         }
@@ -327,10 +329,11 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         let mut xt = Vec::with_capacity(count);
         let mut f = Vec::with_capacity(count);
 
-        for (n, &sym) in x.iter().enumerate() {
+        for n in 0..count {
+            let sym = x.symbol(n);
             let n16 = n as u16;
             let prp = self.prp_at(&acc, n16)?;
-            let permuted = prp.permute(sym)?;
+            let permuted = prp.permute(sym).get();
             xt.push(permuted);
             f.push(acc.finalize(&final_block(
                 Branch::RoKey,
@@ -338,7 +341,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
                 permuted as u16,
                 WIDTH_BIT6,
             )));
-            acc.absorb(&prefix_block(n16, sym));
+            acc.absorb(&prefix_block(n16, sym.get()));
         }
         Ok(VarLeft { xt, f })
     }
@@ -350,14 +353,14 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     /// as the order and common-prefix length that comparisons reveal; see
     /// the module docs.
     pub fn encrypt_str(&self, s: &str) -> Result<VarCipherText, OreError> {
-        stack::scrubbed(|| self.encrypt_var_unscrubbed(&str_to_blocks(s)?))
+        stack::scrubbed(|| self.encrypt_blocks(&str_to_blocks(s)?))
     }
 
     /// Left-only string ciphertext. Strings longer than [`MAX_STR_BYTES`]
     /// return [`OreError::TooManyBlocks`]. Like [`Self::encrypt_str`], it
     /// reveals the string's exact length.
     pub fn encrypt_left_str(&self, s: &str) -> Result<VarLeft, OreError> {
-        stack::scrubbed(|| self.encrypt_left_var_unscrubbed(&str_to_blocks(s)?))
+        stack::scrubbed(|| self.encrypt_left_blocks(&str_to_blocks(s)?))
     }
 
     /// Compare two serialised full ciphertexts (lexicographic; shorter prefix
@@ -470,17 +473,15 @@ const _: () = assert!(num_blocks_6bit(MAX_STR_BYTES + 1) > u16::MAX as usize);
 /// Decompose `s` into 6-bit blocks, refusing a string too long for the wire
 /// format *before* allocating or decomposing it. The decomposition is the
 /// whole plaintext (it inverts), so the buffer is wiped when dropped.
-fn str_to_blocks(s: &str) -> Result<Zeroizing<Vec<u8>>, OreError> {
+fn str_to_blocks(s: &str) -> Result<Blocks6<Zeroizing<Vec<u8>>>, OreError> {
     let bytes = s.as_bytes();
     if bytes.len() > MAX_STR_BYTES {
         return Err(OreError::TooManyBlocks);
     }
-    let nb = num_blocks_6bit(bytes.len());
-    let mut blocks = Zeroizing::new(vec![0u8; nb]);
-    if nb > 0 {
-        decompose_6bit(bytes, &mut blocks);
-    }
-    Ok(blocks)
+    Ok(Blocks6::decompose(
+        bytes,
+        Zeroizing::new(vec![0u8; num_blocks_6bit(bytes.len())]),
+    ))
 }
 
 #[cfg(test)]
@@ -489,6 +490,28 @@ mod tests {
 
     fn ore() -> OreAes128Bit6ChainedChaCha20 {
         OreAes128Bit6Chained::init(&[0x11; 16]).unwrap()
+    }
+
+    /// Symbols passed straight to `encrypt_var` / `encrypt_left_var` are
+    /// checked: a value outside the 6-bit domain is refused, and in-domain
+    /// symbols encrypt exactly as the string path's decomposition does.
+    #[test]
+    fn raw_symbols_are_checked() {
+        let c = ore();
+        assert!(matches!(
+            c.encrypt_var(&[1, 64, 2]),
+            Err(OreError::PrpError(_))
+        ));
+        assert!(matches!(
+            c.encrypt_left_var(&[1, 64, 2]),
+            Err(OreError::PrpError(_))
+        ));
+
+        let blocks = str_to_blocks("alice").unwrap();
+        assert_eq!(
+            c.encrypt_left_var(blocks.as_bytes()).unwrap().to_bytes(),
+            c.encrypt_left_str("alice").unwrap().to_bytes()
+        );
     }
 
     #[test]
@@ -745,10 +768,11 @@ mod tests {
         let blocks = str_to_blocks(s).unwrap();
         let mut acc = CmacAccumulator::new(&ore.k_acc);
         let mut needles = Vec::new();
-        for (n, &sym) in blocks.iter().enumerate() {
+        for (n, &sym) in blocks.as_bytes().iter().enumerate() {
             let prp = ore.prp_at(&acc, n as u16).unwrap();
-            needles.push((0..64).map(|i| prp.permute(i).unwrap()).collect());
-            needles.push((0..64).map(|i| prp.invert(i).unwrap()).collect());
+            let symbols = (0..64).map(crate::primitives::Symbol::<64>::from_low_bits);
+            needles.push(symbols.clone().map(|i| prp.permute(i).get()).collect());
+            needles.push(symbols.map(|i| prp.invert(i).get()).collect());
             acc.absorb(&prefix_block(n as u16, sym));
         }
         needles
@@ -792,7 +816,7 @@ mod tests {
             },
             |ore, s| {
                 let blocks = str_to_blocks(s).unwrap();
-                core::hint::black_box(ore.encrypt_var_unscrubbed(&blocks).unwrap());
+                core::hint::black_box(ore.encrypt_blocks(&blocks).unwrap());
             },
         );
     }
@@ -805,7 +829,7 @@ mod tests {
             },
             |ore, s| {
                 let blocks = str_to_blocks(s).unwrap();
-                core::hint::black_box(ore.encrypt_left_var_unscrubbed(&blocks).unwrap());
+                core::hint::black_box(ore.encrypt_left_blocks(&blocks).unwrap());
             },
         );
     }

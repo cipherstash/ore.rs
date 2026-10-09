@@ -14,15 +14,14 @@
 //! The 6-bit packing ships ahead of the Bit6 scheme (v2 plan, PR 5) because
 //! it is pure bit logic that can be pinned by property tests now.
 
-// The 6-bit functions are consumed by the Bit6 scheme (v2 plan, PR 5); they
-// land early so the packing is pinned by tests independent of that scheme.
-#[allow(dead_code)]
+use crate::primitives::{PrpError, Symbol};
+use crate::OreError;
+
 /// Number of 6-bit blocks needed for `n` plaintext bytes.
 pub(crate) const fn num_blocks_6bit(n: usize) -> usize {
     (8 * n).div_ceil(6)
 }
 
-#[allow(dead_code)]
 /// Decompose `bytes` MSB-first into 6-bit block values, writing them to
 /// `out`. `out.len()` must be exactly `num_blocks_6bit(bytes.len())`.
 ///
@@ -44,6 +43,66 @@ pub(crate) fn decompose_6bit(bytes: &[u8], out: &mut [u8]) {
         let window = (hi << 8) | lo;
 
         *slot = ((window >> (10 - offset)) & 0x3f) as u8;
+    }
+}
+
+/// 6-bit block values, each `< 64` by construction, in any byte storage
+/// (`[u8; N]` for Bit6, `Vec<u8>` for the chained scheme).
+///
+/// There are two ways to make one. [`Self::decompose`] masks every value to
+/// six bits as it packs, so it never branches on the plaintext; the
+/// `OreEncrypt` and string paths use it. [`Self::check`] validates blocks a
+/// caller passes in directly and branches once on the result. The encryptors
+/// take a `Blocks6`, so the PRP gets an in-domain [`Symbol`] without a
+/// per-block range check on the secret.
+pub(crate) struct Blocks6<B>(B);
+
+impl<B: AsRef<[u8]>> Blocks6<B> {
+    /// Accept `blocks` if every value is `< 64`, else
+    /// [`OreError::PrpError`] (the error an out-of-domain symbol has always
+    /// produced). The values are folded together branch-free and the one
+    /// branch is on the folded result, so for well-formed input the branch
+    /// always goes the same way.
+    pub(crate) fn check(blocks: B) -> Result<Self, OreError> {
+        let high = blocks.as_ref().iter().fold(0u8, |acc, &b| acc | (b >> 6));
+        if high != 0 {
+            return Err(OreError::PrpError(PrpError));
+        }
+        Ok(Self(blocks))
+    }
+
+    /// The block values as bytes.
+    #[inline]
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+
+    /// Block `i` as a PRP symbol. `from_low_bits` is the identity here (the
+    /// value is `< 64`), and does not branch.
+    #[inline]
+    pub(crate) fn symbol(&self, i: usize) -> Symbol<64> {
+        Symbol::from_low_bits(self.0.as_ref()[i])
+    }
+
+    /// The number of blocks.
+    #[inline]
+    pub(crate) fn len(&self) -> usize {
+        self.0.as_ref().len()
+    }
+
+    /// The underlying storage.
+    #[inline]
+    pub(crate) fn inner(&self) -> &B {
+        &self.0
+    }
+}
+
+impl<B: AsRef<[u8]> + AsMut<[u8]>> Blocks6<B> {
+    /// Decompose `bytes` into `out` (see [`decompose_6bit`]).
+    /// `out.as_ref().len()` must be `num_blocks_6bit(bytes.len())`.
+    pub(crate) fn decompose(bytes: &[u8], mut out: B) -> Self {
+        decompose_6bit(bytes, out.as_mut());
+        Self(out)
     }
 }
 
@@ -100,6 +159,17 @@ mod tests {
         assert_eq!(num_blocks_6bit(14), 19); // Decimal
         assert_eq!(num_blocks_6bit(16), 22); // u128
         assert_eq!(num_blocks_6bit(0), 0);
+    }
+
+    #[test]
+    fn blocks6_check_accepts_exactly_the_domain() {
+        assert!(Blocks6::check([0u8, 63, 17]).is_ok());
+        assert!(matches!(
+            Blocks6::check([0u8, 64, 17]),
+            Err(OreError::PrpError(_))
+        ));
+        assert!(Blocks6::check([255u8]).is_err());
+        assert!(Blocks6::check(Vec::<u8>::new()).is_ok());
     }
 
     #[test]

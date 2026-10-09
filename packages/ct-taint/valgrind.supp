@@ -2,21 +2,10 @@
 # secret-dependent access or branch that the design documents and accepts;
 # scripts/ct-taint.sh fails on anything not listed here. Add an entry only
 # with a reason. Frame names are demangled Rust symbols, matched as globs.
-
-# `oblivious_lookup` rejects an out-of-range index before the constant-time
-# scan, and its callers test the `Result`. The comparison is against the
-# public table length, and every symbol the encryptors produce is in range,
-# so the branch direction is the same for every input and carries no
-# information; it is still a comparison on the plaintext symbol, which is
-# why memcheck reports it. Removing it means an infallible `permute` over a
-# typed in-domain symbol.
-{
-   oblivious-lookup-range-check
-   Memcheck:Cond
-   fun:*oblivious_lookup*
-}
-{
-   oblivious-lookup-range-check-result
-   Memcheck:Cond
-   fun:*branch<u8*PrpError*
-}
+#
+# There are none. The PRP's range check on the plaintext symbol, the last
+# accepted report, is gone: `permute` takes a typed in-domain `Symbol`, and
+# the encryptors get their symbols from the 6-bit decomposition, which masks
+# rather than checks. (`Blocks6::check`, the validation for callers that pass
+# raw symbols to `OreCipher::encrypt` or `encrypt_var`, is not on any path
+# the harness runs.)

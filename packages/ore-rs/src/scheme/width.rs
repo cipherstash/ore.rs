@@ -11,7 +11,7 @@
 //! as associated types instead.
 
 use crate::ciphertext::CipherTextBlock;
-use crate::primitives::{AesBlock, Hash, Prp};
+use crate::primitives::{AesBlock, Hash, Prp, Symbol};
 use crate::scheme::bit2::block_types::RightBlock32;
 use crate::scheme::bit2_w6::block_types::RightBlock8;
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -207,8 +207,10 @@ pub trait BlockWidth: sealed::Sealed + 'static {
     const DOMAIN: usize = 1 << Self::BITS;
     /// Right-ciphertext block: a `DOMAIN`-bit masked truth-table row.
     type RightBlock: CipherTextBlock + RightBitVec;
+    /// A block value: a [`Symbol`] of the `DOMAIN`-element domain.
+    type Symbol: Copy;
     /// PRP over the block domain.
-    type Prp: Prp<u8>;
+    type Prp: Prp<Self::Symbol>;
     /// Buffer holding `DOMAIN` random-oracle keys.
     type RoKeyBuf: AesBlockBuf;
 }
@@ -221,6 +223,7 @@ pub struct Bit8;
 impl BlockWidth for Bit8 {
     const BITS: usize = 8;
     type RightBlock = RightBlock32;
+    type Symbol = Symbol<256>;
     type Prp = crate::primitives::prp::KnuthShufflePRP<u8, 256>;
     type RoKeyBuf = [AesBlock; 256];
 }
@@ -238,6 +241,7 @@ impl BlockWidth for Bit6 {
     // Bit6's wire format is not frozen, so it adopts the constant-time,
     // ~9×-faster PRP construction. See `LemireFyPrp`.
     type Prp = crate::primitives::prp::LemireFyPrp<64>;
+    type Symbol = Symbol<64>;
     type RoKeyBuf = [AesBlock; 64];
 }
 
