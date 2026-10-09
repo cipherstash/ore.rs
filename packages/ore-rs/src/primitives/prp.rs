@@ -376,6 +376,22 @@ mod tests {
         assert!((0..64u8).any(|v| a.permute(sym64(v)) != c.permute(sym64(v))));
     }
 
+    /// `from_stream` rejects every stream shorter than 63 * 8 bytes and
+    /// accepts the first full length. Exhaustive over the 504 short lengths;
+    /// this was a Kani harness, which took 335 s to prove the same thing.
+    #[test]
+    fn fy_from_stream_rejects_every_short_stream() {
+        let buf = [0u8; 63 * 8];
+        for len in 0..buf.len() {
+            assert!(
+                LemireFyPrp::<64>::from_stream(&buf[..len]).is_err(),
+                "len {}",
+                len
+            );
+        }
+        assert!(LemireFyPrp::<64>::from_stream(&buf).is_ok());
+    }
+
     #[test]
     fn fy_rejects_short_key() {
         assert!(<LemireFyPrp<64> as Prp<Symbol<64>>>::new(&[0u8; 8]).is_err());
@@ -521,6 +537,11 @@ mod kani_proofs {
     /// reference builder's `permutation` and `inverse` for every stream whose
     /// first `SYMBOLIC_DRAWS` draws are arbitrary and whose remaining draws
     /// come from `FIXED_STREAM`: same shape as the harness above.
+    // 872 s on an M4, and on GitHub's ubuntu-latest runners it has been
+    // cancelled 26 to 32 minutes in on every run but one, so it runs only
+    // with `kani-full`. Every CI run still tests SWAR against the reference
+    // on every swap (`oblivious::tests`).
+    #[cfg(feature = "kani-full")]
     #[kani::proof]
     #[kani::unwind(65)]
     fn oblivious_swar_matches_reference_first_draws_symbolic() {
@@ -533,14 +554,5 @@ mod kani_proofs {
         oblivious::reference::build(&stream, &mut want_perm, &mut want_inverse);
         assert!(perm == want_perm);
         assert!(inverse == want_inverse);
-    }
-
-    /// `from_stream` rejects every stream shorter than 63 * 8 bytes.
-    #[kani::proof]
-    fn lemire_fy_from_stream_rejects_short() {
-        let buf: [u8; 503] = [0u8; 503];
-        let len: usize = kani::any();
-        kani::assume(len < 63 * 8);
-        assert!(LemireFyPrp::<64>::from_stream(&buf[..len]).is_err());
     }
 }

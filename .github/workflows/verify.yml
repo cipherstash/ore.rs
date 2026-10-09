@@ -9,8 +9,10 @@ name: "Verify"
 #   * fuzz: the libFuzzer targets (packages/ore-rs/fuzz) for the ciphertext
 #     parsers and raw comparators, time-boxed per pull request.
 #   * kani: the bounded model-checking harnesses (`#[cfg(kani)]`) for the pure
-#     building blocks. The exhaustive-length harness behind the `kani-full`
-#     feature is not run here (about 9 minutes); run
+#     building blocks. The two heaviest, behind the `kani-full` feature, are
+#     not run here: the exhaustive-length `ct_select_byte` harness (about 9
+#     minutes) and the SWAR-builder equivalence harness (about 15 minutes on
+#     an M4, and cancelled on GitHub's runners); run
 #     `cargo kani -p ore-rs --features kani-full` by hand for the full set.
 #
 # Like test.yml, this runs on every pull request regardless of base branch, so
@@ -120,6 +122,9 @@ jobs:
   kani:
     runs-on: ubuntu-latest
     name: "✅ Kani"
+    # A hung or runaway CBMC run should fail the job rather than hold a
+    # runner for GitHub's six-hour default.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 

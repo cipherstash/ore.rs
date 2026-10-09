@@ -36,8 +36,9 @@ decimal = ["dep:rust_decimal", "orderable-bytes/decimal"]
 # public API: a feature rather than a `cfg` so it never trips
 # `unexpected_cfgs`, and never enabled by a dependant.
 ct-bench = []
-# Adds the exhaustive-length Kani harness (about 9 minutes of the full
-# run). CI runs `cargo kani` without it; run
+# Adds the two heaviest Kani harnesses: exhaustive-length `ct_select_byte`
+# (about 9 minutes) and SWAR-builder equivalence (about 15 minutes on an M4,
+# too heavy for GitHub's runners). CI runs `cargo kani` without it; run
 # `cargo kani -p ore-rs --features kani-full` for the complete set.
 kani-full = []
 
