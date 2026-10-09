@@ -438,6 +438,9 @@ mod kani_proofs {
 
     /// `oblivious_lookup` over a table of any length 0..=256 returns
     /// `Ok(table[i])` when `i < len` and `Err` otherwise.
+    // Every length 0..=256 takes about seven minutes; the two lengths in
+    // use are proved above, so this runs only with `kani-full`.
+    #[cfg(feature = "kani-full")]
     #[kani::proof]
     #[kani::unwind(257)]
     fn oblivious_lookup_any_len_matches_index() {

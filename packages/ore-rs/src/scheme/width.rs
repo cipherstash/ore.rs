@@ -200,6 +200,9 @@ mod kani_proofs {
 
     /// `ct_select_byte(block, idx) == block[idx]` for every block of length
     /// 1..=256 (the stated domain) and every in-range `idx`.
+    // Every length 1..=256 takes about nine minutes; the shipped lengths are
+    // proved by the harness below, so this runs only with `kani-full`.
+    #[cfg(feature = "kani-full")]
     #[kani::proof]
     #[kani::unwind(257)]
     fn ct_select_byte_equals_index_up_to_256() {

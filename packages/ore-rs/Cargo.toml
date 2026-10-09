@@ -36,6 +36,10 @@ decimal = ["dep:rust_decimal", "orderable-bytes/decimal"]
 # public API: a feature rather than a `cfg` so it never trips
 # `unexpected_cfgs`, and never enabled by a dependant.
 ct-bench = []
+# Adds the two exhaustive-length Kani harnesses (about 16 minutes of the
+# full run). CI runs `cargo kani` without it; run
+# `cargo kani -p ore-rs --features kani-full` for the complete set.
+kani-full = []
 
 [dependencies]
 aes = { version = "0.8.2", features = ["zeroize"] }
