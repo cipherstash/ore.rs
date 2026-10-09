@@ -66,8 +66,6 @@ pub trait ToOrderableBytes {
 ///
 /// The length is exposed as [`ENCODED_LEN`](Self::ENCODED_LEN), and by
 /// convention [`ToOrderableBytes::Bytes`] is `[u8; Self::ENCODED_LEN]`.
-/// Per-type modules also re-export the same value as a free `pub const`
-/// for use in const contexts where naming the impl would be unwieldy.
 pub trait FixedOrderableBytes: ToOrderableBytes {
     /// Length, in bytes, of the canonical encoding produced by
     /// [`to_orderable_bytes`](ToOrderableBytes::to_orderable_bytes).
