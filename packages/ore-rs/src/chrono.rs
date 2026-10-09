@@ -9,35 +9,37 @@
 //! ordering properties.
 
 use crate::ciphertext::*;
+use crate::scheme::bit2::OreAes128;
 use crate::{OreCipher, OreEncrypt, OreError};
 use ::chrono::{DateTime, NaiveDate, Utc};
 use orderable_bytes::ToOrderableBytes;
+use rand::{Rng, SeedableRng};
 
 const NAIVE_DATE_LEN: usize = <NaiveDate as ToOrderableBytes>::ENCODED_LEN;
 const DATETIME_UTC_LEN: usize = <DateTime<Utc> as ToOrderableBytes>::ENCODED_LEN;
 
-impl<T: OreCipher> OreEncrypt<T> for NaiveDate {
-    type LeftOutput = Left<T, NAIVE_DATE_LEN>;
-    type FullOutput = CipherText<T, NAIVE_DATE_LEN>;
+impl<T_: Rng + SeedableRng> OreEncrypt<OreAes128<T_>> for NaiveDate {
+    type LeftOutput = Left<OreAes128<T_>, NAIVE_DATE_LEN>;
+    type FullOutput = CipherText<OreAes128<T_>, NAIVE_DATE_LEN>;
 
-    fn encrypt_left(&self, cipher: &T) -> Result<Self::LeftOutput, OreError> {
+    fn encrypt_left(&self, cipher: &OreAes128<T_>) -> Result<Self::LeftOutput, OreError> {
         cipher.encrypt_left(&self.to_orderable_bytes())
     }
 
-    fn encrypt(&self, cipher: &T) -> Result<Self::FullOutput, OreError> {
+    fn encrypt(&self, cipher: &OreAes128<T_>) -> Result<Self::FullOutput, OreError> {
         cipher.encrypt(&self.to_orderable_bytes())
     }
 }
 
-impl<T: OreCipher> OreEncrypt<T> for DateTime<Utc> {
-    type LeftOutput = Left<T, DATETIME_UTC_LEN>;
-    type FullOutput = CipherText<T, DATETIME_UTC_LEN>;
+impl<T_: Rng + SeedableRng> OreEncrypt<OreAes128<T_>> for DateTime<Utc> {
+    type LeftOutput = Left<OreAes128<T_>, DATETIME_UTC_LEN>;
+    type FullOutput = CipherText<OreAes128<T_>, DATETIME_UTC_LEN>;
 
-    fn encrypt_left(&self, cipher: &T) -> Result<Self::LeftOutput, OreError> {
+    fn encrypt_left(&self, cipher: &OreAes128<T_>) -> Result<Self::LeftOutput, OreError> {
         cipher.encrypt_left(&self.to_orderable_bytes())
     }
 
-    fn encrypt(&self, cipher: &T) -> Result<Self::FullOutput, OreError> {
+    fn encrypt(&self, cipher: &OreAes128<T_>) -> Result<Self::FullOutput, OreError> {
         cipher.encrypt(&self.to_orderable_bytes())
     }
 }
