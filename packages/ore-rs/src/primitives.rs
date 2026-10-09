@@ -1,3 +1,4 @@
+pub mod cmac;
 pub mod hash;
 pub mod prf;
 pub mod prp;

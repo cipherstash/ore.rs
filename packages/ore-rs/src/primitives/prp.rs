@@ -187,6 +187,36 @@ macro_rules! impl_lemire_fy_prp {
             "LemireFyPrp: the oblivious builders are written for a 64-entry domain"
         );
 
+        impl LemireFyPrp<$domain> {
+            /// Build the permutation directly from a precomputed draw stream
+            /// (shape (ii)): `stream` must be at least `($domain - 1) * 8`
+            /// bytes, consumed as `$domain - 1` little-endian u64 draws and
+            /// Lemire-reduced. The chained scheme feeds the CMAC accumulator's
+            /// `PRP_STREAM` branch here, avoiding a per-block AES key schedule;
+            /// [`Prp::new`] feeds it an AES-CTR keystream. Either way the
+            /// tables come from the oblivious builder ([`oblivious::build`]),
+            /// so no address depends on the stream.
+            pub(crate) fn from_stream(stream: &[u8]) -> PrpResult<Self> {
+                if stream.len() < ($domain - 1) * 8 {
+                    return Err(PrpError);
+                }
+
+                // Fisher–Yates with Lemire-reduced wide draws: draw `d`
+                // (8 bytes) drives step `$domain - 1 - d`. Fixed trip count,
+                // branch-free index reduction, and no secret-dependent
+                // address: the oblivious builder keeps both tables in
+                // registers (or masked words) and maintains the inverse
+                // alongside the swaps. It wipes its copies of each draw.
+                let mut perm = Self {
+                    permutation: [0u8; $domain],
+                    inverse: [0u8; $domain],
+                };
+                oblivious::build(stream, &mut perm.permutation, &mut perm.inverse);
+
+                Ok(perm)
+            }
+        }
+
         impl Prp<u8> for LemireFyPrp<$domain> {
             fn new(key: &[u8]) -> PrpResult<Self> {
                 if key.len() < 16 {
@@ -195,7 +225,8 @@ macro_rules! impl_lemire_fy_prp {
 
                 // Fixed-count AES-CTR keystream from the seed: counter in
                 // the first 4 bytes (big-endian), matching the existing
-                // PRNG's counter convention.
+                // PRNG's counter convention. Shape (i): a fresh key schedule
+                // per call. Shape (ii) skips this via `from_stream`.
                 // Encryption only: no decryption schedule is built or copied.
                 let cipher = Aes128Enc::new(GenericArray::from_slice(&key[0..16]));
                 let mut blocks = [AesBlock::default(); $stream_blocks];
@@ -209,17 +240,7 @@ macro_rules! impl_lemire_fy_prp {
                     stream[i * 16..(i + 1) * 16].copy_from_slice(b);
                 }
 
-                // Fisher–Yates with Lemire-reduced wide draws: draw `d`
-                // (8 bytes) drives step `$domain - 1 - d`. Fixed trip count,
-                // branch-free index reduction, and no secret-dependent
-                // address: the oblivious builder keeps both tables in
-                // registers (or masked words) and maintains the inverse
-                // alongside the swaps. It wipes its copies of each draw.
-                let mut perm = Self {
-                    permutation: [0u8; $domain],
-                    inverse: [0u8; $domain],
-                };
-                oblivious::build(&stream, &mut perm.permutation, &mut perm.inverse);
+                let perm = Self::from_stream(&stream)?;
 
                 // The keystream determined the permutation — wipe it.
                 stream.zeroize();
