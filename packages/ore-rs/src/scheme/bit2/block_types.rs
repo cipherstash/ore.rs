@@ -31,6 +31,12 @@ impl RightBlock32 {
     /// The raw bitvector bytes, LSB-first within each byte — the bit order
     /// used by [`Self::set_bit`] / [`Self::get_bit`].
     #[inline]
+    pub(crate) fn bytes(&self) -> &[u8] {
+        &self.data
+    }
+
+    /// Mutable form of [`Self::bytes`].
+    #[inline]
     pub(crate) fn bytes_mut(&mut self) -> &mut [u8] {
         &mut self.data
     }
