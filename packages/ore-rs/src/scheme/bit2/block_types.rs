@@ -17,15 +17,15 @@ pub struct RightBlock32 {
 }
 
 impl RightBlock32 {
-    /// Set bit `bit` (in `0..256`) to `value` (which must be `0` or `1`).
-    /// Panics in debug if `bit >= 256`.
+    /// Set bit `bit` (in `0..256`) to `value` (which must be `0` or `1`),
+    /// overwriting whatever the bit held. Panics in debug if `bit >= 256`.
     #[inline]
     pub fn set_bit(&mut self, bit: usize, value: u8) {
         debug_assert!(bit < 256);
         let byte_index = bit / 8;
-        let mask = bit % 8;
-        let v = value << mask;
-        self.data[byte_index] |= v;
+        let shift = bit % 8;
+        let b = &mut self.data[byte_index];
+        *b = (*b & !(1 << shift)) | ((value & 1) << shift);
     }
 
     /// The raw bitvector bytes, LSB-first within each byte — the bit order
@@ -107,6 +107,22 @@ mod tests {
 
         block.set_bit(255, 1);
         assert_eq!(block.get_bit(255), 1);
+    }
+
+    #[test]
+    fn set_bit_overwrites_rather_than_ors() {
+        let mut block = RightBlock32::default();
+        block.set_bit(17, 1);
+        block.set_bit(17, 0);
+        assert_eq!(block.get_bit(17), 0);
+        block.set_bit(18, 1);
+        block.set_bit(16, 1);
+        block.set_bit(17, 0);
+        assert_eq!(
+            (block.get_bit(16), block.get_bit(18)),
+            (1, 1),
+            "neighbours untouched"
+        );
     }
 
     #[test]
