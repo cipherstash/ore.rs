@@ -506,6 +506,35 @@ mod tests {
         }
     }
 
+    /// The smallest draw that `lemire_draw` reduces to `j` at step `i`:
+    /// `ceil(j * 2^64 / (i + 1))`.
+    fn draw_for(i: usize, j: usize) -> u64 {
+        let n = i as u128 + 1;
+        (((j as u128) << 64).div_ceil(n)) as u64
+    }
+
+    /// Every step `i` with every swap index `j` in `0..=i`, through the
+    /// dispatched builder (NEON on aarch64, SSSE3 or SWAR on x86_64) and the
+    /// portable ones. Kani cannot model the NEON and SSSE3 intrinsics, so
+    /// this is the coverage those builders get: each of the 2 079 `(i, j)`
+    /// swaps is exercised at least once, inside a full build whose other
+    /// draws vary, and the tables must equal the reference builder's.
+    #[test]
+    fn builders_match_reference_for_every_swap() {
+        for i in 1..DOMAIN {
+            for j in 0..=i {
+                let mut s = stream_from(&[i as u8, j as u8]);
+                let d = DOMAIN - 1 - i;
+                s[d * 8..d * 8 + 8].copy_from_slice(&draw_for(i, j).to_le_bytes());
+                assert_eq!(usize::from(lemire_draw(&s, i)), j, "draw_for({i}, {j})");
+
+                let want = run(reference::build, &s);
+                assert_eq!(run(build, &s), want, "dispatched, i {i} j {j}");
+                assert_eq!(run(swar::build, &s), want, "swar, i {i} j {j}");
+            }
+        }
+    }
+
     /// The reference tables are a permutation of `0..64` and its inverse,
     /// so matching them means every builder builds one.
     #[test]

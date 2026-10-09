@@ -445,16 +445,27 @@ mod kani_proofs {
         }
     }
 
-    /// Lemire reduction `((x * (i + 1)) >> 64)` is `<= i` for every `x: u64`
-    /// and every step index `i < 64` (the `LemireFyPrp<64>` domain), so the
-    /// Fisher–Yates swap index never exceeds the step index.
+    /// `oblivious::lemire_draw`, the draw every builder uses, reads step
+    /// `i`'s draw from bytes `(63 - i) * 8 ..+ 8` as a little-endian `u64`
+    /// and reduces it to `0..=i` by multiply-high: for every stream and every
+    /// step `1..64` it is `(x * (i + 1)) >> 64` of that draw, and so never
+    /// exceeds `i`. Proved on the function itself, not a restatement of its
+    /// formula. The steps are a loop rather than a symbolic `i`, so every
+    /// slice offset is concrete once unwound.
     #[kani::proof]
-    fn lemire_reduction_in_range() {
-        let x: u64 = kani::any();
-        let i: u64 = kani::any();
-        kani::assume(i < 64);
-        let j = (x as u128 * (i as u128 + 1)) >> 64;
-        assert!(j <= i as u128);
+    #[kani::unwind(64)]
+    fn lemire_draw_in_range() {
+        let stream: [u8; 63 * 8] = kani::any();
+        for i in 1..64 {
+            let d = 63 - i;
+            let mut draw = [0u8; 8];
+            draw.copy_from_slice(&stream[d * 8..d * 8 + 8]);
+            let x = u64::from_le_bytes(draw);
+
+            let j = oblivious::lemire_draw(&stream, i);
+            assert_eq!(u128::from(j), (u128::from(x) * (i as u128 + 1)) >> 64);
+            assert!(usize::from(j) <= i);
+        }
     }
 
     /// Asserts `perm` is a permutation of `0..64` with `inverse` its
