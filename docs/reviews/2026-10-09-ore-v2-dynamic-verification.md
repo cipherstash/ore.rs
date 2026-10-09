@@ -71,7 +71,9 @@ The legacy `OreAes128::compare_raw_slices` inferred the block count from the
 length without checking it: two empty slices underflowed the nonce
 subtraction, and a partial block sliced past the end. Fixed (`None` for any
 length that is not `n·(1 + 16 + 32) + 16`), with a regression test; 16.5 M
-runs clean afterwards. This is a pre-existing bug in the frozen legacy
+runs clean afterwards. `n = 0` is included: a nonce-only input is the valid
+ciphertext of a zero-byte plaintext, which the parser also accepts, and both
+comparators return `Equal` on it. This is a pre-existing bug in the frozen legacy
 scheme, not a v2 regression, and it reaches any caller that compares stored
 bytes without parsing them first.
 
@@ -144,7 +146,9 @@ tags are deterministic), so this did not widen the scheme's leakage
 profile; it moved part of it from "the ciphertext holder" to "anyone who can
 time the comparison", which the constant-time scan was written to prevent.
 
-**Fix (applied in the Bit6 and chained scheme commits).** The scan now
+**Fix (applied to the Bit6 raw and chained comparators in their scheme
+commits; in this PR to the Bit6 typed `Ord` and to both legacy `OreAes128`
+comparators, raw and typed).** The scan now
 latches `xt[l]`, `f[l]` and `right[l]` as it runs, with
 `width::ct_assign_bytes` under the choice "this is the first differing
 block" (set for exactly one `n`), and the resolution step hashes and
@@ -152,7 +156,10 @@ bit-selects from the latched copies. Every load is now indexed by the public
 loop counter. The added cost is one 8-byte right-block read and about 25
 masked byte copies per block, against a scan already comparing 17 bytes per
 block; the chained benchmarks in `docs/benchmarks/` were not re-run, since
-the comparator is not on the encrypt path they time.
+the comparator is not on the encrypt path they time. The legacy comparator
+had the same post-scan `l`-indexed loads and takes the same fix, which
+leaves its frozen wire format unchanged; it has no dudect bench, so the
+legacy fix rests on the same reasoning, not a measurement.
 
 The chained effect size fell from 0.020 to 0.0015, below the L1-resident
 control measured before the fix, so the cache component is gone. What

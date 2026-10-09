@@ -29,7 +29,7 @@ use crate::{
     primitives::{
         hash::FixedPiZ2Hash, prf::Aes128Prf, AesBlock, Hash, HashKey, Prf, Prp, NONCE_SIZE,
     },
-    scheme::width::{ct_assign_bytes, AesBlockBuf, Bit6, BlockWidth},
+    scheme::width::{ct_assign_bytes, AesBlockBuf, Bit6, BlockWidth, RightBitVec},
     OreCipher, OreError, PlainText,
 };
 
@@ -364,26 +364,33 @@ impl<const N: usize> PartialEq for CipherText<OreAes128Bit6ChaCha20, N> {
 impl<const N: usize> Ord for CipherText<OreAes128Bit6ChaCha20, N> {
     fn cmp(&self, b: &Self) -> Ordering {
         let mut is_equal = Choice::from(1);
-        let mut l: u64 = 0; // Unequal block
+        // Latch the first differing block during the scan, as in
+        // `compare_raw_slices`: no load after the loop is indexed by its
+        // position.
+        let mut sel_xt = 0u8;
+        let mut sel_f = LeftBlock16::default();
+        let mut sel_right = RightBlock8::default();
 
         for n in 0..N {
             let condition: Choice =
                 !(self.left.xt[n].ct_eq(&b.left.xt[n])) | !(self.left.f[n].ct_eq(&b.left.f[n]));
+            // Set for exactly one `n`: the first differing block.
+            let first = is_equal & condition;
 
-            l.conditional_assign(&(n as u64), is_equal & condition);
-            is_equal.conditional_assign(&Choice::from(0), is_equal & condition);
+            sel_xt.conditional_assign(&self.left.xt[n], first);
+            ct_assign_bytes(&mut sel_f, &self.left.f[n], first);
+            ct_assign_bytes(sel_right.as_mut_bytes(), b.right.data[n].bytes(), first);
+            is_equal.conditional_assign(&Choice::from(0), first);
         }
-
-        let l: usize = l as usize;
 
         if bool::from(is_equal) {
             return Ordering::Equal;
         }
 
         let hash: Z2Hash = Hash::new(HashKey::from_slice(&b.right.nonce));
-        let h = hash.hash(&self.left.f[l]);
+        let h = hash.hash(&sel_f);
 
-        let test = b.right.data[l].get_bit(self.left.xt[l] as usize) ^ h;
+        let test = sel_right.get_bit(sel_xt as usize) ^ h;
         if test == 1 {
             return Ordering::Greater;
         }

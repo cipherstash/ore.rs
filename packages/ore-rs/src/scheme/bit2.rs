@@ -9,7 +9,7 @@ use crate::{
     primitives::{
         hash::Aes128Z2Hash, prf::Aes128Prf, AesBlock, Hash, HashKey, Prf, Prp, NONCE_SIZE,
     },
-    scheme::width::{AesBlockBuf, Bit8, BlockWidth, RightBitVec},
+    scheme::width::{ct_assign_bytes, AesBlockBuf, Bit8, BlockWidth, RightBitVec},
     OreCipher, OreError, PlainText,
 };
 
@@ -231,45 +231,58 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
 
         // The legacy wire has no header: the block count is implied by the
         // length, `n·(1 + left + right) + nonce`. Anything that does not fit
-        // that shape exactly (too short for a nonce, a partial block, or no
-        // blocks at all) is not a ciphertext of this scheme, and the slicing
-        // below would panic on it.
+        // that shape exactly (too short for a nonce, or a partial block) is
+        // not a ciphertext of this scheme, and the slicing below would panic
+        // on it. A nonce-only input is the valid `N = 0` ciphertext, which
+        // `CipherText::<_, 0>::from_slice` also accepts; it compares Equal.
         let body = a.len().checked_sub(NONCE_SIZE)?;
         let per_block = left_size + right_size + 1;
-        if body == 0 || body % per_block != 0 {
+        if body % per_block != 0 {
             return None;
         }
         let num_blocks = body / per_block;
 
         let mut is_equal = Choice::from(1);
-        let mut l: u64 = 0; // Unequal block
+        // What the resolution step needs from the first differing block `l`:
+        // `a`'s permuted symbol and PRF tag, and `b`'s right bitvector. All
+        // three are latched *inside* the scan, under the choice "this is the
+        // first difference", so no load after the loop is indexed by `l`.
+        // The right blocks are the one region the scan would otherwise never
+        // touch, so a direct `right[l]` afterwards hits or misses the cache
+        // according to `l`; measured as a timing signal, see `docs/reviews/`.
+        // The wire format is unchanged.
+        let mut sel_xt = 0u8;
+        let mut sel_f = [0u8; LeftBlock16::BLOCK_SIZE];
+        let mut sel_right = [0u8; RightBlock32::BLOCK_SIZE];
 
-        // Slices for the PRF ("f") blocks
+        // Slices for the PRF ("f") blocks and the right half.
         let a_f = &a[num_blocks..];
         let b_f = &b[num_blocks..];
+        let b_right = &b[num_blocks * (left_size + 1)..];
+        let b_right_blocks = &b_right[NONCE_SIZE..];
 
         for n in 0..num_blocks {
             let prp_eq: Choice = !a[n].ct_eq(&b[n]);
             let left_block_comparison: Choice = !left_block(a_f, n).ct_eq(left_block(b_f, n));
             let condition: Choice = prp_eq | left_block_comparison;
+            // Set for exactly one `n`: the first differing block.
+            let first = is_equal & condition;
 
-            l.conditional_assign(&(n as u64), is_equal & condition);
-            is_equal.conditional_assign(&Choice::from(0), is_equal & condition);
+            sel_xt.conditional_assign(&a[n], first);
+            ct_assign_bytes(&mut sel_f, left_block(a_f, n), first);
+            ct_assign_bytes(&mut sel_right, right_block(b_right_blocks, n), first);
+            is_equal.conditional_assign(&Choice::from(0), first);
         }
-
-        let l: usize = l as usize;
 
         if bool::from(is_equal) {
             return Some(Ordering::Equal);
         }
 
-        let b_right = &b[num_blocks * (left_size + 1)..];
         let hash_key = HashKey::from_slice(&b_right[0..NONCE_SIZE]);
         let hash: Aes128Z2Hash = Hash::new(hash_key);
-        let h = hash.hash(left_block(a_f, l));
+        let h = hash.hash(&sel_f);
 
-        let target_block = right_block(&b_right[NONCE_SIZE..], l);
-        let test = get_bit(target_block, a[l] as usize) ^ h;
+        let test = get_bit(&sel_right, sel_xt as usize) ^ h;
 
         if test == 1 {
             return Some(Ordering::Greater);
@@ -311,26 +324,33 @@ impl<const N: usize> PartialEq for CipherText<OreAes128ChaCha20, N> {
 impl<const N: usize> Ord for CipherText<OreAes128ChaCha20, N> {
     fn cmp(&self, b: &Self) -> Ordering {
         let mut is_equal = Choice::from(1);
-        let mut l: u64 = 0; // Unequal block
+        // Latch the first differing block during the scan, as in
+        // `compare_raw_slices`: no load after the loop is indexed by its
+        // position.
+        let mut sel_xt = 0u8;
+        let mut sel_f = LeftBlock16::default();
+        let mut sel_right = RightBlock32::default();
 
         for n in 0..N {
             let condition: Choice =
                 !(self.left.xt[n].ct_eq(&b.left.xt[n])) | !(self.left.f[n].ct_eq(&b.left.f[n]));
+            // Set for exactly one `n`: the first differing block.
+            let first = is_equal & condition;
 
-            l.conditional_assign(&(n as u64), is_equal & condition);
-            is_equal.conditional_assign(&Choice::from(0), is_equal & condition);
+            sel_xt.conditional_assign(&self.left.xt[n], first);
+            ct_assign_bytes(&mut sel_f, &self.left.f[n], first);
+            ct_assign_bytes(sel_right.bytes_mut(), b.right.data[n].bytes(), first);
+            is_equal.conditional_assign(&Choice::from(0), first);
         }
-
-        let l: usize = l as usize;
 
         if bool::from(is_equal) {
             return Ordering::Equal;
         }
 
         let hash: Aes128Z2Hash = Hash::new(AesBlock::from_slice(&b.right.nonce));
-        let h = hash.hash(&self.left.f[l]);
+        let h = hash.hash(&sel_f);
 
-        let test = b.right.data[l].get_bit(self.left.xt[l] as usize) ^ h;
+        let test = sel_right.get_bit(sel_xt as usize) ^ h;
         if test == 1 {
             return Ordering::Greater;
         }
@@ -382,8 +402,6 @@ mod tests {
         assert!(Ore::compare_raw_slices(&good, &good).is_some());
 
         assert_eq!(Ore::compare_raw_slices(&[], &[]), None);
-        let nonce_only = vec![0u8; NONCE_SIZE];
-        assert_eq!(Ore::compare_raw_slices(&nonce_only, &nonce_only), None);
         let short = vec![0u8; NONCE_SIZE - 1];
         assert_eq!(Ore::compare_raw_slices(&short, &short), None);
         let partial = &good[..good.len() - 1];
@@ -391,6 +409,24 @@ mod tests {
         let mut longer = good.clone();
         longer.push(0);
         assert_eq!(Ore::compare_raw_slices(&longer, &longer), None);
+    }
+
+    /// A zero-block plaintext encrypts to a nonce-only ciphertext. The raw
+    /// comparator must agree with the parsed one on it, not refuse it.
+    #[test]
+    fn compare_raw_slices_accepts_zero_blocks() {
+        let ore = init_ore();
+        let a = [0u8; 0].encrypt(&ore).unwrap();
+        let b = [0u8; 0].encrypt(&ore).unwrap();
+        let (a_bytes, b_bytes) = (a.to_bytes(), b.to_bytes());
+        assert_eq!(a_bytes.len(), NONCE_SIZE);
+
+        let parsed = CipherText::<Ore, 0>::from_slice(&a_bytes).unwrap();
+        assert_eq!(parsed.cmp(&b), Ordering::Equal);
+        assert_eq!(
+            Ore::compare_raw_slices(&a_bytes, &b_bytes),
+            Some(Ordering::Equal)
+        );
     }
 
     quickcheck! {
