@@ -271,3 +271,46 @@ mod tests {
         }
     }
 }
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    fn any_branch() -> Branch {
+        if kani::any() {
+            Branch::RoKey
+        } else {
+            Branch::PrpStream
+        }
+    }
+
+    /// `final_block` is injective over its full domain: for all
+    /// `(branch, n, s, width)` pairs, equal blocks imply equal tuples.
+    #[kani::proof]
+    fn final_block_injective() {
+        let (b1, n1, s1, w1) = (any_branch(), kani::any(), kani::any(), kani::any());
+        let (b2, n2, s2, w2) = (any_branch(), kani::any(), kani::any(), kani::any());
+        if final_block(b1, n1, s1, w1) == final_block(b2, n2, s2, w2) {
+            assert!(b1 == b2 && n1 == n2 && s1 == s2 && w1 == w2);
+        }
+    }
+
+    /// `prefix_block` is injective over its full domain: for all
+    /// `(pos, sym)` pairs, equal blocks imply equal pairs.
+    #[kani::proof]
+    fn prefix_block_injective() {
+        let (p1, y1): (u16, u8) = (kani::any(), kani::any());
+        let (p2, y2): (u16, u8) = (kani::any(), kani::any());
+        if prefix_block(p1, y1) == prefix_block(p2, y2) {
+            assert!(p1 == p2 && y1 == y2);
+        }
+    }
+
+    /// No prefix block equals any final block, over both full domains.
+    #[kani::proof]
+    fn prefix_and_final_blocks_disjoint() {
+        let pb = prefix_block(kani::any(), kani::any());
+        let fb = final_block(any_branch(), kani::any(), kani::any(), kani::any());
+        assert!(pb != fb);
+    }
+}

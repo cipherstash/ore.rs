@@ -52,6 +52,10 @@ subtle-ng = "2.5.0"
 zeroize = { version = "1.5.7", features = ["zeroize_derive"] }
 thiserror = "1.0.38"
 
+# `cfg(kani)` gates the Kani proof harnesses (compiled only by `cargo kani`).
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+
 [[bench]]
 name = "oreaes128"
 harness = false

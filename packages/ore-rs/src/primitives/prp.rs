@@ -406,3 +406,139 @@ mod tests {
         }
     }
 }
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// `oblivious_lookup` over a 64-entry table returns `Ok(table[i])` for
+    /// every `i < 64` and `Err` for every `i >= 64` (all tables, all `u8`).
+    #[kani::proof]
+    #[kani::unwind(65)]
+    fn oblivious_lookup_64_matches_index() {
+        let table: [u8; 64] = kani::any();
+        let index: u8 = kani::any();
+        let got = oblivious_lookup(&table, index);
+        if index < 64 {
+            assert!(matches!(got, Ok(v) if v == table[index as usize]));
+        } else {
+            assert!(got.is_err());
+        }
+    }
+
+    /// `oblivious_lookup` over a 256-entry table returns `Ok(table[i])` for
+    /// every `u8` index (all tables; no index is out of range).
+    #[kani::proof]
+    #[kani::unwind(257)]
+    fn oblivious_lookup_256_matches_index() {
+        let table: [u8; 256] = kani::any();
+        let index: u8 = kani::any();
+        assert!(matches!(oblivious_lookup(&table, index), Ok(v) if v == table[index as usize]));
+    }
+
+    /// `oblivious_lookup` over a table of any length 0..=256 returns
+    /// `Ok(table[i])` when `i < len` and `Err` otherwise.
+    #[kani::proof]
+    #[kani::unwind(257)]
+    fn oblivious_lookup_any_len_matches_index() {
+        let buf: [u8; 256] = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len <= 256);
+        let table = &buf[..len];
+        let index: u8 = kani::any();
+        let got = oblivious_lookup(table, index);
+        if usize::from(index) < len {
+            assert!(matches!(got, Ok(v) if v == table[index as usize]));
+        } else {
+            assert!(got.is_err());
+        }
+    }
+
+    /// Lemire reduction `((x * (i + 1)) >> 64)` is `<= i` for every `x: u64`
+    /// and every step index `i < 64` (the `LemireFyPrp<64>` domain), so the
+    /// Fisher–Yates swap index never exceeds the step index.
+    #[kani::proof]
+    fn lemire_reduction_in_range() {
+        let x: u64 = kani::any();
+        let i: u64 = kani::any();
+        kani::assume(i < 64);
+        let j = (x as u128 * (i as u128 + 1)) >> 64;
+        assert!(j <= i as u128);
+    }
+
+    /// Asserts `perm` is a permutation of `0..64` with `inverse` its
+    /// two-sided inverse. Checking `perm[i] < 64` and `inverse[perm[i]] == i`
+    /// for every `i` suffices: it makes `perm` injective on a 64-element
+    /// domain into `0..64`, hence a bijection, and `inverse` then agrees with
+    /// `perm⁻¹` at every point of `0..64`.
+    fn assert_is_permutation(perm: &[u8; 64], inverse: &[u8; 64]) {
+        for (i, p) in perm.iter().enumerate() {
+            assert!(*p < 64);
+            assert_eq!(inverse[*p as usize] as usize, i);
+        }
+    }
+
+    /// A fixed non-trivial keystream, used for the concrete draws of the
+    /// bounded harness below.
+    const FIXED_STREAM: [u8; 512] = {
+        let mut s = [0u8; 512];
+        let mut n = 0;
+        while n < 512 {
+            s[n] = (n as u8).wrapping_mul(167).wrapping_add(13);
+            n += 1;
+        }
+        s
+    };
+
+    /// Number of leading symbolic draws in the bounded harness below.
+    const SYMBOLIC_DRAWS: usize = 6;
+
+    /// The reference builder (textbook Fisher–Yates, which the oblivious
+    /// builders are proved equal to below) yields a permutation of `0..64`
+    /// and its inverse for every stream whose first `SYMBOLIC_DRAWS` draws
+    /// (driving steps 63 down to `64 - SYMBOLIC_DRAWS`) are arbitrary and
+    /// whose remaining draws come from `FIXED_STREAM`. Proved on the
+    /// reference rather than through `from_stream` (the SWAR builder under
+    /// Kani) because that takes under half the time; the harness below
+    /// carries the property over to the SWAR builder.
+    /// With all 63 draws symbolic CBMC does not finish in 30 minutes; 8
+    /// symbolic draws does not finish in 20.
+    #[kani::proof]
+    #[kani::unwind(65)]
+    fn lemire_fy_reference_is_permutation_first_draws_symbolic() {
+        let mut stream = FIXED_STREAM;
+        let head: [u8; SYMBOLIC_DRAWS * 8] = kani::any();
+        stream[..SYMBOLIC_DRAWS * 8].copy_from_slice(&head);
+        let (mut perm, mut inverse) = ([0u8; 64], [0u8; 64]);
+        oblivious::reference::build(&stream, &mut perm, &mut inverse);
+        assert_is_permutation(&perm, &inverse);
+    }
+
+    /// The SWAR oblivious builder (what `from_stream` dispatches to under
+    /// Kani, and on targets with neither NEON nor SSSE3) builds exactly the
+    /// reference builder's `permutation` and `inverse` for every stream whose
+    /// first `SYMBOLIC_DRAWS` draws are arbitrary and whose remaining draws
+    /// come from `FIXED_STREAM`: same shape as the harness above.
+    #[kani::proof]
+    #[kani::unwind(65)]
+    fn oblivious_swar_matches_reference_first_draws_symbolic() {
+        let mut stream = FIXED_STREAM;
+        let head: [u8; SYMBOLIC_DRAWS * 8] = kani::any();
+        stream[..SYMBOLIC_DRAWS * 8].copy_from_slice(&head);
+        let (mut perm, mut inverse) = ([0u8; 64], [0u8; 64]);
+        oblivious::swar::build(&stream, &mut perm, &mut inverse);
+        let (mut want_perm, mut want_inverse) = ([0u8; 64], [0u8; 64]);
+        oblivious::reference::build(&stream, &mut want_perm, &mut want_inverse);
+        assert!(perm == want_perm);
+        assert!(inverse == want_inverse);
+    }
+
+    /// `from_stream` rejects every stream shorter than 63 * 8 bytes.
+    #[kani::proof]
+    fn lemire_fy_from_stream_rejects_short() {
+        let buf: [u8; 503] = [0u8; 503];
+        let len: usize = kani::any();
+        kani::assume(len < 63 * 8);
+        assert!(LemireFyPrp::<64>::from_stream(&buf[..len]).is_err());
+    }
+}
