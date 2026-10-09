@@ -124,6 +124,29 @@ mod tests {
             xb.cmp(&yb) == xq.cmp(&yq)
         }
 
+        /// Order is preserved across different lengths too, with a proper
+        /// prefix sorting first: the chained scheme's string order.
+        fn order_preserved_any_lengths(a: Vec<u8>, b: Vec<u8>) -> bool {
+            let mut aq = vec![0u8; num_blocks_6bit(a.len())];
+            let mut bq = vec![0u8; num_blocks_6bit(b.len())];
+            decompose_6bit(&a, &mut aq);
+            decompose_6bit(&b, &mut bq);
+            a.cmp(&b) == aq.cmp(&bq)
+        }
+
+        /// The case padding could break: `b` extends `a`, so the two share
+        /// `a`'s bits and `a`'s zero-padded last block meets `b`'s real
+        /// bits. Random pairs almost never share a prefix, hence this case
+        /// on its own.
+        fn order_preserved_proper_prefix(a: Vec<u8>, tail: Vec<u8>) -> bool {
+            let b: Vec<u8> = a.iter().chain(&tail).copied().collect();
+            let mut aq = vec![0u8; num_blocks_6bit(a.len())];
+            let mut bq = vec![0u8; num_blocks_6bit(b.len())];
+            decompose_6bit(&a, &mut aq);
+            decompose_6bit(&b, &mut bq);
+            a.cmp(&b) == aq.cmp(&bq)
+        }
+
         /// Every block value is in the 6-bit domain.
         fn blocks_in_domain(bytes: Vec<u8>) -> bool {
             let mut out = vec![0u8; num_blocks_6bit(bytes.len())];
@@ -261,22 +284,29 @@ mod kani_proofs {
         }
     }
 
-    /// For any two inputs of the same length `0..=16`, lexicographic order
-    /// of the block values equals lexicographic order of the bytes.
+    /// For any two inputs of lengths `0..=16`, equal or not, lexicographic
+    /// order of the block values (a proper prefix sorting first) equals
+    /// lexicographic order of the bytes. This is the order the chained
+    /// comparator computes for strings of different lengths: the first
+    /// differing block decides, else the shorter sorts first. The zero
+    /// padding of a shorter input's last block is what could break it, and
+    /// does not: it is never greater than the longer input's real bits.
     #[kani::proof]
     #[kani::unwind(23)]
     fn decompose_6bit_preserves_order() {
         let a_buf: [u8; MAX_LEN] = kani::any();
         let b_buf: [u8; MAX_LEN] = kani::any();
-        let len: usize = kani::any();
-        kani::assume(len <= MAX_LEN);
-        let a = &a_buf[..len];
-        let b = &b_buf[..len];
-        let nb = num_blocks_6bit(len);
+        let a_len: usize = kani::any();
+        let b_len: usize = kani::any();
+        kani::assume(a_len <= MAX_LEN && b_len <= MAX_LEN);
+        let a = &a_buf[..a_len];
+        let b = &b_buf[..b_len];
+        let a_nb = num_blocks_6bit(a_len);
+        let b_nb = num_blocks_6bit(b_len);
         let mut a_out = [0u8; MAX_BLOCKS];
         let mut b_out = [0u8; MAX_BLOCKS];
-        decompose_6bit(a, &mut a_out[..nb]);
-        decompose_6bit(b, &mut b_out[..nb]);
-        assert!(a.cmp(b) == a_out[..nb].cmp(&b_out[..nb]));
+        decompose_6bit(a, &mut a_out[..a_nb]);
+        decompose_6bit(b, &mut b_out[..b_nb]);
+        assert!(a.cmp(b) == a_out[..a_nb].cmp(&b_out[..b_nb]));
     }
 }
