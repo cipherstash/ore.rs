@@ -30,7 +30,14 @@ const K2: [u8; 16] = [
 ];
 
 /// Inputs per class, precomputed so the measured region is the call alone.
-const POOL: usize = 512;
+/// `CT_DUDECT_POOL` overrides it: a pool of a few entries keeps every input
+/// in L1, which separates cache effects from arithmetic ones.
+fn pool_size() -> usize {
+    std::env::var("CT_DUDECT_POOL")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(512)
+}
 /// Measurements per invocation of a bench (dudect's `--continuous` loops).
 const SAMPLES: usize = 100_000;
 
@@ -74,9 +81,9 @@ fn class(rng: &mut BenchRng) -> Class {
 /// 6-bit block differs (`Right`).
 fn bit6_compare_first_vs_last_block(runner: &mut CtRunner, rng: &mut BenchRng) {
     let ore = bit6();
-    let mut left = Vec::with_capacity(POOL);
-    let mut right = Vec::with_capacity(POOL);
-    for _ in 0..POOL {
+    let mut left = Vec::with_capacity(pool_size());
+    let mut right = Vec::with_capacity(pool_size());
+    for _ in 0..pool_size() {
         let x: u64 = rng.random::<u64>();
         // Flip the top bit: block 0 differs.
         let y0 = x ^ (1 << 63);
@@ -98,7 +105,7 @@ fn bit6_compare_first_vs_last_block(runner: &mut CtRunner, rng: &mut BenchRng) {
         } else {
             &right
         };
-        let (a, b) = &pool[rng.random_range(0..POOL)];
+        let (a, b) = &pool[rng.random_range(0..pool_size())];
         runner.run_one(c, || {
             black_box(OreAes128Bit6ChaCha20::compare_raw_slices(
                 black_box(a),
@@ -112,9 +119,9 @@ fn bit6_compare_first_vs_last_block(runner: &mut CtRunner, rng: &mut BenchRng) {
 /// (`Left`) versus only the last byte differs (`Right`).
 fn chained_compare_first_vs_last_byte(runner: &mut CtRunner, rng: &mut BenchRng) {
     let ore = chained();
-    let mut left = Vec::with_capacity(POOL);
-    let mut right = Vec::with_capacity(POOL);
-    for _ in 0..POOL {
+    let mut left = Vec::with_capacity(pool_size());
+    let mut right = Vec::with_capacity(pool_size());
+    for _ in 0..pool_size() {
         let mut s = [0u8; 17];
         for b in s.iter_mut() {
             *b = rng.random_range(b'a'..=b'z');
@@ -138,7 +145,7 @@ fn chained_compare_first_vs_last_byte(runner: &mut CtRunner, rng: &mut BenchRng)
         } else {
             &right
         };
-        let (a, b) = &pool[rng.random_range(0..POOL)];
+        let (a, b) = &pool[rng.random_range(0..pool_size())];
         runner.run_one(c, || {
             black_box(OreAes128Bit6ChainedChaCha20::compare_raw_slices(
                 black_box(a),
@@ -153,8 +160,8 @@ fn chained_compare_first_vs_last_byte(runner: &mut CtRunner, rng: &mut BenchRng)
 /// measurements is the same whichever class comes next.
 fn bit6_encrypt_zero_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
     let ore = bit6();
-    let left = vec![0u64; POOL];
-    let right: Vec<u64> = (0..POOL).map(|_| rng.random::<u64>()).collect();
+    let left = vec![0u64; pool_size()];
+    let right: Vec<u64> = (0..pool_size()).map(|_| rng.random::<u64>()).collect();
     for _ in 0..SAMPLES {
         let c = class(rng);
         let pool = if matches!(c, Class::Left) {
@@ -162,7 +169,7 @@ fn bit6_encrypt_zero_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
         } else {
             &right
         };
-        let x = pool[rng.random_range(0..POOL)];
+        let x = pool[rng.random_range(0..pool_size())];
         runner.run_one(c, || black_box(black_box(x).encrypt(&ore).unwrap()));
     }
 }
@@ -173,8 +180,8 @@ fn bit6_encrypt_zero_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
 /// zero class's other property, that it never looks like a pointer.
 fn bit6_encrypt_const_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
     let ore = bit6();
-    let left = vec![0x1234_5678_9abc_def0u64; POOL];
-    let right: Vec<u64> = (0..POOL).map(|_| rng.random::<u64>()).collect();
+    let left = vec![0x1234_5678_9abc_def0u64; pool_size()];
+    let right: Vec<u64> = (0..pool_size()).map(|_| rng.random::<u64>()).collect();
     for _ in 0..SAMPLES {
         let c = class(rng);
         let pool = if matches!(c, Class::Left) {
@@ -182,7 +189,7 @@ fn bit6_encrypt_const_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
         } else {
             &right
         };
-        let x = pool[rng.random_range(0..POOL)];
+        let x = pool[rng.random_range(0..pool_size())];
         runner.run_one(c, || black_box(black_box(x).encrypt(&ore).unwrap()));
     }
 }
@@ -192,8 +199,8 @@ fn bit6_encrypt_const_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
 /// no random-oracle keys, hashing or right blocks.
 fn bit6_encrypt_left_const_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
     let ore = bit6();
-    let left = vec![0x1234_5678_9abc_def0u64; POOL];
-    let right: Vec<u64> = (0..POOL).map(|_| rng.random::<u64>()).collect();
+    let left = vec![0x1234_5678_9abc_def0u64; pool_size()];
+    let right: Vec<u64> = (0..pool_size()).map(|_| rng.random::<u64>()).collect();
     for _ in 0..SAMPLES {
         let c = class(rng);
         let pool = if matches!(c, Class::Left) {
@@ -201,7 +208,7 @@ fn bit6_encrypt_left_const_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) 
         } else {
             &right
         };
-        let x = pool[rng.random_range(0..POOL)];
+        let x = pool[rng.random_range(0..pool_size())];
         runner.run_one(c, || black_box(black_box(x).encrypt_left(&ore).unwrap()));
     }
 }
@@ -216,8 +223,8 @@ fn prp_build_const_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
     for b in fixed.iter_mut() {
         *b = rng.random::<u8>();
     }
-    let left = vec![fixed; POOL];
-    let right: Vec<[u8; 512]> = (0..POOL)
+    let left = vec![fixed; pool_size()];
+    let right: Vec<[u8; 512]> = (0..pool_size())
         .map(|_| {
             let mut s = [0u8; 512];
             for b in s.iter_mut() {
@@ -233,7 +240,7 @@ fn prp_build_const_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
         } else {
             &right
         };
-        let s = &pool[rng.random_range(0..POOL)];
+        let s = &pool[rng.random_range(0..pool_size())];
         runner.run_one(c, || {
             black_box(ore_rs::ct_bench::lemire_fy_prp_from_stream(black_box(s)))
         });
@@ -276,8 +283,8 @@ fn bit6_encrypt_left_fixed_a_vs_fixed_b(runner: &mut CtRunner, rng: &mut BenchRn
 /// lowercase (`Right`), both from precomputed pools.
 fn chained_encrypt_fixed_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
     let ore = chained();
-    let left: Vec<String> = vec!["a".repeat(17); POOL];
-    let right: Vec<String> = (0..POOL)
+    let left: Vec<String> = vec!["a".repeat(17); pool_size()];
+    let right: Vec<String> = (0..pool_size())
         .map(|_| {
             (0..17)
                 .map(|_| char::from(rng.random_range(b'a'..=b'z')))
@@ -291,7 +298,7 @@ fn chained_encrypt_fixed_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
         } else {
             &right
         };
-        let s = pool[rng.random_range(0..POOL)].as_str();
+        let s = pool[rng.random_range(0..pool_size())].as_str();
         runner.run_one(c, || black_box(ore.encrypt_str(black_box(s)).unwrap()));
     }
 }
