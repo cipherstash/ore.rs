@@ -90,6 +90,12 @@ bytes without parsing them first.
 
 The corpora from these runs are committed as seeds.
 
+`bit6_parse` and `bit8_parse` now also parse every input as a right-only
+ciphertext (`Right::from_slice`), which no target covered before; 20 s per
+target in an arm64 container, all four clean (5.7 M to 13.1 M runs). The
+chained left-only query has no parser: `compare_left_to_full` reads it as
+raw bytes, and `chained_compare` fuzzes that.
+
 ## 3. Kani — proofs for the pure building blocks
 
 Eighteen harnesses, all verified (full run 1 324 s before the oblivious PRP
