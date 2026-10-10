@@ -6,3 +6,6 @@
 
 /// 2-bit-indicator BlockORE with AES-128 PRF and Knuth-shuffle PRP.
 pub mod bit2;
+
+pub(crate) mod decompose;
+pub(crate) mod width;
