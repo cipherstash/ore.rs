@@ -1,7 +1,7 @@
 use crate::ciphertext::*;
 use crate::PlainText;
 use crate::{OreCipher, OreError};
-use orderable_bytes::ToOrderableBytes;
+use orderable_bytes::{FixedOrderableBytes, ToOrderableBytes};
 
 /// Type-directed entry point for encrypting plaintext values with a given
 /// [`OreCipher`].
@@ -29,25 +29,25 @@ pub trait OreEncrypt<T: OreCipher> {
 }
 
 // `Left<T, N>` and `CipherText<T, N>` need a const-generic `N` known at
-// the type level. Stable Rust can't accept `<Self as ToOrderableBytes>::ENCODED_LEN`
+// the type level. Stable Rust can't accept `<Self as FixedOrderableBytes>::ENCODED_LEN`
 // directly in that position (it would require `generic_const_exprs`), so
 // we lift each primitive's encoded length into a free `const` and name
 // that const in the associated type. Same idiom as `chrono.rs` /
 // `decimal.rs`.
-const BOOL_LEN: usize = <bool as ToOrderableBytes>::ENCODED_LEN;
-const U8_LEN: usize = <u8 as ToOrderableBytes>::ENCODED_LEN;
-const I8_LEN: usize = <i8 as ToOrderableBytes>::ENCODED_LEN;
-const U16_LEN: usize = <u16 as ToOrderableBytes>::ENCODED_LEN;
-const I16_LEN: usize = <i16 as ToOrderableBytes>::ENCODED_LEN;
-const U32_LEN: usize = <u32 as ToOrderableBytes>::ENCODED_LEN;
-const I32_LEN: usize = <i32 as ToOrderableBytes>::ENCODED_LEN;
-const U64_LEN: usize = <u64 as ToOrderableBytes>::ENCODED_LEN;
-const I64_LEN: usize = <i64 as ToOrderableBytes>::ENCODED_LEN;
-const U128_LEN: usize = <u128 as ToOrderableBytes>::ENCODED_LEN;
-const I128_LEN: usize = <i128 as ToOrderableBytes>::ENCODED_LEN;
-const CHAR_LEN: usize = <char as ToOrderableBytes>::ENCODED_LEN;
-const F32_LEN: usize = <f32 as ToOrderableBytes>::ENCODED_LEN;
-const F64_LEN: usize = <f64 as ToOrderableBytes>::ENCODED_LEN;
+const BOOL_LEN: usize = <bool as FixedOrderableBytes>::ENCODED_LEN;
+const U8_LEN: usize = <u8 as FixedOrderableBytes>::ENCODED_LEN;
+const I8_LEN: usize = <i8 as FixedOrderableBytes>::ENCODED_LEN;
+const U16_LEN: usize = <u16 as FixedOrderableBytes>::ENCODED_LEN;
+const I16_LEN: usize = <i16 as FixedOrderableBytes>::ENCODED_LEN;
+const U32_LEN: usize = <u32 as FixedOrderableBytes>::ENCODED_LEN;
+const I32_LEN: usize = <i32 as FixedOrderableBytes>::ENCODED_LEN;
+const U64_LEN: usize = <u64 as FixedOrderableBytes>::ENCODED_LEN;
+const I64_LEN: usize = <i64 as FixedOrderableBytes>::ENCODED_LEN;
+const U128_LEN: usize = <u128 as FixedOrderableBytes>::ENCODED_LEN;
+const I128_LEN: usize = <i128 as FixedOrderableBytes>::ENCODED_LEN;
+const CHAR_LEN: usize = <char as FixedOrderableBytes>::ENCODED_LEN;
+const F32_LEN: usize = <f32 as FixedOrderableBytes>::ENCODED_LEN;
+const F64_LEN: usize = <f64 as FixedOrderableBytes>::ENCODED_LEN;
 
 macro_rules! impl_ore_encrypt_via_orderable_bytes {
     ($type:ty, $len_const:ident) => {

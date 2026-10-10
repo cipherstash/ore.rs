@@ -11,10 +11,10 @@
 use crate::ciphertext::*;
 use crate::{OreCipher, OreEncrypt, OreError};
 use ::chrono::{DateTime, NaiveDate, Utc};
-use orderable_bytes::ToOrderableBytes;
+use orderable_bytes::{FixedOrderableBytes, ToOrderableBytes};
 
-const NAIVE_DATE_LEN: usize = <NaiveDate as ToOrderableBytes>::ENCODED_LEN;
-const DATETIME_UTC_LEN: usize = <DateTime<Utc> as ToOrderableBytes>::ENCODED_LEN;
+const NAIVE_DATE_LEN: usize = <NaiveDate as FixedOrderableBytes>::ENCODED_LEN;
+const DATETIME_UTC_LEN: usize = <DateTime<Utc> as FixedOrderableBytes>::ENCODED_LEN;
 
 impl<T: OreCipher> OreEncrypt<T> for NaiveDate {
     type LeftOutput = Left<T, NAIVE_DATE_LEN>;
