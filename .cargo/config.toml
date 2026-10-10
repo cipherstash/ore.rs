@@ -1,0 +1,10 @@
+# Enable hardware AES (ARMv8 Cryptography Extensions) in the `aes` crate on
+# aarch64. Without this cfg, `aes` v0.8 falls back to its software
+# (fixsliced) backend on ARM — roughly 60x slower per block on Apple
+# Silicon. x86_64 AES-NI is auto-detected and needs no flag.
+#
+# This config covers builds *of this workspace* (tests, benches, examples).
+# Downstream crates need the same cfg in their own build configuration to
+# get hardware AES on ARM; see the README.
+[target.'cfg(target_arch = "aarch64")']
+rustflags = ["--cfg", "aes_armv8"]
