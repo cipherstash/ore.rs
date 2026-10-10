@@ -1,12 +1,13 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hex_literal::hex;
+use orderable_bytes::FixedOrderableBytes;
 use ore_rs::{scheme::bit2::OreAes128ChaCha20, CipherText, OreCipher, OreEncrypt, OreOutput};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
 /// Number of plaintext bytes produced by the `Decimal` orderable-bytes
-/// encoder (matches `orderable_bytes::decimal::ENCODED_LEN`).
-const ENCODED_LEN: usize = 14;
+/// encoder.
+const ENCODED_LEN: usize = <Decimal as FixedOrderableBytes>::ENCODED_LEN;
 
 #[inline]
 fn do_encrypt_decimal(input: Decimal, ore: &mut OreAes128ChaCha20) {

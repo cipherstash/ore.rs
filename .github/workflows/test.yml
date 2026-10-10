@@ -42,7 +42,7 @@ jobs:
         run: cargo fmt -- --check
 
       - name: test
-        run: cargo test
+        run: cargo test --all-features
 
   bench:
     runs-on: ubuntu-latest

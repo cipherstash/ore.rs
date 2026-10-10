@@ -1,8 +1,8 @@
 //! Canonical, order-preserving fixed-length byte encodings for the
 //! `chrono` types `NaiveDate` and `DateTime<Utc>`.
 //!
-//! Each submodule exposes an `ENCODED_LEN` constant and an
-//! [`crate::ToOrderableBytes`] impl on its target type. The bytes
+//! Each submodule implements [`crate::OrderableBytes`] and
+//! [`crate::FixedOrderableBytes`] on its target type. The bytes
 //! returned have the property that byte-wise lex comparison agrees with
 //! chronological ordering (and byte equality with value equality), so
 //! any comparison-as-bytes scheme (`ore-rs` BlockORE, OPE, an ordered
@@ -10,22 +10,18 @@
 
 /// Order-preserving byte encoding for [`::chrono::NaiveDate`].
 pub mod naive_date {
-    use crate::ToOrderableBytes;
     use ::chrono::{Datelike, NaiveDate};
 
-    /// Build the canonical, order-preserving byte encoding of a `NaiveDate`.
-    ///
-    /// `NaiveDate::num_days_from_ce()` returns an `i32` whose ordering
-    /// matches chronological order. Sign-flipping `i32 → u32` (XOR with
-    /// `1u32 << 31`) preserves order while making the value unsigned, then
-    /// big-endian byte serialisation gives a 4-byte sequence whose lex
-    /// order matches the natural date order.
-    impl ToOrderableBytes for NaiveDate {
-        const ENCODED_LEN: usize = 4;
-        type Bytes = [u8; Self::ENCODED_LEN];
-
-        fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
-            let biased = (self.num_days_from_ce() as u32) ^ (1u32 << 31);
+    impl_fixed_orderable_bytes! {
+        /// Build the canonical, order-preserving byte encoding of a `NaiveDate`.
+        ///
+        /// `NaiveDate::num_days_from_ce()` returns an `i32` whose ordering
+        /// matches chronological order. Sign-flipping `i32 → u32` (XOR with
+        /// `1u32 << 31`) preserves order while making the value unsigned, then
+        /// big-endian byte serialisation gives a 4-byte sequence whose lex
+        /// order matches the natural date order.
+        NaiveDate, 4, |value| {
+            let biased = (value.num_days_from_ce() as u32) ^ (1u32 << 31);
             biased.to_be_bytes()
         }
     }
@@ -33,6 +29,7 @@ pub mod naive_date {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use crate::OrderableBytes;
 
         fn ymd(year: i32, month: u32, day: u32) -> NaiveDate {
             NaiveDate::from_ymd_opt(year, month, day).unwrap()
@@ -73,34 +70,25 @@ pub mod naive_date {
 
 /// Order-preserving byte encoding for [`::chrono::DateTime<::chrono::Utc>`].
 pub mod datetime_utc {
-    use crate::ToOrderableBytes;
     use ::chrono::{DateTime, Utc};
 
-    /// Number of bytes in the canonical orderable-bytes form. Mirrors
-    /// `<DateTime<Utc> as ToOrderableBytes>::ENCODED_LEN` for use in
-    /// const contexts that can't easily name the trait impl.
-    pub const ENCODED_LEN: usize = 12;
-
-    /// Build the canonical, order-preserving byte encoding of a
-    /// `DateTime<Utc>`.
-    ///
-    /// Layout: a sign-flipped `i64` Unix timestamp (8 bytes BE) followed by
-    /// the `u32` subsecond nanosecond count (4 bytes BE). Sign-flipping the
-    /// timestamp via `XOR (1u64 << 63)` makes the bias-encoded value sort
-    /// chronologically as an unsigned big-endian integer; appending the
-    /// subsecond field gives a strict tiebreaker on nanos within the same
-    /// whole second. `timestamp_subsec_nanos` returns values in
-    /// `0..2_000_000_000` (the upper half encodes leap-second moments),
-    /// which fits in `u32` and preserves chronological order.
-    impl ToOrderableBytes for DateTime<Utc> {
-        const ENCODED_LEN: usize = ENCODED_LEN;
-        type Bytes = [u8; ENCODED_LEN];
-
-        fn to_orderable_bytes(&self) -> [u8; ENCODED_LEN] {
-            let secs = self.timestamp();
-            let nanos = self.timestamp_subsec_nanos();
+    impl_fixed_orderable_bytes! {
+        /// Build the canonical, order-preserving byte encoding of a
+        /// `DateTime<Utc>`.
+        ///
+        /// Layout: a sign-flipped `i64` Unix timestamp (8 bytes BE) followed by
+        /// the `u32` subsecond nanosecond count (4 bytes BE). Sign-flipping the
+        /// timestamp via `XOR (1u64 << 63)` makes the bias-encoded value sort
+        /// chronologically as an unsigned big-endian integer; appending the
+        /// subsecond field gives a strict tiebreaker on nanos within the same
+        /// whole second. `timestamp_subsec_nanos` returns values in
+        /// `0..2_000_000_000` (the upper half encodes leap-second moments),
+        /// which fits in `u32` and preserves chronological order.
+        DateTime<Utc>, 12, |value| {
+            let secs = value.timestamp();
+            let nanos = value.timestamp_subsec_nanos();
             let secs_biased = (secs as u64) ^ (1u64 << 63);
-            let mut out = [0u8; ENCODED_LEN];
+            let mut out = [0u8; Self::ENCODED_LEN];
             out[..8].copy_from_slice(&secs_biased.to_be_bytes());
             out[8..].copy_from_slice(&nanos.to_be_bytes());
             out
@@ -110,6 +98,7 @@ pub mod datetime_utc {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use crate::OrderableBytes;
         use ::chrono::TimeZone;
 
         fn dt(secs: i64, nanos: u32) -> DateTime<Utc> {

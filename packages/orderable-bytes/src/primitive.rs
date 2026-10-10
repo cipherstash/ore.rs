@@ -1,6 +1,7 @@
 //! Canonical, order-preserving fixed-length byte encodings for the
 //! primitives `bool`, `char`, `u8`, `i8`, `i16`, `i32`, `i64`, `u128`,
-//! `i128`, and the IEEE 754 floats `f32` and `f64`.
+//! `i128`, the IEEE 754 floats `f32` and `f64`, and byte arrays
+//! `[u8; N]`.
 //!
 //! Each impl emits the type's native byte width — no padding:
 //!
@@ -9,6 +10,7 @@
 //! - `i32`, `u32`, `char`, `f32` → `[u8; 4]`
 //! - `i64`, `u64`, `f64` → `[u8; 8]`
 //! - `u128`, `i128` → `[u8; 16]`
+//! - `[u8; N]` → itself
 //!
 //! Consumers that need a fixed wider encoding (e.g. an ORE construction
 //! whose plaintext block size is `[u8; 8]`) should zero-extend the
@@ -60,126 +62,85 @@
 //! bytes; consumers that need a canonical NaN must canonicalise
 //! upstream.
 
-use crate::ToOrderableBytes;
-
-impl ToOrderableBytes for bool {
-    const ENCODED_LEN: usize = 1;
-    type Bytes = [u8; Self::ENCODED_LEN];
-
-    fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
+impl_fixed_orderable_bytes! {
+    bool, 1, |value| {
         // `false as u8 == 0`, `true as u8 == 1`. `false` sorts strictly
         // below `true`.
-        [*self as u8]
+        [*value as u8]
     }
 }
 
-impl ToOrderableBytes for u8 {
-    const ENCODED_LEN: usize = 1;
-    type Bytes = [u8; Self::ENCODED_LEN];
-
-    fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
-        [*self]
+impl_fixed_orderable_bytes! {
+    u8, 1, |value| {
+        [*value]
     }
 }
 
-impl ToOrderableBytes for i8 {
-    const ENCODED_LEN: usize = 1;
-    type Bytes = [u8; Self::ENCODED_LEN];
-
-    fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
-        [(*self as u8) ^ (1u8 << 7)]
+impl_fixed_orderable_bytes! {
+    i8, 1, |value| {
+        [(*value as u8) ^ (1u8 << 7)]
     }
 }
 
-impl ToOrderableBytes for u16 {
-    const ENCODED_LEN: usize = 2;
-    type Bytes = [u8; Self::ENCODED_LEN];
-
-    fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
-        self.to_be_bytes()
+impl_fixed_orderable_bytes! {
+    u16, 2, |value| {
+        value.to_be_bytes()
     }
 }
 
-impl ToOrderableBytes for i16 {
-    const ENCODED_LEN: usize = 2;
-    type Bytes = [u8; Self::ENCODED_LEN];
-
-    fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
-        ((*self as u16) ^ (1u16 << 15)).to_be_bytes()
+impl_fixed_orderable_bytes! {
+    i16, 2, |value| {
+        ((*value as u16) ^ (1u16 << 15)).to_be_bytes()
     }
 }
 
-impl ToOrderableBytes for u32 {
-    const ENCODED_LEN: usize = 4;
-    type Bytes = [u8; Self::ENCODED_LEN];
-
-    fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
-        self.to_be_bytes()
+impl_fixed_orderable_bytes! {
+    u32, 4, |value| {
+        value.to_be_bytes()
     }
 }
 
-impl ToOrderableBytes for i32 {
-    const ENCODED_LEN: usize = 4;
-    type Bytes = [u8; Self::ENCODED_LEN];
-
-    fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
-        ((*self as u32) ^ (1u32 << 31)).to_be_bytes()
+impl_fixed_orderable_bytes! {
+    i32, 4, |value| {
+        ((*value as u32) ^ (1u32 << 31)).to_be_bytes()
     }
 }
 
-impl ToOrderableBytes for u64 {
-    const ENCODED_LEN: usize = 8;
-    type Bytes = [u8; Self::ENCODED_LEN];
-
-    fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
-        self.to_be_bytes()
+impl_fixed_orderable_bytes! {
+    u64, 8, |value| {
+        value.to_be_bytes()
     }
 }
 
-impl ToOrderableBytes for i64 {
-    const ENCODED_LEN: usize = 8;
-    type Bytes = [u8; Self::ENCODED_LEN];
-
-    fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
-        ((*self as u64) ^ (1u64 << 63)).to_be_bytes()
+impl_fixed_orderable_bytes! {
+    i64, 8, |value| {
+        ((*value as u64) ^ (1u64 << 63)).to_be_bytes()
     }
 }
 
-impl ToOrderableBytes for u128 {
-    const ENCODED_LEN: usize = 16;
-    type Bytes = [u8; Self::ENCODED_LEN];
-
-    fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
-        self.to_be_bytes()
+impl_fixed_orderable_bytes! {
+    u128, 16, |value| {
+        value.to_be_bytes()
     }
 }
 
-impl ToOrderableBytes for i128 {
-    const ENCODED_LEN: usize = 16;
-    type Bytes = [u8; Self::ENCODED_LEN];
-
-    fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
-        ((*self as u128) ^ (1u128 << 127)).to_be_bytes()
+impl_fixed_orderable_bytes! {
+    i128, 16, |value| {
+        ((*value as u128) ^ (1u128 << 127)).to_be_bytes()
     }
 }
 
-impl ToOrderableBytes for char {
-    const ENCODED_LEN: usize = 4;
-    type Bytes = [u8; Self::ENCODED_LEN];
-
-    fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
-        (*self as u32).to_be_bytes()
+impl_fixed_orderable_bytes! {
+    char, 4, |value| {
+        (*value as u32).to_be_bytes()
     }
 }
 
-impl ToOrderableBytes for f32 {
-    const ENCODED_LEN: usize = 4;
-    type Bytes = [u8; Self::ENCODED_LEN];
-
-    fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
+impl_fixed_orderable_bytes! {
+    f32, 4, |value| {
         // Canonicalise -0.0 → 0.0 so the two share one byte encoding
         // (their f32 equality demands byte equality under our contract).
-        let value = if *self == -0.0 { 0.0 } else { *self };
+        let value = if *value == -0.0 { 0.0 } else { *value };
         let bits = value.to_bits();
         // Branchless monotonic mapping (see `f64` impl for derivation).
         let sign_extension = (bits as i32 >> 31) as u32;
@@ -188,14 +149,11 @@ impl ToOrderableBytes for f32 {
     }
 }
 
-impl ToOrderableBytes for f64 {
-    const ENCODED_LEN: usize = 8;
-    type Bytes = [u8; Self::ENCODED_LEN];
-
-    fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
+impl_fixed_orderable_bytes! {
+    f64, 8, |value| {
         // Canonicalise -0.0 → 0.0 so the two share one byte encoding
         // (their f64 equality demands byte equality under our contract).
-        let value = if *self == -0.0 { 0.0 } else { *self };
+        let value = if *value == -0.0 { 0.0 } else { *value };
         let bits = value.to_bits();
         // Branchless monotonic mapping. `sign_extension` is `u64::MAX`
         // when the input is negative (sign bit `1`) and `0` when
@@ -208,9 +166,53 @@ impl ToOrderableBytes for f64 {
     }
 }
 
+impl<const N: usize> crate::private::Sealed for [u8; N] {}
+
+/// A byte array encodes to itself: byte-wise order is already the order
+/// Rust defines for arrays. Hashes and UUIDs can be encoded without
+/// copying them into a `Vec<u8>`.
+impl<const N: usize> crate::OrderableBytes for [u8; N] {
+    type Bytes<'a> = &'a [u8];
+
+    fn to_orderable_bytes(&self) -> &[u8] {
+        self
+    }
+}
+
+impl<const N: usize> crate::FixedOrderableBytes for [u8; N] {
+    const ENCODED_LEN: usize = N;
+
+    type Array = [u8; N];
+
+    fn to_fixed_orderable_bytes(&self) -> [u8; N] {
+        *self
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::{FixedOrderableBytes, OrderableBytes};
+
+    // --- [u8; N] ---
+
+    #[test]
+    fn byte_array_encodes_to_itself() {
+        let a = [1u8, 2, 3];
+        assert_eq!(a.to_orderable_bytes(), &a);
+        assert_eq!(a.to_orderable_bytes().as_ptr(), a.as_ptr());
+        assert_eq!(a.to_fixed_orderable_bytes(), a);
+        assert_eq!(<[u8; 3] as FixedOrderableBytes>::ENCODED_LEN, 3);
+    }
+
+    quickcheck! {
+        fn byte_array_order_matches_array_order(a: Vec<u8>, b: Vec<u8>) -> bool {
+            let mut x = [0u8; 8];
+            let mut y = [0u8; 8];
+            for (dst, src) in x.iter_mut().zip(&a) { *dst = *src; }
+            for (dst, src) in y.iter_mut().zip(&b) { *dst = *src; }
+            x.to_orderable_bytes().cmp(y.to_orderable_bytes()) == x.cmp(&y)
+        }
+    }
 
     // --- bool ---
 

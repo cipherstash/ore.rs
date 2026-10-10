@@ -4,10 +4,29 @@ Pre-encryption byte encodings for **order-revealing encryption** (ORE) and **ord
 
 ORE and OPE both produce ciphertexts whose byte-wise comparison reveals the order of the underlying plaintexts. To exploit that property you first need to convert your plaintext — a `Decimal`, a `NaiveDate`, a `DateTime<Utc>`, … — into a canonical byte sequence whose lexicographic order already matches the value's natural total order. **That conversion is what this crate does.** Plug the bytes into an ORE or OPE primitive and the resulting ciphertext inherits the same order and equality semantics as the original plaintext.
 
-Primitive types (`bool`, all integer widths, `char`, `f32`/`f64`) implement the `ToOrderableBytes` trait via the always-available `primitive` module; `Decimal` and `chrono` types are covered by feature-gated modules, each exposing a `to_orderable_bytes` function and an `ENCODED_LEN` constant. The bytes have two guarantees:
+Every supported type implements the `OrderableBytes` trait. The bytes have two guarantees:
 
 - **byte-wise lexicographic order agrees with the type's natural total order**
 - **byte equality agrees with value equality**
+
+Every type also implements exactly one of two subtraits, which say how its bytes may be handled:
+
+- **`FixedOrderableBytes`**: every value encodes to the same length, named as `ENCODED_LEN`. `to_fixed_orderable_bytes` returns the bytes as an owned array that can be stored or returned. Fixed-length bytes may be zero-extended to a larger block.
+- **`VariableOrderableBytes`**: the length varies with the value, and the bytes are borrowed from it. Strings and byte strings (see [Variable-length encodings](#variable-length-encodings)). These must never be padded or concatenated.
+
+A reference `&T` implements the same traits as `T`.
+
+Bound generic code on the trait it relies on:
+
+| Need | Bound | Call |
+|---|---|---|
+| Pad, store or return fixed-length bytes | `T: FixedOrderableBytes` | `to_fixed_orderable_bytes()` (owned) |
+| Bytes of either kind, used immediately | `T: OrderableBytes` | `to_orderable_bytes()` (may borrow) |
+| Strings or byte strings specifically | `T: VariableOrderableBytes` | `to_orderable_bytes()` (borrowed) |
+
+Code that pads to a block size must bound on `FixedOrderableBytes`, so that strings are rejected at compile time.
+
+The traits are sealed: only this crate implements them, so every encoding is pinned by its golden vectors and the rules above hold for every implementing type.
 
 The crate is scheme-agnostic — the encodings drop into `ore-rs` BlockORE (this workspace), any OPE construction, an ordered hash, or anything else that compares as bytes.
 
@@ -15,35 +34,76 @@ The crate is scheme-agnostic — the encodings drop into `ore-rs` BlockORE (this
 
 Encoders are gated behind per-type feature flags so callers only pay for the dependencies they actually use.
 
-| Feature  | Path                                            | Type                       | `ENCODED_LEN` |
-|----------|-------------------------------------------------|----------------------------|---------------|
-| (none)   | `primitive` (`ToOrderableBytes` impls)          | `bool`, `u8`–`u128`, `i8`–`i128`, `char`, `f32`, `f64` | per type |
-| `decimal`| `decimal::to_orderable_bytes`                   | `rust_decimal::Decimal`    | 14            |
-| `chrono` | `chrono::naive_date::to_orderable_bytes`        | `chrono::NaiveDate`        | 4             |
-| `chrono` | `chrono::datetime_utc::to_orderable_bytes`      | `chrono::DateTime<Utc>`    | 12            |
+| Feature   | Module       | Type                                                   | Encoded length  |
+|-----------|--------------|--------------------------------------------------------|-----------------|
+| (none)    | `primitive`  | `bool`, `u8`–`u128`, `i8`–`i128`, `char`, `f32`, `f64` | fixed, per type |
+| (none)    | `primitive`  | `[u8; N]`                                              | `N`             |
+| (none)    | `variable`   | `str`, `String`, `[u8]`, `Vec<u8>`                     | the value's own |
+| `decimal` | `decimal`    | `rust_decimal::Decimal`                                | 14              |
+| `chrono`  | `chrono`     | `chrono::NaiveDate`                                    | 4               |
+| `chrono`  | `chrono`     | `chrono::DateTime<Utc>`                                | 12              |
 
-Each encoding canonicalises equivalent values to identical bytes — `1` ≡ `1.0` ≡ `1.00` for `Decimal`, `±0` collide, `NaiveDate` and `DateTime<Utc>` byte-equality matches their respective `Eq` impls — so consumers inherit value-equality semantics on the encoded form.
+Each fixed-length encoding canonicalises equivalent values to identical bytes — `1` ≡ `1.0` ≡ `1.00` for `Decimal`, `±0` collide, `NaiveDate` and `DateTime<Utc>` byte-equality matches their respective `Eq` impls — so consumers inherit value-equality semantics on the encoded form.
 
 ## Usage
 
 ```toml
 [dependencies]
-orderable-bytes = { version = "0.1", features = ["decimal", "chrono"] }
+orderable-bytes = { version = "0.2", features = ["decimal", "chrono"] }
 ```
 
 ```rust
-use orderable_bytes::decimal;
-use rust_decimal::Decimal;
-use std::str::FromStr;
+use orderable_bytes::{FixedOrderableBytes, OrderableBytes};
 
-let bytes = decimal::to_orderable_bytes(&Decimal::from_str("1.5").unwrap());
-assert_eq!(bytes.len(), decimal::ENCODED_LEN);
+let bytes: [u8; 8] = 1.5f64.to_fixed_orderable_bytes();
+assert_eq!(bytes.len(), <f64 as FixedOrderableBytes>::ENCODED_LEN);
 
-// Byte-wise comparison matches Decimal::cmp
-let a = decimal::to_orderable_bytes(&Decimal::from_str("1.05").unwrap());
-let b = decimal::to_orderable_bytes(&Decimal::from_str("1.5").unwrap());
+// Byte-wise comparison matches the value's order
+let a = (-1.05f64).to_orderable_bytes();
+let b = 1.5f64.to_orderable_bytes();
 assert!(a < b);
+
+// Strings encode to their own bytes, borrowed: no copy is made.
+assert!("ab".to_orderable_bytes() < "abc".to_orderable_bytes());
+
+// Generic code that keeps fixed-length bytes bounds on FixedOrderableBytes.
+fn term<T: FixedOrderableBytes>(value: T) -> T::Array {
+    value.to_fixed_orderable_bytes()
+}
+assert_eq!(term(7u32), [0, 0, 0, 7]);
 ```
+
+## Variable-length encodings
+
+A string encodes to its UTF-8 bytes and a byte string to itself, borrowed from the value. Byte-wise order is already the order these types define, with a value sorting before any longer value it is a prefix of (`"ab"` < `"abc"`); for strings that is Unicode code-point order.
+
+- **No normalisation.** A string is encoded exactly as given. `é` written as U+00E9 and as `e` + U+0301 encode differently, and strings sort by code point, not by any language's collation. Normalise before encoding if you need canonical equivalence, case folding or accent folding.
+- **Never pad, never concatenate.** These encodings do not mark where they end. Zero-padding to a block size makes `"a"` and `"a\0"` identical; concatenating two values loses the boundary between them. A consumer must keep each value's length and sort a prefix first, as a variable-length ORE or OPE scheme does. Fixed-length encodings are safe to zero-extend; these are not.
+
+## Upgrading from 0.1
+
+Encoded bytes are unchanged. The traits changed:
+
+- **`ToOrderableBytes` is now `OrderableBytes`, and `ENCODED_LEN` moved to `FixedOrderableBytes`.** The 0.1 trait was fixed-length only, so replace a `T: ToOrderableBytes` bound with `T: FixedOrderableBytes`. The old name was removed on purpose: had it been kept as the general trait, 0.1 code would still compile and silently accept strings.
+- **`OrderableBytes::Bytes` now takes a lifetime**, because variable-length bytes borrow from the value. Where generic code stores or returns the bytes, use the owned form: `T::Bytes` becomes `T::Array`, and `to_orderable_bytes()` becomes `to_fixed_orderable_bytes()`.
+
+  ```rust,ignore
+  // 0.1
+  fn term<T: ToOrderableBytes>(value: T) -> T::Bytes { value.to_orderable_bytes() }
+  struct Cached<T: ToOrderableBytes> { bytes: T::Bytes }
+  ```
+
+  ```rust
+  // 0.2
+  use orderable_bytes::FixedOrderableBytes;
+
+  fn term<T: FixedOrderableBytes>(value: T) -> T::Array { value.to_fixed_orderable_bytes() }
+  struct Cached<T: FixedOrderableBytes> { bytes: T::Array }
+  ```
+
+- **Calling `to_orderable_bytes()` on a concrete type** still works and returns the same array; import `OrderableBytes` to call it.
+- **The traits are sealed.** 0.1 allowed implementing `ToOrderableBytes` for your own types; 0.2 doesn't. Encode a wrapper through the value it wraps.
+- **`chrono::datetime_utc::ENCODED_LEN` is removed.** Use `<DateTime<Utc> as FixedOrderableBytes>::ENCODED_LEN`.
 
 ## How the encoding works
 
@@ -67,7 +127,7 @@ Pipeline:
 
 `1`, `1.0`, `1.00` all become the same canonical `(significand=1, leading_exp=0)`:
 
-```
+```text
 1     :  (scale=0, mantissa=1)    → significand=1, trailing=0, leading_exp=0
 1.0   :  (scale=1, mantissa=10)   → significand=1, trailing=1, leading_exp = 1-1+1-1 = 0
 1.00  :  (scale=2, mantissa=100)  → significand=1, trailing=2, leading_exp = 1-1+2-2 = 0
@@ -75,7 +135,7 @@ Pipeline:
 
 All three produce the identical byte sequence:
 
-```
+```text
 192   0  32  79 206  94  62  37   2  97  16   0   0   0
 ```
 
@@ -87,7 +147,7 @@ Byte 0 = 192 = 128 + 64 (sign bit + biased_exp 64 = leading_exp 0). Bytes 1..=13
 
 This is the subtle part. Consider `1`, `1.05`, `1.5` — all three have `leading_exp = 0`, so they share byte 0. The discriminator is the mantissa region. If we packed the *raw* significand (right-justified) we'd get:
 
-```
+```text
 1     →  significand=1   →  …   0   0   1
 1.05  →  significand=105 →  …   0   0 105
 1.5   →  significand=15  →  …   0   0  15
@@ -97,7 +157,7 @@ Byte-compare those: `1 < 15 < 105`, but numerically `1 < 1.05 < 1.5`. **Wrong or
 
 Padding fixes it. We multiply each significand by `10^(29 − digit_count)`, left-justifying the leading digit at decimal position 28:
 
-```
+```text
 1    × 10^28  =  10000000000000000000000000000
 1.05 × 10^27  ×  ... (i.e. 105 × 10^26 = 10500000000000000000000000000)
 1.5  × 10^27  ×  ... (i.e. 15  × 10^27 = 15000000000000000000000000000)
@@ -105,7 +165,7 @@ Padding fixes it. We multiply each significand by `10^(29 − digit_count)`, lef
 
 These three now compare correctly as plain unsigned integers. In bytes:
 
-```
+```text
 1     :  192   0 |  32  79 206  94  62  37   2  97  16   0   0   0
 1.05  :  192   0 |  33 237 101 124 142  13  66 127 132   0   0   0
 1.5   :  192   0 |  48 119 181 141  93  55 131 145 152   0   0   0
@@ -119,7 +179,7 @@ The `Decimal` mantissa is u96 (29 decimal digits max), and `10^29` needs ~97 bit
 
 `0.001`, `1`, `100` all have `significand = 1` and so share the same mantissa region. Only byte 0 distinguishes them:
 
-```
+```text
 0.001 :  189   0 |  32  79 ...     biased_exp = 61   (leading_exp = -3)
 1     :  192   0 |  32  79 ...     biased_exp = 64   (leading_exp =  0)
 100   :  194   0 |  32  79 ...     biased_exp = 66   (leading_exp =  2)
@@ -131,7 +191,7 @@ Byte 0 strictly increases with the value.
 
 `Decimal::MAX = 79228162514264337593543950335` — a 29-digit positive integer. `leading_exp = 28`, biased = 92, byte 0 = 220. The 96-bit mantissa nearly fills the 13-byte region:
 
-```
+```text
 220   0 | 255 255 255 255 255 255 255 255 255 255 255 255
 ```
 
@@ -139,7 +199,7 @@ Byte 0 strictly increases with the value.
 
 `-1` is the bitwise NOT of `1` everywhere except the sign bit:
 
-```
+```text
 +1 :  192   0 |  32  79 206  94  62  37   2  97  16   0   0   0
 -1 :   63 255 | 223 176  49 161 193 218 253 158 239 255 255 255
 ```
@@ -164,7 +224,7 @@ So `byte0 < 128 ⇔ negative`, `byte0 == 128 ⇔ zero`, `byte0 > 128 ⇔ positiv
 
 Much simpler. `NaiveDate::num_days_from_ce()` returns an `i32` whose ordering matches chronological order. We sign-flip to `u32` (XOR with `1u32 << 31`) so big-endian byte serialisation gives a 4-byte plaintext where lex order = chronological order.
 
-```
+```text
 NaiveDate::MIN  →  i32 = -95,746,129  →  u32 = 0x7A4B07AF  →  bytes [122,  75,   7, 175]
 year 1, day 1   →  i32 = 1            →  u32 = 0x80000001  →  bytes [128,   0,   0,   1]
 1970-01-01      →  i32 = 719,163      →  u32 = 0x800AF93B  →  bytes [128,  10, 249,  59]
@@ -180,7 +240,7 @@ The sign-flip puts the most-negative valid `i32` (the lower bound of `chrono`'s 
 - Bytes 0..=7: `secs ^ (1u64 << 63)` as big-endian — sign-flips the i64 timestamp the same way `NaiveDate` does, putting all valid timestamps in `[0, u64::MAX]` ordered chronologically.
 - Bytes 8..=11: `subsec_nanos` as big-endian — strict tiebreaker within a whole second. `chrono` returns values in `0..2_000_000_000` (the upper half is for leap-second moments), which fits in `u32` and preserves order.
 
-```
+```text
 1970-01-01T00:00:00Z              →  secs=0, nanos=0          →  [128,0,0,0,0,0,0,0,   0,0,0,0]
 1970-01-01T00:00:00.000000001Z    →  secs=0, nanos=1          →  [128,0,0,0,0,0,0,0,   0,0,0,1]
 1970-01-01T00:00:01Z              →  secs=1, nanos=0          →  [128,0,0,0,0,0,0,1,   0,0,0,0]
