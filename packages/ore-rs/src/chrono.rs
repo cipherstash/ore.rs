@@ -11,7 +11,7 @@
 use crate::ciphertext::*;
 use crate::{OreCipher, OreEncrypt, OreError};
 use ::chrono::{DateTime, NaiveDate, Utc};
-use orderable_bytes::{FixedOrderableBytes, ToOrderableBytes};
+use orderable_bytes::{FixedOrderableBytes, OrderableBytes};
 
 const NAIVE_DATE_LEN: usize = <NaiveDate as FixedOrderableBytes>::ENCODED_LEN;
 const DATETIME_UTC_LEN: usize = <DateTime<Utc> as FixedOrderableBytes>::ENCODED_LEN;

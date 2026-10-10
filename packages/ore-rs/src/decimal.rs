@@ -10,7 +10,7 @@
 use crate::ciphertext::{CipherText, Left};
 use crate::encrypt::OreEncrypt;
 use crate::{OreCipher, OreError};
-use orderable_bytes::{FixedOrderableBytes, ToOrderableBytes};
+use orderable_bytes::{FixedOrderableBytes, OrderableBytes};
 use rust_decimal::Decimal;
 
 const ENCODED_LEN: usize = <Decimal as FixedOrderableBytes>::ENCODED_LEN;

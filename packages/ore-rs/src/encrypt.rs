@@ -1,7 +1,7 @@
 use crate::ciphertext::*;
 use crate::PlainText;
 use crate::{OreCipher, OreError};
-use orderable_bytes::{FixedOrderableBytes, ToOrderableBytes};
+use orderable_bytes::{FixedOrderableBytes, OrderableBytes};
 
 /// Type-directed entry point for encrypting plaintext values with a given
 /// [`OreCipher`].
@@ -9,7 +9,7 @@ use orderable_bytes::{FixedOrderableBytes, ToOrderableBytes};
 /// Each implementation knows how to canonicalise its target type into the
 /// fixed-size byte plaintext expected by the cipher. For primitives and
 /// the `chrono` / `decimal` value types the canonicalisation is delegated
-/// to [`orderable_bytes::ToOrderableBytes`], which guarantees the encoded
+/// to [`orderable_bytes::OrderableBytes`], which guarantees the encoded
 /// bytes preserve the type's natural total order under lexicographic
 /// comparison. The associated output types pin the resulting ciphertext
 /// shape, with `LeftOutput` the query-only half and `FullOutput` the full
