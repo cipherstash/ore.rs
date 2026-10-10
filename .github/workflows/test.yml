@@ -43,26 +43,3 @@ jobs:
 
       - name: test
         run: cargo test
-
-  bench:
-    runs-on: ubuntu-latest
-    name: "⏱ Benchmark"
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: setup rust 1.78
-        uses: dtolnay/rust-toolchain@1.78.0
-
-      - name: "Benchmark"
-        run: cargo bench

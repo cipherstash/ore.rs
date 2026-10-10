@@ -1,0 +1,142 @@
+name: "Benchmark"
+
+# Benchmarks every PR against its base and posts the comparison as a sticky
+# PR comment. Both commits run on the same runner, one after the other, so the
+# comparison isn't skewed by landing on a faster or slower machine. Criterion
+# saves the base run as a baseline and reports the head run's change against
+# it with a confidence interval; .github/scripts/bench-report.py turns that
+# into the comment.
+#
+# Report-only: shared runners are too noisy for a hard gate, so this job never
+# fails on a regression. It fails only when the benchmarks themselves don't
+# build or run at the PR's head.
+on:
+  # No branch filter, so stacked PRs (based on a feature branch) are
+  # benchmarked against their own base too.
+  pull_request:
+    paths:
+      - "packages/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/bench.yml"
+      - ".github/scripts/bench-report.py"
+      # Negative patterns must stay last: ignore pure-docs changes.
+      - "!**.md"
+
+defaults:
+  run:
+    shell: bash
+
+# Needed to post/update the report comment on the PR.
+permissions:
+  contents: read
+  pull-requests: write
+
+# Only the latest push to a PR matters.
+concurrency:
+  group: bench-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # A change smaller than this is never flagged, whatever its interval. Two
+  # runs of identical code on one machine can differ by ~5%, so 10% keeps
+  # noise out of the headline.
+  THRESHOLD_PCT: 10
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    name: "⏱ Benchmark"
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The PR's merge commit plus its first parent: the base the PR
+          # merges into. Comparing the two isolates exactly the PR's changes.
+          fetch-depth: 2
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-bench-
+
+      - name: setup rust 1.78
+        uses: dtolnay/rust-toolchain@1.78.0
+
+      - name: Resolve commits
+        id: commits
+        run: |
+          echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "base=$(git rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"
+
+      - name: Benchmark base
+        # Best-effort: if the base can't build these benchmarks (say, a feature
+        # this PR introduces), the report lists every benchmark as new rather
+        # than failing the job.
+        continue-on-error: true
+        run: |
+          # target/ is cached, so clear results left by an earlier run.
+          rm -rf target/criterion
+          git checkout --quiet --detach "${{ steps.commits.outputs.base }}"
+          # Both steps run the same command, inline rather than from a script
+          # in the repo, because the base commit may not have that script.
+          # - `--bench '*'` runs every bench target and skips the libraries'
+          #   libtest harness, which rejects criterion's flags.
+          # - The decimal and chrono features enable those benches.
+          # - Warm-up and measurement are shorter than criterion's defaults
+          #   (3s and 5s) to keep two full runs to a few minutes; the
+          #   confidence interval in the report shows when that isn't enough.
+          cargo bench --workspace --bench '*' --features ore-rs/decimal,ore-rs/chrono -- \
+            --noplot --warm-up-time 1 --measurement-time 3 \
+            --save-baseline base
+
+      - name: Benchmark PR
+        run: |
+          git checkout --quiet --detach "${{ steps.commits.outputs.head }}"
+          # Same command as the base step; `--baseline-lenient` compares
+          # against the base run, and still records benchmarks it lacks.
+          cargo bench --workspace --bench '*' --features ore-rs/decimal,ore-rs/chrono -- \
+            --noplot --warm-up-time 1 --measurement-time 3 \
+            --baseline-lenient base
+
+      - name: Build report
+        run: |
+          python3 -I .github/scripts/bench-report.py \
+            target/criterion \
+            "${{ steps.commits.outputs.base }}" \
+            "${{ github.event.pull_request.head.sha }}" \
+            "$THRESHOLD_PCT" \
+            target/bench-comment.md
+          cat target/bench-comment.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post report as a sticky PR comment
+        # Best-effort: a comment-posting hiccup must not turn the job red. The
+        # report is in the job summary either way.
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('target/bench-comment.md', 'utf8');
+            // bench-report.py starts its output with this marker.
+            const marker = '<!-- ore-rs-bench-report -->';
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            // Paginate so the marker is found even on PRs with >100 comments,
+            // otherwise each run would post a duplicate comment.
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number, per_page: 100,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
