@@ -23,6 +23,13 @@ impl RightBlock8 {
         let byte = crate::scheme::width::ct_select_byte(&self.data, bit / 8);
         crate::scheme::width::ct_bit(byte, (bit % 8) as u8)
     }
+
+    /// The raw bitvector bytes, LSB-first within each byte — the bit order
+    /// used by [`Self::get_bit`].
+    #[inline]
+    pub(crate) fn bytes(&self) -> &[u8] {
+        &self.data
+    }
 }
 
 impl RightBitVec for RightBlock8 {

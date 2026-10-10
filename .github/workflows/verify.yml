@@ -1,0 +1,133 @@
+name: "Verify"
+# Dynamic and formal evidence for the v2 ORE implementation, beyond the unit
+# and property tests in `test.yml`:
+#
+#   * ct-taint: the ctgrind-style Valgrind run (packages/ct-taint). Key and
+#     plaintext are marked undefined; every secret-dependent branch or
+#     secret-indexed access memcheck reports fails the job unless it is one of
+#     the documented exceptions in packages/ct-taint/valgrind.supp.
+#   * fuzz: the libFuzzer targets (packages/ore-rs/fuzz) for the ciphertext
+#     parsers and raw comparators, time-boxed per pull request.
+#   * kani: the bounded model-checking harnesses (`#[cfg(kani)]`) for the pure
+#     building blocks. The two heaviest, behind the `kani-full` feature, are
+#     not run here: the exhaustive-length `ct_select_byte` harness (about 9
+#     minutes) and the SWAR-builder equivalence harness (about 15 minutes on
+#     an M4, and cancelled on GitHub's runners); run
+#     `cargo kani -p ore-rs --features kani-full` by hand for the full set.
+#
+# Like test.yml, this runs on every pull request regardless of base branch, so
+# the stacked PRs get it too.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash -l {0}
+
+jobs:
+  ct-taint:
+    # Both legs matter: `oblivious::build` dispatches to the SSSE3 builder on
+    # x86_64 and the NEON builder on aarch64, so each target's shipping
+    # builder is only taint-checked on its own runner.
+    runs-on: ${{ matrix.os }}
+    name: "🔍 Valgrind taint (${{ matrix.arch }})"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x86_64
+          - os: ubuntu-24.04-arm
+            arch: aarch64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            packages/ct-taint/target/
+          key: ${{ runner.os }}-${{ runner.arch }}-ct-taint-${{ hashFiles('packages/ct-taint/Cargo.lock', 'packages/ore-rs/src/**') }}
+
+      # crabgrind binds the Valgrind client-request header at build time.
+      - name: install valgrind
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq valgrind clang libclang-dev
+
+      - name: taint run
+        run: scripts/ct-taint.sh
+
+  fuzz:
+    runs-on: ubuntu-latest
+    name: "🧬 fuzz (${{ matrix.target }})"
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [chained_parse, chained_compare, bit6_parse, bit8_parse]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup nightly (cargo-fuzz requires it)
+        uses: dtolnay/rust-toolchain@nightly
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            ~/.cargo/bin/cargo-fuzz
+            packages/ore-rs/fuzz/target/
+          key: ${{ runner.os }}-fuzz-${{ hashFiles('packages/ore-rs/fuzz/Cargo.lock', 'packages/ore-rs/src/**') }}
+
+      - name: install cargo-fuzz
+        run: command -v cargo-fuzz >/dev/null || cargo install cargo-fuzz --locked
+
+      - name: fuzz
+        run: scripts/fuzz.sh 120 ${{ matrix.target }}
+
+      - name: keep any crashing input
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: packages/ore-rs/fuzz/artifacts/
+          if-no-files-found: ignore
+
+  # The PRP builder that ships on Arm is NEON, which Kani cannot model, so
+  # its evidence is the equivalence tests against the reference builder
+  # (every step with every swap index, plus random and edge streams). test.yml
+  # runs on x86_64 only, where those tests exercise SSSE3; this runs them
+  # where the dispatcher picks NEON.
+  prp-builders-aarch64:
+    runs-on: ubuntu-24.04-arm
+    name: "🧮 PRP builders (aarch64)"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: builder equivalence tests
+        run: cargo test -p ore-rs --lib primitives::prp
+
+  kani:
+    runs-on: ubuntu-latest
+    name: "✅ Kani"
+    # A hung or runaway CBMC run should fail the job rather than hold a
+    # runner for GitHub's six-hour default.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: model-checking/kani-github-action@v1.1
+        with:
+          args: -p ore-rs

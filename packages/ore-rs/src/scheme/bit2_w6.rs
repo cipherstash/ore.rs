@@ -29,7 +29,8 @@ use crate::{
     primitives::{
         hash::FixedPiZ2Hash, prf::Aes128Prf, AesBlock, Hash, HashKey, Prf, Prp, NONCE_SIZE,
     },
-    scheme::width::{ct_assign_bytes, AesBlockBuf, Bit6, BlockWidth},
+    scheme::decompose::Blocks6,
+    scheme::width::{AesBlockBuf, Bit6, BlockWidth, FirstDiff},
     OreCipher, OreError, PlainText,
 };
 
@@ -140,6 +141,94 @@ impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
         self.prf2.encrypt_all(&mut seeds);
         SeedBuf(seeds)
     }
+
+    /// [`OreCipher::encrypt_left`] over blocks already known to be in the
+    /// 6-bit domain.
+    fn encrypt_left_blocks<const N: usize>(
+        &self,
+        x: &Blocks6<PlainText<N>>,
+    ) -> EncryptLeftResult<R, N> {
+        assert!(N <= MAX_BLOCKS);
+
+        let mut output = Left::<Self, N>::init();
+        let seeds = self.derive_prp_seeds(x.inner());
+
+        for n in 0..N {
+            let prp: <Bit6 as BlockWidth>::Prp = Prp::new(&seeds.0[n])?;
+            output.xt[n] = prp.permute(x.symbol(n)).get();
+
+            output.f[n][0..n].clone_from_slice(&x.as_bytes()[0..n]);
+            output.f[n][n] = output.xt[n];
+            output.f[n][N] = n as u8;
+            output.f[n][15] = N as u8;
+        }
+        self.prf1.encrypt_all(&mut output.f);
+
+        Ok(output)
+    }
+
+    /// [`OreCipher::encrypt`] over blocks already known to be in the 6-bit
+    /// domain.
+    fn encrypt_blocks<const N: usize>(&self, x: &Blocks6<PlainText<N>>) -> EncryptResult<R, N> {
+        assert!(N <= MAX_BLOCKS);
+
+        let mut left = Left::<Self, N>::init();
+        let mut right = Right::<Self, N>::init();
+
+        self.rng.borrow_mut().try_fill(&mut right.nonce)?;
+
+        let seeds = self.derive_prp_seeds(x.inner());
+        let hasher: Z2Hash = Hash::new(HashKey::from_slice(&right.nonce));
+
+        // RO key template, maintained incrementally (see the bit2 sibling).
+        // Entry j for block n is (x[0..n] ‖ j ‖ 0… ‖ n@N ‖ N@15).
+        let mut template = <Bit6 as BlockWidth>::RoKeyBuf::zeroed();
+        for (j, entry) in template.iter_mut().enumerate() {
+            entry[0] = j as u8;
+            entry[15] = N as u8;
+        }
+        let mut work = <Bit6 as BlockWidth>::RoKeyBuf::zeroed();
+
+        for n in 0..N {
+            let prp: <Bit6 as BlockWidth>::Prp = Prp::new(&seeds.0[n])?;
+            left.xt[n] = prp.permute(x.symbol(n)).get();
+
+            left.f[n][0..n].clone_from_slice(&x.as_bytes()[0..n]);
+            left.f[n][n] = left.xt[n];
+            left.f[n][N] = n as u8;
+            left.f[n][15] = N as u8;
+
+            if n > 0 {
+                for (j, entry) in template.iter_mut().enumerate() {
+                    entry[n - 1] = x.as_bytes()[n - 1];
+                    entry[n] = j as u8;
+                    entry[N] = n as u8;
+                }
+            }
+
+            work.copy_from(&template);
+            self.prf1.encrypt_all(work.as_mut_slice());
+
+            crate::scheme::bit2::encode_right_block::<Bit6, _>(
+                &mut right.data[n],
+                &prp,
+                x.symbol(n),
+                &hasher,
+                &mut work,
+            );
+        }
+
+        self.prf1.encrypt_all(&mut left.f);
+
+        for entry in template.iter_mut() {
+            entry.zeroize();
+        }
+        for entry in work.as_mut_slice() {
+            entry.zeroize();
+        }
+
+        Ok(CipherText { left, right })
+    }
 }
 
 // Right-block encoding is the width-/hash-generic helper shared with the
@@ -162,95 +251,18 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128Bit6<R> {
         })
     }
 
-    /// Encrypt `x`, whose entries are **6-bit block values** (`< 64`,
-    /// produced by [`crate::scheme::decompose`]); `N` is the block count
+    /// Encrypt `x`, whose entries are **6-bit block values** (`< 64`, as
+    /// [`crate::scheme::decompose`] produces); `N` is the block count
     /// (≤ [`MAX_BLOCKS`]). The [`crate::OreEncrypt`] impls handle the
-    /// byte→block decomposition for primitive types.
+    /// byte→block decomposition for primitive types and skip the check
+    /// below. A value `>= 64` returns [`OreError::PrpError`].
     fn encrypt_left<const N: usize>(&self, x: &PlainText<N>) -> EncryptLeftResult<R, N> {
-        assert!(N <= MAX_BLOCKS);
-        debug_assert!(x
-            .iter()
-            .all(|&b| (b as usize) < <Bit6 as BlockWidth>::DOMAIN));
-
-        let mut output = Left::<Self, N>::init();
-        let seeds = self.derive_prp_seeds(x);
-
-        for n in 0..N {
-            let prp: <Bit6 as BlockWidth>::Prp = Prp::new(&seeds.0[n])?;
-            output.xt[n] = prp.permute(x[n])?;
-
-            output.f[n][0..n].clone_from_slice(&x[0..n]);
-            output.f[n][n] = output.xt[n];
-            output.f[n][N] = n as u8;
-            output.f[n][15] = N as u8;
-        }
-        self.prf1.encrypt_all(&mut output.f);
-
-        Ok(output)
+        self.encrypt_left_blocks(&Blocks6::check(*x)?)
     }
 
+    /// As [`Self::encrypt_left`], for the full ciphertext.
     fn encrypt<const N: usize>(&self, x: &PlainText<N>) -> EncryptResult<R, N> {
-        assert!(N <= MAX_BLOCKS);
-        debug_assert!(x
-            .iter()
-            .all(|&b| (b as usize) < <Bit6 as BlockWidth>::DOMAIN));
-
-        let mut left = Left::<Self, N>::init();
-        let mut right = Right::<Self, N>::init();
-
-        self.rng.borrow_mut().try_fill(&mut right.nonce)?;
-
-        let seeds = self.derive_prp_seeds(x);
-        let hasher: Z2Hash = Hash::new(HashKey::from_slice(&right.nonce));
-
-        // RO key template, maintained incrementally (see the bit2 sibling).
-        // Entry j for block n is (x[0..n] ‖ j ‖ 0… ‖ n@N ‖ N@15).
-        let mut template = <Bit6 as BlockWidth>::RoKeyBuf::zeroed();
-        for (j, entry) in template.iter_mut().enumerate() {
-            entry[0] = j as u8;
-            entry[15] = N as u8;
-        }
-        let mut work = <Bit6 as BlockWidth>::RoKeyBuf::zeroed();
-
-        for n in 0..N {
-            let prp: <Bit6 as BlockWidth>::Prp = Prp::new(&seeds.0[n])?;
-            left.xt[n] = prp.permute(x[n])?;
-
-            left.f[n][0..n].clone_from_slice(&x[0..n]);
-            left.f[n][n] = left.xt[n];
-            left.f[n][N] = n as u8;
-            left.f[n][15] = N as u8;
-
-            if n > 0 {
-                for (j, entry) in template.iter_mut().enumerate() {
-                    entry[n - 1] = x[n - 1];
-                    entry[n] = j as u8;
-                    entry[N] = n as u8;
-                }
-            }
-
-            work.copy_from(&template);
-            self.prf1.encrypt_all(work.as_mut_slice());
-
-            crate::scheme::bit2::encode_right_block::<Bit6, _>(
-                &mut right.data[n],
-                &prp,
-                x[n],
-                &hasher,
-                &mut work,
-            );
-        }
-
-        self.prf1.encrypt_all(&mut left.f);
-
-        for entry in template.iter_mut() {
-            entry.zeroize();
-        }
-        for entry in work.as_mut_slice() {
-            entry.zeroize();
-        }
-
-        Ok(CipherText { left, right })
+        self.encrypt_blocks(&Blocks6::check(*x)?)
     }
 
     fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering> {
@@ -294,9 +306,7 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128Bit6<R> {
         // The right blocks are the one region the scan would otherwise never
         // touch, so a direct `right[l]` afterwards hits or misses the cache
         // according to `l`; measured as a timing signal, see `docs/reviews/`.
-        let mut sel_xt = 0u8;
-        let mut sel_f = [0u8; LeftBlock16::BLOCK_SIZE];
-        let mut sel_right = [0u8; RightBlock8::BLOCK_SIZE];
+        let mut diff = FirstDiff::<{ RightBlock8::BLOCK_SIZE }>::new();
 
         // Slices for the PRF ("f") blocks and the right half.
         let a_f = &a[num_blocks..];
@@ -311,9 +321,12 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128Bit6<R> {
             // Set for exactly one `n`: the first differing block.
             let first = is_equal & condition;
 
-            sel_xt.conditional_assign(&a[n], first);
-            ct_assign_bytes(&mut sel_f, left_block(a_f, n), first);
-            ct_assign_bytes(&mut sel_right, right_block(b_right_blocks, n), first);
+            diff.latch(
+                a[n],
+                left_block(a_f, n),
+                right_block(b_right_blocks, n),
+                first,
+            );
             is_equal.conditional_assign(&Choice::from(0), first);
         }
 
@@ -322,10 +335,8 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128Bit6<R> {
         }
 
         let hash: Z2Hash = Hash::new(HashKey::from_slice(&b_right[0..NONCE_SIZE]));
-        let h = hash.hash(&sel_f);
-        let test = get_bit(&sel_right, sel_xt as usize) ^ h;
 
-        if test == 1 {
+        if diff.resolve(&hash) == 1 {
             return Some(Ordering::Greater);
         }
 
@@ -345,16 +356,6 @@ fn right_block(input: &[u8], n: usize) -> &[u8] {
     &input[f_pos..(f_pos + RightBlock8::BLOCK_SIZE)]
 }
 
-#[inline]
-fn get_bit(block: &[u8], bit: usize) -> u8 {
-    debug_assert!(block.len() == RightBlock8::BLOCK_SIZE);
-    debug_assert!(bit < 64);
-    // `bit` is the secret permuted symbol; read the byte obliviously so the
-    // access address does not depend on it. See `width::ct_select_byte`.
-    let byte = crate::scheme::width::ct_select_byte(block, bit / 8);
-    crate::scheme::width::ct_bit(byte, (bit % 8) as u8)
-}
-
 impl<const N: usize> PartialEq for CipherText<OreAes128Bit6ChaCha20, N> {
     fn eq(&self, b: &Self) -> bool {
         matches!(self.cmp(b), Ordering::Equal)
@@ -364,27 +365,32 @@ impl<const N: usize> PartialEq for CipherText<OreAes128Bit6ChaCha20, N> {
 impl<const N: usize> Ord for CipherText<OreAes128Bit6ChaCha20, N> {
     fn cmp(&self, b: &Self) -> Ordering {
         let mut is_equal = Choice::from(1);
-        let mut l: u64 = 0; // Unequal block
+        // Latch the first differing block during the scan, as in
+        // `compare_raw_slices`: no load after the loop is indexed by its
+        // position.
+        let mut diff = FirstDiff::<{ RightBlock8::BLOCK_SIZE }>::new();
 
         for n in 0..N {
             let condition: Choice =
                 !(self.left.xt[n].ct_eq(&b.left.xt[n])) | !(self.left.f[n].ct_eq(&b.left.f[n]));
+            // Set for exactly one `n`: the first differing block.
+            let first = is_equal & condition;
 
-            l.conditional_assign(&(n as u64), is_equal & condition);
-            is_equal.conditional_assign(&Choice::from(0), is_equal & condition);
+            diff.latch(
+                self.left.xt[n],
+                &self.left.f[n],
+                b.right.data[n].bytes(),
+                first,
+            );
+            is_equal.conditional_assign(&Choice::from(0), first);
         }
-
-        let l: usize = l as usize;
 
         if bool::from(is_equal) {
             return Ordering::Equal;
         }
 
         let hash: Z2Hash = Hash::new(HashKey::from_slice(&b.right.nonce));
-        let h = hash.hash(&self.left.f[l]);
-
-        let test = b.right.data[l].get_bit(self.left.xt[l] as usize) ^ h;
-        if test == 1 {
+        if diff.resolve(&hash) == 1 {
             return Ordering::Greater;
         }
 
@@ -406,8 +412,8 @@ impl<const N: usize> Eq for CipherText<OreAes128Bit6ChaCha20, N> {}
 
 mod encrypt_impls {
     use super::{OreAes128Bit6, MAX_BLOCKS};
-    use crate::scheme::decompose::{decompose_6bit, num_blocks_6bit};
-    use crate::{CipherText, Left, OreCipher, OreEncrypt, OreError};
+    use crate::scheme::decompose::{num_blocks_6bit, Blocks6};
+    use crate::{CipherText, Left, OreEncrypt, OreError};
     use orderable_bytes::ToOrderableBytes;
     use rand::{Rng, SeedableRng};
 
@@ -428,16 +434,14 @@ mod encrypt_impls {
                     cipher: &OreAes128Bit6<R>,
                 ) -> Result<Self::LeftOutput, OreError> {
                     let bytes = self.to_orderable_bytes();
-                    let mut blocks = [0u8; $blocks_const];
-                    decompose_6bit(&bytes, &mut blocks);
-                    cipher.encrypt_left(&blocks)
+                    let blocks = Blocks6::decompose(&bytes, [0u8; $blocks_const]);
+                    cipher.encrypt_left_blocks(&blocks)
                 }
 
                 fn encrypt(&self, cipher: &OreAes128Bit6<R>) -> Result<Self::FullOutput, OreError> {
                     let bytes = self.to_orderable_bytes();
-                    let mut blocks = [0u8; $blocks_const];
-                    decompose_6bit(&bytes, &mut blocks);
-                    cipher.encrypt(&blocks)
+                    let blocks = Blocks6::decompose(&bytes, [0u8; $blocks_const]);
+                    cipher.encrypt_blocks(&blocks)
                 }
             }
         };
@@ -484,6 +488,29 @@ mod tests {
     /// input `xt[0] ‖ 0×10 ‖ 0@11 ‖ 0×3 ‖ 11@15`; legacy block 11 of
     /// `(xt[0], 0×10, c, 0×3)` has input `xt[0] ‖ 0×10 ‖ xt'[11] ‖ 0×3 ‖
     /// 11@15`, which matches whenever `c` permutes to 0. Search every `c`.
+    /// Blocks passed straight to `OreCipher` are checked: a value outside
+    /// the 6-bit domain is refused, and an in-domain array encrypts exactly
+    /// as the decomposing `OreEncrypt` path does.
+    #[test]
+    fn raw_blocks_are_checked() {
+        let ore = init_ore();
+        let mut blocks = [0u8; 11];
+        blocks[3] = 64;
+        assert!(matches!(
+            OreCipher::encrypt(&ore, &blocks),
+            Err(OreError::PrpError(_))
+        ));
+        assert!(matches!(
+            OreCipher::encrypt_left(&ore, &blocks),
+            Err(OreError::PrpError(_))
+        ));
+
+        let x = 0x0123_4567_89ab_cdefu64;
+        let decomposed = crate::scheme::decompose::Blocks6::decompose(&x.to_be_bytes(), [0u8; 11]);
+        let raw = OreCipher::encrypt_left(&ore, decomposed.inner()).unwrap();
+        assert_eq!(raw.to_bytes(), x.encrypt_left(&ore).unwrap().to_bytes());
+    }
+
     #[test]
     fn legacy_ciphertexts_never_publish_bit6_tags() {
         use crate::scheme::bit2::OreAes128ChaCha20;

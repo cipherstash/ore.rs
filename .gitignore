@@ -4,3 +4,11 @@
 .DS_Store
 .env
 *.pem
+
+# Detached verification crates (packages/ct-taint, packages/ct-dudect,
+# packages/ore-rs/fuzz) build into their own target dirs; the taint harness
+# also builds into target-linux from a container on a macOS host. libFuzzer
+# crash artefacts are per-run output, not seeds (the seeds are in corpus/).
+target/
+packages/ct-taint/target-linux/
+packages/ore-rs/fuzz/artifacts/

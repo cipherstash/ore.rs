@@ -11,9 +11,10 @@
 //! as associated types instead.
 
 use crate::ciphertext::CipherTextBlock;
-use crate::primitives::{AesBlock, Prp};
+use crate::primitives::{AesBlock, Hash, Prp, Symbol};
 use crate::scheme::bit2::block_types::RightBlock32;
 use crate::scheme::bit2_w6::block_types::RightBlock8;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 mod sealed {
     pub trait Sealed {}
@@ -129,6 +130,52 @@ pub(crate) fn ct_bit(byte: u8, pos: u8) -> u8 {
     out
 }
 
+/// The first differing block of a comparator's prefix scan: `a`'s permuted
+/// symbol `xt` and PRF tag `f`, and `b`'s `R`-byte right bitvector.
+///
+/// The scan calls [`Self::latch`] for every block, under the choice "this is
+/// the first difference", so nothing after the scan is loaded at an address
+/// derived from that position (see [`ct_assign_bytes`]). The copies are
+/// zeroized on drop, on every return path, so they do not outlive the
+/// comparison on the stack.
+#[derive(Zeroize, ZeroizeOnDrop)]
+pub(crate) struct FirstDiff<const R: usize> {
+    xt: u8,
+    f: [u8; 16],
+    right: [u8; R],
+}
+
+impl<const R: usize> FirstDiff<R> {
+    pub(crate) fn new() -> Self {
+        Self {
+            xt: 0,
+            f: [0; 16],
+            right: [0; R],
+        }
+    }
+
+    /// Copy one block's values in when `first` is set; every byte of the
+    /// latch and the inputs is touched either way.
+    #[inline]
+    pub(crate) fn latch(&mut self, xt: u8, f: &[u8], right: &[u8], first: subtle_ng::Choice) {
+        use subtle_ng::ConditionallySelectable;
+        self.xt.conditional_assign(&xt, first);
+        ct_assign_bytes(&mut self.f, f, first);
+        ct_assign_bytes(&mut self.right, right, first);
+    }
+
+    /// The resolution step: bit `xt` of the right bitvector XOR the random
+    /// oracle on `f`. `1` means `a > b`. The bit is read with
+    /// [`ct_select_byte`] and [`ct_bit`], so its address does not depend on
+    /// `xt` either.
+    #[inline]
+    pub(crate) fn resolve<H: Hash>(&self, hasher: &H) -> u8 {
+        debug_assert!(usize::from(self.xt) < R * 8);
+        let byte = ct_select_byte(&self.right, usize::from(self.xt / 8));
+        ct_bit(byte, self.xt % 8) ^ hasher.hash(&self.f)
+    }
+}
+
 /// Per-block bitvector operations on a Right ciphertext block, one bit per
 /// value in the block domain.
 pub trait RightBitVec {
@@ -160,8 +207,10 @@ pub trait BlockWidth: sealed::Sealed + 'static {
     const DOMAIN: usize = 1 << Self::BITS;
     /// Right-ciphertext block: a `DOMAIN`-bit masked truth-table row.
     type RightBlock: CipherTextBlock + RightBitVec;
+    /// A block value: a [`Symbol`] of the `DOMAIN`-element domain.
+    type Symbol: Copy;
     /// PRP over the block domain.
-    type Prp: Prp<u8>;
+    type Prp: Prp<Self::Symbol>;
     /// Buffer holding `DOMAIN` random-oracle keys.
     type RoKeyBuf: AesBlockBuf;
 }
@@ -174,6 +223,7 @@ pub struct Bit8;
 impl BlockWidth for Bit8 {
     const BITS: usize = 8;
     type RightBlock = RightBlock32;
+    type Symbol = Symbol<256>;
     type Prp = crate::primitives::prp::KnuthShufflePRP<u8, 256>;
     type RoKeyBuf = [AesBlock; 256];
 }
@@ -191,5 +241,58 @@ impl BlockWidth for Bit6 {
     // Bit6's wire format is not frozen, so it adopts the constant-time,
     // ~9×-faster PRP construction. See `LemireFyPrp`.
     type Prp = crate::primitives::prp::LemireFyPrp<64>;
+    type Symbol = Symbol<64>;
     type RoKeyBuf = [AesBlock; 64];
+}
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// `ct_select_byte(block, idx) == block[idx]` for every block of length
+    /// 1..=256 (the stated domain) and every in-range `idx`.
+    // Every length 1..=256 takes about nine minutes; the shipped lengths are
+    // proved by the harness below, so this runs only with `kani-full`.
+    #[cfg(feature = "kani-full")]
+    #[kani::proof]
+    #[kani::unwind(257)]
+    fn ct_select_byte_equals_index_up_to_256() {
+        let buf: [u8; 256] = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len >= 1 && len <= 256);
+        let idx: usize = kani::any();
+        kani::assume(idx < len);
+        let block = &buf[..len];
+        assert_eq!(ct_select_byte(block, idx), block[idx]);
+    }
+
+    /// `ct_select_byte(block, idx) == block[idx]` for the two right-block
+    /// sizes the comparators use (8 and 32 bytes), all contents, all
+    /// in-range `idx`.
+    #[kani::proof]
+    #[kani::unwind(33)]
+    fn ct_select_byte_equals_index_right_blocks() {
+        let b8: [u8; 8] = kani::any();
+        let i8: usize = kani::any();
+        kani::assume(i8 < 8);
+        assert_eq!(ct_select_byte(&b8, i8), b8[i8]);
+
+        let b32: [u8; 32] = kani::any();
+        let i32: usize = kani::any();
+        kani::assume(i32 < 32);
+        assert_eq!(ct_select_byte(&b32, i32), b32[i32]);
+    }
+
+    /// `ct_bit(byte, pos) == (byte >> pos) & 1` for every byte and every
+    /// `pos` in `0..8`, and is 0 for every `pos >= 8` (exhaustive).
+    #[kani::proof]
+    fn ct_bit_equals_shift() {
+        let byte: u8 = kani::any();
+        let pos: u8 = kani::any();
+        if pos < 8 {
+            assert_eq!(ct_bit(byte, pos), (byte >> pos) & 1);
+        } else {
+            assert_eq!(ct_bit(byte, pos), 0);
+        }
+    }
 }

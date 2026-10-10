@@ -1,0 +1,11 @@
+# Accepted memcheck reports for the taint harness. Each entry is a
+# secret-dependent access or branch that the design documents and accepts;
+# scripts/ct-taint.sh fails on anything not listed here. Add an entry only
+# with a reason. Frame names are demangled Rust symbols, matched as globs.
+#
+# There are none. The PRP's range check on the plaintext symbol, the last
+# accepted report, is gone: `permute` takes a typed in-domain `Symbol`, and
+# the encryptors get their symbols from the 6-bit decomposition, which masks
+# rather than checks. (`Blocks6::check`, the validation for callers that pass
+# raw symbols to `OreCipher::encrypt` or `encrypt_var`, is not on any path
+# the harness runs.)

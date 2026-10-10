@@ -41,8 +41,8 @@ use crate::primitives::cmac::{final_block, prefix_block, Branch, CmacAccumulator
 use crate::primitives::hash::FixedPiZ2Hash;
 use crate::primitives::prp::LemireFyPrp;
 use crate::primitives::{AesBlock, Hash, HashKey, Prp};
-use crate::scheme::decompose::{decompose_6bit, num_blocks_6bit};
-use crate::scheme::width::{ct_assign_bytes, ct_bit, ct_select_byte};
+use crate::scheme::decompose::{num_blocks_6bit, Blocks6};
+use crate::scheme::width::FirstDiff;
 use crate::OreError;
 
 const VERSION: u8 = 0x02;
@@ -224,10 +224,16 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         Ok(prp)
     }
 
-    /// Full Left+Right ciphertext for `x` (one 6-bit symbol per element).
+    /// Full Left+Right ciphertext for `x` (one 6-bit symbol per element). A
+    /// value `>= 64` returns [`OreError::PrpError`].
     pub fn encrypt_var(&self, x: &[u8]) -> Result<VarCipherText, OreError> {
+        self.encrypt_blocks(&Blocks6::check(x)?)
+    }
+
+    /// [`Self::encrypt_var`] over blocks already known to be in the 6-bit
+    /// domain.
+    fn encrypt_blocks<B: AsRef<[u8]>>(&self, x: &Blocks6<B>) -> Result<VarCipherText, OreError> {
         let count = x.len();
-        debug_assert!(x.iter().all(|&b| (b as usize) < DOMAIN));
         if count > u16::MAX as usize {
             return Err(OreError::TooManyBlocks);
         }
@@ -246,10 +252,11 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         // loop rather than once per block.
         let mut ro = [AesBlock::default(); DOMAIN];
 
-        for (n, &sym) in x.iter().enumerate() {
+        for n in 0..count {
+            let sym = x.symbol(n);
             let n16 = n as u16;
             let prp = self.prp_at(&acc, n16)?;
-            let permuted = prp.permute(sym)?;
+            let permuted = prp.permute(sym).get();
             xt.push(permuted);
 
             // ro_key for every domain value; f[n] = ro(n, xt[n]).
@@ -277,7 +284,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
             prp.indicator_mask_xor(sym, &mut rb);
             blocks.push(rb);
 
-            acc.absorb(&prefix_block(n16, sym));
+            acc.absorb(&prefix_block(n16, sym.get()));
         }
 
         // `ro` held key-derived RO_KEY tags (then H outputs) for the last block.
@@ -291,10 +298,16 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         })
     }
 
-    /// Left-only ciphertext (smaller; for query plaintexts).
+    /// Left-only ciphertext (smaller; for query plaintexts). A value `>= 64`
+    /// returns [`OreError::PrpError`].
     pub fn encrypt_left_var(&self, x: &[u8]) -> Result<VarLeft, OreError> {
+        self.encrypt_left_blocks(&Blocks6::check(x)?)
+    }
+
+    /// [`Self::encrypt_left_var`] over blocks already known to be in the
+    /// 6-bit domain.
+    fn encrypt_left_blocks<B: AsRef<[u8]>>(&self, x: &Blocks6<B>) -> Result<VarLeft, OreError> {
         let count = x.len();
-        debug_assert!(x.iter().all(|&b| (b as usize) < DOMAIN));
         if count > u16::MAX as usize {
             return Err(OreError::TooManyBlocks);
         }
@@ -303,10 +316,11 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         let mut xt = Vec::with_capacity(count);
         let mut f = Vec::with_capacity(count);
 
-        for (n, &sym) in x.iter().enumerate() {
+        for n in 0..count {
+            let sym = x.symbol(n);
             let n16 = n as u16;
             let prp = self.prp_at(&acc, n16)?;
-            let permuted = prp.permute(sym)?;
+            let permuted = prp.permute(sym).get();
             xt.push(permuted);
             f.push(acc.finalize(&final_block(
                 Branch::RoKey,
@@ -314,7 +328,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
                 permuted as u16,
                 WIDTH_BIT6,
             )));
-            acc.absorb(&prefix_block(n16, sym));
+            acc.absorb(&prefix_block(n16, sym.get()));
         }
         Ok(VarLeft { xt, f })
     }
@@ -322,13 +336,13 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     /// Encrypt a string (UTF-8 bytes → MSB-first 6-bit blocks). Strings
     /// longer than [`MAX_STR_BYTES`] return [`OreError::TooManyBlocks`].
     pub fn encrypt_str(&self, s: &str) -> Result<VarCipherText, OreError> {
-        self.encrypt_var(&str_to_blocks(s)?)
+        self.encrypt_blocks(&str_to_blocks(s)?)
     }
 
     /// Left-only string ciphertext. Strings longer than [`MAX_STR_BYTES`]
     /// return [`OreError::TooManyBlocks`].
     pub fn encrypt_left_str(&self, s: &str) -> Result<VarLeft, OreError> {
-        self.encrypt_left_var(&str_to_blocks(s)?)
+        self.encrypt_left_blocks(&str_to_blocks(s)?)
     }
 
     /// Compare two serialised full ciphertexts (lexicographic; shorter prefix
@@ -394,16 +408,12 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     fn compare_views(a: &[u8], ca: usize, b: &[u8], cb: usize) -> Ordering {
         let min_count = ca.min(cb);
         let mut is_equal = Choice::from(1u8);
-        let mut sel_xt = 0u8;
-        let mut sel_f = [0u8; F_LEN];
-        let mut sel_right = [0u8; RIGHT_LEN];
+        let mut diff = FirstDiff::<RIGHT_LEN>::new();
         for n in 0..min_count {
             let differs = !xt_at(a, n).ct_eq(&xt_at(b, n)) | !f_at(a, ca, n).ct_eq(f_at(b, cb, n));
             // Set for exactly one `n`: the first differing block.
             let first = is_equal & differs;
-            sel_xt.conditional_assign(&xt_at(a, n), first);
-            ct_assign_bytes(&mut sel_f, f_at(a, ca, n), first);
-            ct_assign_bytes(&mut sel_right, right_at(b, cb, n), first);
+            diff.latch(xt_at(a, n), f_at(a, ca, n), right_at(b, cb, n), first);
             is_equal.conditional_assign(&Choice::from(0u8), first);
         }
 
@@ -413,10 +423,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         }
 
         let hasher = FixedPiZ2Hash::new(HashKey::from_slice(nonce_at(b, cb)));
-        let h = hasher.hash(&sel_f);
-        let byte = ct_select_byte(&sel_right, (sel_xt / 8) as usize);
-        let test = ct_bit(byte, sel_xt % 8) ^ h;
-        if test == 1 {
+        if diff.resolve(&hasher) == 1 {
             Ordering::Greater
         } else {
             Ordering::Less
@@ -447,17 +454,15 @@ const _: () = assert!(num_blocks_6bit(MAX_STR_BYTES + 1) > u16::MAX as usize);
 
 /// Decompose `s` into 6-bit blocks, refusing a string too long for the wire
 /// format *before* allocating or decomposing it.
-fn str_to_blocks(s: &str) -> Result<Vec<u8>, OreError> {
+fn str_to_blocks(s: &str) -> Result<Blocks6<Vec<u8>>, OreError> {
     let bytes = s.as_bytes();
     if bytes.len() > MAX_STR_BYTES {
         return Err(OreError::TooManyBlocks);
     }
-    let nb = num_blocks_6bit(bytes.len());
-    let mut blocks = vec![0u8; nb];
-    if nb > 0 {
-        decompose_6bit(bytes, &mut blocks);
-    }
-    Ok(blocks)
+    Ok(Blocks6::decompose(
+        bytes,
+        vec![0u8; num_blocks_6bit(bytes.len())],
+    ))
 }
 
 #[cfg(test)]
@@ -466,6 +471,28 @@ mod tests {
 
     fn ore() -> OreAes128Bit6ChainedChaCha20 {
         OreAes128Bit6Chained::init(&[0x11; 16]).unwrap()
+    }
+
+    /// Symbols passed straight to `encrypt_var` / `encrypt_left_var` are
+    /// checked: a value outside the 6-bit domain is refused, and in-domain
+    /// symbols encrypt exactly as the string path's decomposition does.
+    #[test]
+    fn raw_symbols_are_checked() {
+        let c = ore();
+        assert!(matches!(
+            c.encrypt_var(&[1, 64, 2]),
+            Err(OreError::PrpError(_))
+        ));
+        assert!(matches!(
+            c.encrypt_left_var(&[1, 64, 2]),
+            Err(OreError::PrpError(_))
+        ));
+
+        let blocks = str_to_blocks("alice").unwrap();
+        assert_eq!(
+            c.encrypt_left_var(blocks.as_bytes()).unwrap().to_bytes(),
+            c.encrypt_left_str("alice").unwrap().to_bytes()
+        );
     }
 
     #[test]

@@ -31,6 +31,16 @@ chrono = ["dep:chrono", "orderable-bytes/chrono"]
 # order-preserving encoding fed into the existing fixed-N ORE machinery.
 # The encoder lives in the sibling `orderable-bytes` crate.
 decimal = ["dep:rust_decimal", "orderable-bytes/decimal"]
+# Exposes `ct_bench`, timing-measurement entry points to otherwise private
+# primitives, for the detached `packages/ct-dudect` crate. Not part of the
+# public API: a feature rather than a `cfg` so it never trips
+# `unexpected_cfgs`, and never enabled by a dependant.
+ct-bench = []
+# Adds the two heaviest Kani harnesses: exhaustive-length `ct_select_byte`
+# (about 9 minutes) and SWAR-builder equivalence (about 15 minutes on an M4,
+# too heavy for GitHub's runners). CI runs `cargo kani` without it; run
+# `cargo kani -p ore-rs --features kani-full` for the complete set.
+kani-full = []
 
 [dependencies]
 aes = { version = "0.8.2", features = ["zeroize"] }
@@ -46,6 +56,10 @@ hex = "0.4.3"
 subtle-ng = "2.5.0"
 zeroize = { version = "1.5.7", features = ["zeroize_derive"] }
 thiserror = "1.0.38"
+
+# `cfg(kani)` gates the Kani proof harnesses (compiled only by `cargo kani`).
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
 
 [[bench]]
 name = "oreaes128"
@@ -68,6 +82,11 @@ required-features = ["chrono"]
 [[bench]]
 name = "chained"
 harness = false
+
+[[bench]]
+name = "prp_build"
+harness = false
+required-features = ["ct-bench"]
 
 [[example]]
 name = "encrypt"

@@ -16,8 +16,8 @@
 //! - `swar` holds each table as eight `u64` words and does every
 //!   secret-indexed read and write as a masked pass over the words, with
 //!   exact SWAR byte-equality masks. Portable fallback.
-//! - `scalar` (tests only) is the same construction a byte at a time with
-//!   `subtle_ng` choices.
+//! - `scalar` (tests and benches only) is the same construction a byte at
+//!   a time with `subtle_ng` choices.
 //! - `neon` (aarch64) holds both tables in eight 16-byte registers for the
 //!   whole build: `tbl` fetches `perm[j]` by a broadcast index, and
 //!   compare-and-select against a constant index vector writes back.
@@ -59,7 +59,7 @@ pub(crate) const STREAM_BYTES: usize = (DOMAIN - 1) * 8;
 /// `63 - i`, as a little-endian u64, mapped to `0..=i` by multiply-high.
 /// Identical to the indexed builder's reduction.
 #[inline(always)]
-fn lemire_draw(stream: &[u8], i: usize) -> u8 {
+pub(crate) fn lemire_draw(stream: &[u8], i: usize) -> u8 {
     let d = DOMAIN - 1 - i;
     let mut draw = [0u8; 8];
     draw.copy_from_slice(&stream[d * 8..d * 8 + 8]);
@@ -79,15 +79,18 @@ fn lemire_draw(stream: &[u8], i: usize) -> u8 {
 pub(crate) fn build(stream: &[u8], perm: &mut [u8; DOMAIN], inverse: &mut [u8; DOMAIN]) {
     assert!(stream.len() >= STREAM_BYTES);
 
-    #[cfg(target_arch = "aarch64")]
+    // Kani cannot model the NEON and SSSE3 intrinsics, so under `cargo kani`
+    // every target dispatches to the SWAR builder, which the harnesses prove
+    // equal to the reference builder.
+    #[cfg(all(target_arch = "aarch64", not(kani)))]
     // SAFETY: NEON is baseline on aarch64; `stream` length asserted above.
     unsafe {
         neon::build(stream, perm, inverse)
     }
 
-    #[cfg(not(target_arch = "aarch64"))]
+    #[cfg(any(not(target_arch = "aarch64"), kani))]
     {
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(all(target_arch = "x86_64", not(kani)))]
         if is_x86_feature_detected!("ssse3") {
             // SAFETY: SSSE3 presence just checked; `stream` length asserted.
             unsafe { ssse3::build(stream, perm, inverse) };
@@ -101,9 +104,10 @@ pub(crate) fn build(stream: &[u8], perm: &mut [u8; DOMAIN], inverse: &mut [u8; D
 /// The reference builder: textbook Fisher–Yates, swapping at the
 /// draw-derived index, then `inverse[perm[k]] = k`. Both use a secret value
 /// as an address, which is the timing channel the oblivious builders close,
-/// so it is never compiled into the library: it exists only as the
-/// specification the oblivious builders are tested against.
-#[cfg(test)]
+/// so it is never compiled into a shipped build: it exists only as the
+/// specification the oblivious builders are tested and proved (Kani)
+/// against, and for the `ct-bench` before/after timing hooks.
+#[cfg(any(test, kani, feature = "ct-bench"))]
 pub(crate) mod reference {
     use super::*;
 
@@ -124,9 +128,10 @@ pub(crate) mod reference {
 /// Byte-at-a-time oblivious builder with `subtle_ng` choices: full-scan
 /// reads and masked full-table writes, the inverse maintained alongside.
 /// The most direct form of the construction, kept as a second reference
-/// for the tests; `subtle_ng`'s per-choice optimisation barrier makes it
-/// about 17x slower than [`swar`], which the dispatcher uses instead.
-#[cfg(test)]
+/// for the tests and the timing benches; `subtle_ng`'s per-choice
+/// optimisation barrier makes it about 17x slower than [`swar`], which the
+/// dispatcher uses instead.
+#[cfg(any(test, feature = "ct-bench"))]
 pub(crate) mod scalar {
     use super::*;
     use subtle_ng::{ConditionallySelectable, ConstantTimeEq};
@@ -171,7 +176,7 @@ pub(crate) mod scalar {
 /// a public bound). The inverse is updated on the value side, as in the
 /// NEON builder. Pure integer arithmetic with no `subtle_ng` optimisation barrier
 /// per byte, so the compiler can keep the tables in registers.
-#[cfg(any(not(target_arch = "aarch64"), test))]
+#[cfg(any(not(target_arch = "aarch64"), kani, test, feature = "ct-bench"))]
 pub(crate) mod swar {
     use super::*;
 
@@ -252,7 +257,7 @@ pub(crate) mod swar {
     }
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(target_arch = "aarch64", not(kani)))]
 mod neon {
     use super::{lemire_draw, DOMAIN};
     use core::arch::aarch64::*;
@@ -349,7 +354,7 @@ mod neon {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", not(kani)))]
 mod ssse3 {
     use super::{lemire_draw, DOMAIN};
     use core::arch::x86_64::*;
@@ -498,6 +503,35 @@ mod tests {
             assert_eq!(run(build, &s), want, "dispatched, fill {fill:#04x}");
             assert_eq!(run(swar::build, &s), want, "swar, fill {fill:#04x}");
             assert_eq!(run(scalar::build, &s), want, "scalar, fill {fill:#04x}");
+        }
+    }
+
+    /// The smallest draw that `lemire_draw` reduces to `j` at step `i`:
+    /// `ceil(j * 2^64 / (i + 1))`.
+    fn draw_for(i: usize, j: usize) -> u64 {
+        let n = i as u128 + 1;
+        (((j as u128) << 64).div_ceil(n)) as u64
+    }
+
+    /// Every step `i` with every swap index `j` in `0..=i`, through the
+    /// dispatched builder (NEON on aarch64, SSSE3 or SWAR on x86_64) and the
+    /// portable ones. Kani cannot model the NEON and SSSE3 intrinsics, so
+    /// this is the coverage those builders get: each of the 2 079 `(i, j)`
+    /// swaps is exercised at least once, inside a full build whose other
+    /// draws vary, and the tables must equal the reference builder's.
+    #[test]
+    fn builders_match_reference_for_every_swap() {
+        for i in 1..DOMAIN {
+            for j in 0..=i {
+                let mut s = stream_from(&[i as u8, j as u8]);
+                let d = DOMAIN - 1 - i;
+                s[d * 8..d * 8 + 8].copy_from_slice(&draw_for(i, j).to_le_bytes());
+                assert_eq!(usize::from(lemire_draw(&s, i)), j, "draw_for({i}, {j})");
+
+                let want = run(reference::build, &s);
+                assert_eq!(run(build, &s), want, "dispatched, i {i} j {j}");
+                assert_eq!(run(swar::build, &s), want, "swar, i {i} j {j}");
+            }
         }
     }
 
