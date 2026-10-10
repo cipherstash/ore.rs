@@ -1,5 +1,27 @@
 
 
+### Documentation
+
+- refresh crates.io/docs.rs-facing docs and crate metadata
+- stop promising per-module ENCODED_LEN constants
+
+### Features
+
+- variable-length encodings for strings and byte strings
+- separate fixed and variable encodings by trait
+- owned fixed-length bytes, sealed traits
+
+### Miscellaneous
+
+- release
+
+### Testing
+
+- pin every encoding with golden vectors
+- build golden hex without format-collect
+- run the README's examples as doctests
+
+
 ### Features
 
 - impl ToOrderableBytes for i16/i32/i64/f64
