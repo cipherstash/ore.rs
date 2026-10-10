@@ -54,8 +54,8 @@ pub trait RightBitVec {
     /// scheme; the legacy comparator calls the inherent method.)
     #[allow(dead_code)]
     fn get_bit(&self, bit: usize) -> u8;
-    /// The raw bitvector bytes, LSB-first within each byte (bit `j` lives in
-    /// byte `j / 8` at position `j % 8`), for bulk mask construction.
+    /// The raw bitvector bytes, LSB-first within each byte (the same bit
+    /// order as `RightBlock32::set_bit`), for bulk mask construction.
     fn as_mut_bytes(&mut self) -> &mut [u8];
 }
 
