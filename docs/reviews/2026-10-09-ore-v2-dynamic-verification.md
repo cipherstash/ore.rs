@@ -325,20 +325,22 @@ at 215 M (tau 0.0021). The larger figures therefore come from this
 session's conditions, not from the code changes since `6760707`.
 
 **Cause: the harness.** Two things in the bench, not the builder, produce
-the residual. Measured on an M1 Max, 150 s continuous runs, one build per
-sample unless stated. (The M1 has a data memory-dependent prefetcher that
-DIT cannot switch off; the controls below change only the bench's layout
-and statistics, with the prefetcher the same throughout.)
+the residual. Measured first on an M1 Max, then on the M4 at `7cdb365`
+(conditions below), 150 s continuous runs, one build per sample unless
+stated, DIT off unless stated. (The M1 has a data memory-dependent
+prefetcher that DIT cannot switch off; the controls below change only the
+bench's layout and statistics, with the prefetcher the same throughout.)
 
-| variant | dudect max t | uncropped t |
-|---|---:|---:|
-| as written: a separate pool per class, `Left`'s allocated first | +54.7; +27.7 | +1.10 (14.7 M per class) |
-| allocation order swapped | +40.1 | — |
-| one pool, interleaved, fixed stream at even slots | −12.6 | — |
-| same, fixed stream at odd slots | +23.5 | — |
-| one pool, slots assigned to classes at random each batch | +18.4; +6.4 | +1.34 (15.0 M) |
-| the same, 16 builds per sample (the bench as it now is) | −1.8 | **−0.04** (7.3 M samples, 117 M builds, per class) |
-| `prp_build_fixed_a_vs_fixed_b`, 16 builds per sample | +2.7 | −0.12 (8.6 M samples) |
+| variant | M1 Max: dudect max t | M1 Max: uncropped t | M4: dudect max t | M4: uncropped t |
+|---|---:|---:|---:|---:|
+| as written: a separate pool per class, `Left`'s allocated first | +54.7; +27.7 | +1.10 (14.7 M per class) | +30.4 | +0.52 (22.1 M) |
+| allocation order swapped | +40.1 | — | — | — |
+| one pool, interleaved, fixed stream at even slots | −12.6 | — | −47.3 | −2.43 (21.8 M) |
+| same, fixed stream at odd slots | +23.5 | — | +47.3 | +4.14 (21.9 M) |
+| one pool, slots assigned to classes at random each batch | +18.4; +6.4 | +1.34 (15.0 M) | — | — |
+| the same, 16 builds per sample (the bench as it now is) | −1.8 | **−0.04** (7.3 M samples, 117 M builds, per class) | −2.3; −2.2; +3.7 | **+1.10; −1.23; +0.18** (9.9–10.3 M) |
+| the same, DIT on | — | — | +4.4; +8.1; +9.3 | **−0.61; −0.27; +0.47** (9.4–9.5 M) |
+| `prp_build_fixed_a_vs_fixed_b`, 16 builds per sample | +2.7 | −0.12 (8.6 M samples) | +1.9 | +0.59 (11.9 M) |
 
 1. *Placement.* The classes' inputs sat in two separate heap allocations, so
    they differed in where they were as well as what they held. Moving the
@@ -365,6 +367,30 @@ encryptor `const_vs_random` benches in the first table use the same
 separate-pool layout; a call there is microseconds, so the timer is not a
 factor, but placement and cropping may be, and they have not been
 rerun.
+
+**On the M4.** Apple M4, macOS 26.5.2 (25F84), mains power with the
+battery charged, Low Power Mode off. Other Claude Code sessions were open,
+and a Chrome renderer was at 180% CPU when the first DIT-off run started, so
+that run was repeated; the table gives both. The corrected bench is clean
+uncropped both ways: |t| ≤ 1.23 in six runs, DIT off and on alternately.
+The controls behave as on the M1. Separate pools give +30.4 cropped against
++0.52 uncropped. With the fixed stream at even slots, then at odd, the
+cropped figures are −47.3 and +47.3 and the uncropped −2.43 and +4.14, and
+the tick-bin shares move in mirror image (|z| ≈ 30): whichever class sits
+at the even slots has more samples at 166–167 ns and fewer at
+208–209 ns. Placement is a real timing difference, and cropping inflates
+it. Fixed A against fixed B shows nothing.
+
+One thing is left over, and only with DIT on. dudect's cropped figure is
++4.4, +8.1 and +9.3 in the three DIT-on runs, against −2.3, −2.2 and +3.7
+with DIT off. In all three DIT-on runs, `Left` (the fixed stream) has
+slightly fewer samples than `Right` at 2875–2917 ns and slightly more at
+3000 ns, a share difference of 0.0005–0.001 per bin with |z| up to 6.4.
+The DIT-off runs show no such shift (|z| ≤ 3.5, with no consistent sign).
+The shift moves the mean by under a nanosecond (Left − Right −0.31, −0.19,
++0.39 ns, against an sd of 800–1900 ns), below what the uncropped test can
+resolve, so by the |t| < 5 rule nothing is detected. But it repeated three
+times and only with DIT on, and its cause is not known.
 
 Fixed A against fixed B, where both classes repeat one input, shows nothing
 either way: five batch runs each, DIT off −0.9, +2.3, −2.0, +1.5, +2.2, DIT
@@ -394,6 +420,8 @@ seen through a fixed versus varying permutation sequence.
   register encoding), so Graviton needs no changes.
 - The `prp_build_const_vs_random` residual (§4.2) came from the bench
   (input placement and dudect's cropping on a coarse timer), not the
-  builder. The corrected bench is clean on the M1 Max; it has not yet been
-  rerun on the M4. The encryptor `const_vs_random` benches share the old
-  layout and have not been rerun.
+  builder. The corrected bench is clean on the M1 Max and on the M4
+  (uncropped |t| ≤ 1.23 in six runs, DIT off and on). With DIT on, the M4
+  shows a small tick-bin shift that repeated in three runs, below what the
+  uncropped test resolves (§4.2); its cause is not known. The encryptor
+  `const_vs_random` benches share the old layout and have not been rerun.
