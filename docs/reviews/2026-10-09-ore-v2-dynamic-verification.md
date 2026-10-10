@@ -285,8 +285,10 @@ pair has its own sign, so pooling dilutes it (the old builder's +8.6 here,
 against |t| up to 83 in a single pair). The per-pair runs are the test, and
 there the dependence is gone.
 
-`prp_build_const_vs_random` keeps a small residual (tau 0.0005 in the table
-above, 0.0012–0.0016 in the DIT runs below), and it is not explained. An earlier version of this paragraph put it down to the
+`prp_build_const_vs_random` kept a small residual (tau 0.0005 in the table
+above, 0.0012–0.0016 in the DIT runs below). It turned out to come from the
+bench, not the builder; the account below keeps the steps that got there.
+An earlier version of this paragraph put it down to the
 classes' footprints, one repeated input against a 256 KB pool. That is
 wrong: the `Left` pool is 512 copies of the fixed stream, indexed at random
 exactly as the `Right` pool of 512 random streams is, so the two classes
@@ -322,6 +324,48 @@ measurement (`6760707`), run in the same session with DIT off, gave +31.4
 at 215 M (tau 0.0021). The larger figures therefore come from this
 session's conditions, not from the code changes since `6760707`.
 
+**Cause: the harness.** Two things in the bench, not the builder, produce
+the residual. Measured on an M1 Max, 150 s continuous runs, one build per
+sample unless stated. (The M1 has a data memory-dependent prefetcher that
+DIT cannot switch off; the controls below change only the bench's layout
+and statistics, with the prefetcher the same throughout.)
+
+| variant | dudect max t | uncropped t |
+|---|---:|---:|
+| as written: a separate pool per class, `Left`'s allocated first | +54.7; +27.7 | +1.10 (14.7 M per class) |
+| allocation order swapped | +40.1 | — |
+| one pool, interleaved, fixed stream at even slots | −12.6 | — |
+| same, fixed stream at odd slots | +23.5 | — |
+| one pool, slots assigned to classes at random each batch | +18.4; +6.4 | +1.34 (15.0 M) |
+| the same, 16 builds per sample (the bench as it now is) | −1.8 | **−0.04** (7.3 M samples, 117 M builds, per class) |
+| `prp_build_fixed_a_vs_fixed_b`, 16 builds per sample | +2.7 | −0.12 (8.6 M samples) |
+
+1. *Placement.* The classes' inputs sat in two separate heap allocations, so
+   they differed in where they were as well as what they held. Moving the
+   fixed stream from the even to the odd slots of one shared pool flips the
+   sign (−12.6 to +23.5), and the size of the effect changes from session
+   to session with the heap layout, which is why the M4 sessions gave +7.7,
+   +20 and +31 for the same code.
+2. *What dudect reports.* `max t` is the largest |t| over 101 tests, 100 of
+   which first drop every sample above a percentile of the runtime
+   distribution. Apple's timer is a 24 MHz counter, so a one-build sample
+   (about 200 ns) takes only a handful of values (208, 250, 291, 333 ns),
+   and the percentiles fall exactly on them. Where the classes differ in
+   spread (sd 333 against 501 ns as written), cropping removes more of one
+   class's tail than the other's, and the cropped tests report a large t
+   with almost no difference in mean: +27.7 reported, +1.10 uncropped.
+
+The bench now draws both classes from one pool with the slots assigned at
+random each batch, and times 16 builds per sample (about 80 ticks). There
+it shows nothing, cropped or uncropped. `scripts/dudect-uncropped.sh`
+records every sample and prints the uncropped t beside dudect's figure;
+the old bench is kept as `prp_build_const_vs_random_separate_pools`, and
+the interleaved controls as `…_interleaved_even` and `…_odd`. The
+encryptor `const_vs_random` benches in the first table use the same
+separate-pool layout; a call there is microseconds, so the timer is not a
+factor, but placement and cropping may be, and they have not been
+rerun.
+
 Fixed A against fixed B, where both classes repeat one input, shows nothing
 either way: five batch runs each, DIT off −0.9, +2.3, −2.0, +1.5, +2.2, DIT
 on −2.4, −1.6, −1.7, +0.4, +1.6. The first pass of these measurements, in Low
@@ -348,8 +392,8 @@ seen through a fixed versus varying permutation sequence.
   builder's timing has not been measured on real x86 hardware. The harness
   now builds on aarch64 Linux (the DIT write uses the generic system
   register encoding), so Graviton needs no changes.
-- The `prp_build_const_vs_random` residual on the NEON builder (§4.2) is
-  open. On the M4 it is the same with DIT on and off (t ≈ +20, tau
-  0.0012–0.0016, four 150 s runs), so on that evidence it is not the data
-  memory-dependent prefetcher. A run on another core would show whether it
-  is specific to Apple's.
+- The `prp_build_const_vs_random` residual (§4.2) came from the bench
+  (input placement and dudect's cropping on a coarse timer), not the
+  builder. The corrected bench is clean on the M1 Max; it has not yet been
+  rerun on the M4. The encryptor `const_vs_random` benches share the old
+  layout and have not been rerun.
