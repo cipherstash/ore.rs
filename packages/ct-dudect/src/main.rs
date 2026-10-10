@@ -234,27 +234,81 @@ fn bit6_encrypt_left_const_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) 
     }
 }
 
+/// Builds timed per sample by `prp_build_const_vs_random` and
+/// `prp_build_fixed_a_vs_fixed_b`. One build takes about 200 ns, five ticks
+/// of Apple's 24 MHz counter, so a one-build sample takes only a handful of
+/// values and a class difference is a sliver of samples crossing a tick
+/// boundary, which dudect's percentile cropping (cut exactly at those tick
+/// values) exaggerates. Sixteen builds per sample span about eighty ticks.
+const BUILDS_PER_SAMPLE: usize = 16;
+
+/// A fresh random 512-byte draw stream.
+fn random_stream(rng: &mut BenchRng) -> [u8; 512] {
+    let mut s = [0u8; 512];
+    for b in s.iter_mut() {
+        *b = rng.random::<u8>();
+    }
+    s
+}
+
 /// The PRP builder alone (`LemireFyPrp::from_stream`, the oblivious builder
 /// the schemes use, through the `ct-bench` hook): one fixed 512-byte draw
 /// stream (`Left`) versus fresh random streams (`Right`). The draw stream
 /// decides every Fisher–Yates swap, so this isolates the builder from
 /// everything else in the encryptor.
+///
+/// Both classes share one pool of `2 * pool` streams, and a random half of
+/// its slots, redrawn every batch, holds the fixed stream, so the classes
+/// differ in content only. With a separate pool per class they also differ
+/// in where their inputs sit, and that alone moved t from -13 to +55 with
+/// the layout (`prp_build_const_vs_random_separate_pools` and the
+/// interleaved controls below). Each sample times `BUILDS_PER_SAMPLE`
+/// builds over streams from the class's slots.
 fn prp_build_const_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
     data_independent_timing();
-    let mut fixed = [0u8; 512];
-    for b in fixed.iter_mut() {
-        *b = rng.random::<u8>();
+    let fixed = random_stream(rng);
+    let n = 2 * pool_size();
+    // Fisher–Yates over slot indices: the first half are `Left`.
+    let mut order: Vec<usize> = (0..n).collect();
+    for i in (1..n).rev() {
+        order.swap(i, rng.random_range(0..=i));
     }
-    let left = vec![fixed; pool_size()];
-    let right: Vec<[u8; 512]> = (0..pool_size())
-        .map(|_| {
-            let mut s = [0u8; 512];
-            for b in s.iter_mut() {
-                *b = rng.random::<u8>();
+    let (left_idx, right_idx) = order.split_at(pool_size());
+    let mut pool = vec![[0u8; 512]; n];
+    for &k in left_idx {
+        pool[k] = fixed;
+    }
+    for &k in right_idx {
+        pool[k] = random_stream(rng);
+    }
+    for _ in 0..SAMPLES {
+        let c = class(rng);
+        let idx = if matches!(c, Class::Left) {
+            left_idx
+        } else {
+            right_idx
+        };
+        let picks: [&[u8; 512]; BUILDS_PER_SAMPLE] =
+            std::array::from_fn(|_| &pool[idx[rng.random_range(0..pool_size())]]);
+        runner.run_one(c, || {
+            let mut acc = 0u8;
+            for s in picks {
+                acc ^= ore_rs::ct_bench::lemire_fy_prp_from_stream(black_box(s));
             }
-            s
-        })
-        .collect();
+            black_box(acc)
+        });
+    }
+}
+
+/// Artifact control: `prp_build_const_vs_random` as first written, one
+/// build per sample and a separate pool per class (`Left`'s, 512 copies of
+/// the fixed stream, allocated first). This is the bench behind the +7.7 to
+/// +31 residuals; it is kept to show that they come from the harness.
+fn prp_build_const_vs_random_separate_pools(runner: &mut CtRunner, rng: &mut BenchRng) {
+    data_independent_timing();
+    let fixed = random_stream(rng);
+    let left = vec![fixed; pool_size()];
+    let right: Vec<[u8; 512]> = (0..pool_size()).map(|_| random_stream(rng)).collect();
     for _ in 0..SAMPLES {
         let c = class(rng);
         let pool = if matches!(c, Class::Left) {
@@ -269,22 +323,62 @@ fn prp_build_const_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
     }
 }
 
+/// Artifact control: one build per sample, both classes in one pool,
+/// interleaved, `Left` at the slots of parity `left_parity`. Placement is
+/// systematic but differs only by a 512-byte offset; the result's sign
+/// follows the parity.
+fn interleaved(runner: &mut CtRunner, rng: &mut BenchRng, left_parity: usize) {
+    data_independent_timing();
+    let fixed = random_stream(rng);
+    let mut pool = vec![[0u8; 512]; 2 * pool_size()];
+    for (k, s) in pool.iter_mut().enumerate() {
+        *s = if k % 2 == left_parity {
+            fixed
+        } else {
+            random_stream(rng)
+        };
+    }
+    for _ in 0..SAMPLES {
+        let c = class(rng);
+        let parity = if matches!(c, Class::Left) {
+            left_parity
+        } else {
+            1 - left_parity
+        };
+        let s = &pool[2 * rng.random_range(0..pool_size()) + parity];
+        runner.run_one(c, || {
+            black_box(ore_rs::ct_bench::lemire_fy_prp_from_stream(black_box(s)))
+        });
+    }
+}
+
+/// [`interleaved`] with the fixed stream at even slots.
+fn prp_build_const_vs_random_interleaved_even(runner: &mut CtRunner, rng: &mut BenchRng) {
+    interleaved(runner, rng, 0);
+}
+
+/// [`interleaved`] with the fixed stream at odd slots.
+fn prp_build_const_vs_random_interleaved_odd(runner: &mut CtRunner, rng: &mut BenchRng) {
+    interleaved(runner, rng, 1);
+}
+
 /// The PRP builder on two *different fixed* streams, `A` (`Left`) and `B`
 /// (`Right`). Both classes repeat their input, so predictor training is the
 /// same for each; a difference here means the time depends on *which*
-/// permutation is built, not merely on whether the input repeats.
+/// permutation is built, not merely on whether the input repeats. Each
+/// sample times `BUILDS_PER_SAMPLE` builds.
 fn prp_build_fixed_a_vs_fixed_b(runner: &mut CtRunner, rng: &mut BenchRng) {
     data_independent_timing();
-    let mut a = [0u8; 512];
-    let mut b = [0u8; 512];
-    for x in a.iter_mut().chain(b.iter_mut()) {
-        *x = rng.random::<u8>();
-    }
+    let (a, b) = (random_stream(rng), random_stream(rng));
     for _ in 0..SAMPLES {
         let c = class(rng);
         let s = if matches!(c, Class::Left) { &a } else { &b };
         runner.run_one(c, || {
-            black_box(ore_rs::ct_bench::lemire_fy_prp_from_stream(black_box(s)))
+            let mut acc = 0u8;
+            for _ in 0..BUILDS_PER_SAMPLE {
+                acc ^= ore_rs::ct_bench::lemire_fy_prp_from_stream(black_box(s));
+            }
+            black_box(acc)
         });
     }
 }
@@ -454,6 +548,9 @@ ctbench_main!(
     bit6_encrypt_left_const_vs_random,
     bit6_encrypt_left_fixed_a_vs_fixed_b,
     prp_build_const_vs_random,
+    prp_build_const_vs_random_separate_pools,
+    prp_build_const_vs_random_interleaved_even,
+    prp_build_const_vs_random_interleaved_odd,
     prp_build_fixed_a_vs_fixed_b,
     chained_encrypt_fixed_vs_random,
     iso_swap_secret_fixed_a_vs_fixed_b,
