@@ -193,8 +193,14 @@ The pooled continuous figure is weak evidence for the reference builder
 it. In the Low Power Mode pass the same test gave −45 at 135 M. The batch
 runs are the stronger evidence in both directions.
 
-`prp_build_const_vs_random` still shows a small difference (t = +7.7,
-tau 0.0005), and it is not explained. An earlier version of this paragraph
+`prp_build_const_vs_random` showed a small difference (t = +7.7,
+tau 0.0005). It came from the bench, not the builder: the classes' inputs
+sat in separate heap allocations, and dudect's percentile cropping, on a
+24 MHz timer that gives a one-build sample only a handful of values,
+exaggerates the difference that makes. With both classes in one pool,
+slots assigned at random, and 16 builds per sample, it is gone (uncropped
+t = −0.04, M1 Max); details in the verification doc, §4.2. The rest of
+this paragraph is the record of how that was found. An earlier version of this paragraph
 said the classes differ in where their input comes from, one repeated input
 against a 256 KB pool. They do not: the `Left` pool is 512 copies of the
 fixed stream, indexed at random like the `Right` pool of 512 random streams,
@@ -215,8 +221,7 @@ on the same M4 (macOS 26.5.2, mains power, Low Power Mode off).
 | off-2 | off | 251 M | +19.6 | +0.0012 |
 | on-2 | on | 191 M | +21.8 | +0.0016 |
 
-DIT does not remove or reduce it, so on four runs it is not the prefetcher,
-and it stays unexplained. The figures are larger than the +7.7 above, but
+DIT does not remove or reduce it, so on four runs it is not the prefetcher. The figures are larger than the +7.7 above, but
 the commit that measured +7.7 (`6760707`), rerun in the same session, gave
 +31.4 at 215 M, so the change is in the session, not the code. Fixed A
 against fixed B stays under 2.5 both ways (five batch runs each). Details:
