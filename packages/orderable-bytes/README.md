@@ -4,12 +4,18 @@ Pre-encryption byte encodings for **order-revealing encryption** (ORE) and **ord
 
 ORE and OPE both produce ciphertexts whose byte-wise comparison reveals the order of the underlying plaintexts. To exploit that property you first need to convert your plaintext — a `Decimal`, a `NaiveDate`, a `DateTime<Utc>`, … — into a canonical byte sequence whose lexicographic order already matches the value's natural total order. **That conversion is what this crate does.** Plug the bytes into an ORE or OPE primitive and the resulting ciphertext inherits the same order and equality semantics as the original plaintext.
 
-Every supported type implements the `ToOrderableBytes` trait. The bytes have two guarantees:
+Every supported type implements the `OrderableBytes` trait. The bytes have two guarantees:
 
 - **byte-wise lexicographic order agrees with the type's natural total order**
 - **byte equality agrees with value equality**
 
-Most types encode to a fixed length and also implement `FixedOrderableBytes`, which names that length as `ENCODED_LEN`. Strings and byte strings encode to variable-length bytes (see [Variable-length encodings](#variable-length-encodings)).
+Every type also implements exactly one of two subtraits, which say how its bytes may be handled:
+
+- **`FixedOrderableBytes`**: every value encodes to the same length, named as `ENCODED_LEN`. Fixed-length bytes may be zero-extended to a larger block.
+- **`VariableOrderableBytes`**: the length varies with the value. Strings and byte strings (see [Variable-length encodings](#variable-length-encodings)). These must never be padded or concatenated.
+
+Bound generic code on the subtrait it relies on. Code that pads to a block size must bound on `FixedOrderableBytes`, so that strings are rejected at compile time. Bound on `OrderableBytes` only when you handle both kinds correctly.
+
 
 The crate is scheme-agnostic — the encodings drop into `ore-rs` BlockORE (this workspace), any OPE construction, an ordered hash, or anything else that compares as bytes.
 
@@ -35,16 +41,14 @@ orderable-bytes = { version = "0.2", features = ["decimal", "chrono"] }
 ```
 
 ```rust
-use orderable_bytes::{FixedOrderableBytes, ToOrderableBytes};
-use rust_decimal::Decimal;
-use std::str::FromStr;
+use orderable_bytes::{FixedOrderableBytes, OrderableBytes};
 
-let bytes = Decimal::from_str("1.5").unwrap().to_orderable_bytes();
-assert_eq!(bytes.len(), <Decimal as FixedOrderableBytes>::ENCODED_LEN);
+let bytes = 1.5f64.to_orderable_bytes();
+assert_eq!(bytes.len(), <f64 as FixedOrderableBytes>::ENCODED_LEN);
 
-// Byte-wise comparison matches Decimal::cmp
-let a = Decimal::from_str("1.05").unwrap().to_orderable_bytes();
-let b = Decimal::from_str("1.5").unwrap().to_orderable_bytes();
+// Byte-wise comparison matches the value's order
+let a = (-1.05f64).to_orderable_bytes();
+let b = 1.5f64.to_orderable_bytes();
 assert!(a < b);
 
 // Strings encode to their own bytes, borrowed: no copy is made.
@@ -57,6 +61,10 @@ A string encodes to its UTF-8 bytes and a byte string to itself, borrowed from t
 
 - **No normalisation.** A string is encoded exactly as given. `é` written as U+00E9 and as `e` + U+0301 encode differently, and strings sort by code point, not by any language's collation. Normalise before encoding if you need canonical equivalence, case folding or accent folding.
 - **Never pad, never concatenate.** These encodings do not mark where they end. Zero-padding to a block size makes `"a"` and `"a\0"` identical; concatenating two values loses the boundary between them. A consumer must keep each value's length and sort a prefix first, as a variable-length ORE or OPE scheme does. Fixed-length encodings are safe to zero-extend; these are not.
+
+## Upgrading from 0.1
+
+`ToOrderableBytes` is now `OrderableBytes`, and `ENCODED_LEN` moved to `FixedOrderableBytes`. The 0.1 trait was fixed-length only, so replace a `T: ToOrderableBytes` bound with `T: FixedOrderableBytes`, and import `OrderableBytes` wherever you call `to_orderable_bytes`. The old name was removed on purpose: had it been kept as the general trait, 0.1 code would still compile and silently accept strings. Encoded bytes are unchanged.
 
 ## How the encoding works
 

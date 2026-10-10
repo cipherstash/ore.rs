@@ -1,7 +1,7 @@
 //! Canonical, order-preserving fixed-length byte encodings for the
 //! `chrono` types `NaiveDate` and `DateTime<Utc>`.
 //!
-//! Each submodule implements [`crate::ToOrderableBytes`] and
+//! Each submodule implements [`crate::OrderableBytes`] and
 //! [`crate::FixedOrderableBytes`] on its target type. The bytes
 //! returned have the property that byte-wise lex comparison agrees with
 //! chronological ordering (and byte equality with value equality), so
@@ -10,7 +10,7 @@
 
 /// Order-preserving byte encoding for [`::chrono::NaiveDate`].
 pub mod naive_date {
-    use crate::{FixedOrderableBytes, ToOrderableBytes};
+    use crate::{FixedOrderableBytes, OrderableBytes};
     use ::chrono::{Datelike, NaiveDate};
 
     impl FixedOrderableBytes for NaiveDate {
@@ -24,7 +24,7 @@ pub mod naive_date {
     /// `1u32 << 31`) preserves order while making the value unsigned, then
     /// big-endian byte serialisation gives a 4-byte sequence whose lex
     /// order matches the natural date order.
-    impl ToOrderableBytes for NaiveDate {
+    impl OrderableBytes for NaiveDate {
         type Bytes<'a> = [u8; Self::ENCODED_LEN];
 
         fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
@@ -76,16 +76,11 @@ pub mod naive_date {
 
 /// Order-preserving byte encoding for [`::chrono::DateTime<::chrono::Utc>`].
 pub mod datetime_utc {
-    use crate::{FixedOrderableBytes, ToOrderableBytes};
+    use crate::{FixedOrderableBytes, OrderableBytes};
     use ::chrono::{DateTime, Utc};
 
-    /// Number of bytes in the canonical orderable-bytes form. Mirrors
-    /// `<DateTime<Utc> as FixedOrderableBytes>::ENCODED_LEN` for use in
-    /// const contexts that can't easily name the trait impl.
-    pub const ENCODED_LEN: usize = 12;
-
     impl FixedOrderableBytes for DateTime<Utc> {
-        const ENCODED_LEN: usize = ENCODED_LEN;
+        const ENCODED_LEN: usize = 12;
     }
 
     /// Build the canonical, order-preserving byte encoding of a
@@ -99,14 +94,14 @@ pub mod datetime_utc {
     /// whole second. `timestamp_subsec_nanos` returns values in
     /// `0..2_000_000_000` (the upper half encodes leap-second moments),
     /// which fits in `u32` and preserves chronological order.
-    impl ToOrderableBytes for DateTime<Utc> {
-        type Bytes<'a> = [u8; ENCODED_LEN];
+    impl OrderableBytes for DateTime<Utc> {
+        type Bytes<'a> = [u8; Self::ENCODED_LEN];
 
-        fn to_orderable_bytes(&self) -> [u8; ENCODED_LEN] {
+        fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
             let secs = self.timestamp();
             let nanos = self.timestamp_subsec_nanos();
             let secs_biased = (secs as u64) ^ (1u64 << 63);
-            let mut out = [0u8; ENCODED_LEN];
+            let mut out = [0u8; Self::ENCODED_LEN];
             out[..8].copy_from_slice(&secs_biased.to_be_bytes());
             out[8..].copy_from_slice(&nanos.to_be_bytes());
             out

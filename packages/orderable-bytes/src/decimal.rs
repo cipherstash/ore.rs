@@ -60,14 +60,14 @@
 //!
 //! ## Constant-time
 //!
-//! [`<Decimal as ToOrderableBytes>::to_orderable_bytes`](crate::ToOrderableBytes::to_orderable_bytes)
+//! [`<Decimal as OrderableBytes>::to_orderable_bytes`](crate::OrderableBytes::to_orderable_bytes)
 //! is straight-line code with fixed-iteration loops and branchless mask
 //! arithmetic. It does not call `Decimal::normalize` (which loops while
 //! `scale > 0`) and does not branch on sign or zero-ness. Timing does
 //! not distinguish the input's sign, zero-ness, digit count,
 //! trailing-zero count, or scale.
 
-use crate::{FixedOrderableBytes, ToOrderableBytes};
+use crate::{FixedOrderableBytes, OrderableBytes};
 use rust_decimal::Decimal;
 
 /// Width of the padded-significand field in bytes (13 bytes = 104 bits).
@@ -97,7 +97,7 @@ impl FixedOrderableBytes for Decimal {
 /// Build the canonical, order-preserving fixed-length byte encoding of a
 /// `Decimal`. Two `Decimal`s that compare equal under `Decimal::cmp`
 /// produce identical byte arrays.
-impl ToOrderableBytes for Decimal {
+impl OrderableBytes for Decimal {
     type Bytes<'a> = [u8; Self::ENCODED_LEN];
 
     fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {

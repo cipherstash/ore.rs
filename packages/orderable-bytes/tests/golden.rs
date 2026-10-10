@@ -12,7 +12,7 @@
 //! The NaN rows pin current behaviour, not a promise about NaN ordering (see
 //! the `primitive` module docs): the raw bit pattern passes through.
 
-use orderable_bytes::{FixedOrderableBytes, ToOrderableBytes};
+use orderable_bytes::{FixedOrderableBytes, OrderableBytes};
 
 fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write;

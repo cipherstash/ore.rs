@@ -32,11 +32,16 @@
 //!   `("ab", "c")` and `("a", "bc")` encode identically.
 //!
 //! Fixed-length encodings (see [`crate::FixedOrderableBytes`]) are safe
-//! to zero-extend; these are not.
+//! to zero-extend; these are not. That is why these types implement
+//! [`crate::VariableOrderableBytes`] and not
+//! [`crate::FixedOrderableBytes`]: code that pads must bound on the
+//! latter, and then rejects these types at compile time.
 
-use crate::ToOrderableBytes;
+use crate::{OrderableBytes, VariableOrderableBytes};
 
-impl ToOrderableBytes for str {
+impl VariableOrderableBytes for str {}
+
+impl OrderableBytes for str {
     type Bytes<'a> = &'a [u8];
 
     fn to_orderable_bytes(&self) -> &[u8] {
@@ -44,7 +49,9 @@ impl ToOrderableBytes for str {
     }
 }
 
-impl ToOrderableBytes for String {
+impl VariableOrderableBytes for String {}
+
+impl OrderableBytes for String {
     type Bytes<'a> = &'a [u8];
 
     fn to_orderable_bytes(&self) -> &[u8] {
@@ -52,7 +59,9 @@ impl ToOrderableBytes for String {
     }
 }
 
-impl ToOrderableBytes for [u8] {
+impl VariableOrderableBytes for [u8] {}
+
+impl OrderableBytes for [u8] {
     type Bytes<'a> = &'a [u8];
 
     fn to_orderable_bytes(&self) -> &[u8] {
@@ -60,7 +69,9 @@ impl ToOrderableBytes for [u8] {
     }
 }
 
-impl ToOrderableBytes for Vec<u8> {
+impl VariableOrderableBytes for Vec<u8> {}
+
+impl OrderableBytes for Vec<u8> {
     type Bytes<'a> = &'a [u8];
 
     fn to_orderable_bytes(&self) -> &[u8] {
@@ -71,6 +82,15 @@ impl ToOrderableBytes for Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn variable_length_types_implement_variable_orderable_bytes() {
+        fn is_variable<T: VariableOrderableBytes + ?Sized>() {}
+        is_variable::<str>();
+        is_variable::<String>();
+        is_variable::<[u8]>();
+        is_variable::<Vec<u8>>();
+    }
 
     #[test]
     fn str_encodes_to_its_utf8_bytes() {
