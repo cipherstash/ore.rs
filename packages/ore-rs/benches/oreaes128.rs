@@ -1,48 +1,48 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hex_literal::hex;
-use ore_rs::{scheme::bit2::OreAes128ChaCha20, CipherText, OreCipher, OreEncrypt, OreOutput};
+use ore_rs::{scheme::bit2::OreAes128ChaCha20, CipherText, Left, OreCipher, OreEncrypt, OreOutput};
 
 #[inline]
-fn do_encrypt_64(input: u64, ore: &mut OreAes128ChaCha20) {
-    input.encrypt(ore).unwrap();
+fn do_encrypt_64(input: u64, ore: &mut OreAes128ChaCha20) -> CipherText<OreAes128ChaCha20, 8> {
+    input.encrypt(ore).unwrap()
 }
 
 #[inline]
-fn do_encrypt_left_64(input: u64, ore: &mut OreAes128ChaCha20) {
-    input.encrypt_left(ore).unwrap();
+fn do_encrypt_left_64(input: u64, ore: &mut OreAes128ChaCha20) -> Left<OreAes128ChaCha20, 8> {
+    input.encrypt_left(ore).unwrap()
 }
 
 #[inline]
 fn do_compare<const N: usize>(
     a: &CipherText<OreAes128ChaCha20, N>,
     b: &CipherText<OreAes128ChaCha20, N>,
-) {
-    let _ret = a.partial_cmp(b);
+) -> Option<std::cmp::Ordering> {
+    a.partial_cmp(b)
 }
 
 #[inline]
-fn do_compare_slice(a: &[u8], b: &[u8]) {
-    let _ret = OreAes128ChaCha20::compare_raw_slices(a, b);
+fn do_compare_slice(a: &[u8], b: &[u8]) -> Option<std::cmp::Ordering> {
+    OreAes128ChaCha20::compare_raw_slices(a, b)
 }
 
 #[inline]
-fn do_serialize<const N: usize>(a: &CipherText<OreAes128ChaCha20, N>) {
-    let _ret = a.to_bytes();
+fn do_serialize<const N: usize>(a: &CipherText<OreAes128ChaCha20, N>) -> Vec<u8> {
+    a.to_bytes()
 }
 
 #[inline]
-fn do_deserialize(bytes: &[u8]) {
-    let _ret = CipherText::<OreAes128ChaCha20, 8>::from_slice(bytes).unwrap();
+fn do_deserialize(bytes: &[u8]) -> CipherText<OreAes128ChaCha20, 8> {
+    CipherText::<OreAes128ChaCha20, 8>::from_slice(bytes).unwrap()
 }
 
 #[inline]
-fn do_encrypt_32(input: u32, ore: &mut OreAes128ChaCha20) {
-    input.encrypt(ore).unwrap();
+fn do_encrypt_32(input: u32, ore: &mut OreAes128ChaCha20) -> CipherText<OreAes128ChaCha20, 4> {
+    input.encrypt(ore).unwrap()
 }
 
 #[inline]
-fn do_encrypt_left_32(input: u32, ore: &mut OreAes128ChaCha20) {
-    input.encrypt_left(ore).unwrap();
+fn do_encrypt_left_32(input: u32, ore: &mut OreAes128ChaCha20) -> Left<OreAes128ChaCha20, 4> {
+    input.encrypt_left(ore).unwrap()
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
@@ -60,10 +60,10 @@ fn criterion_benchmark(c: &mut Criterion) {
     let y_u32 = 10098393_u32.encrypt(&ore).unwrap();
 
     c.bench_function("encrypt-8", |b| {
-        b.iter(|| do_encrypt_64(25u64, black_box(&mut ore)))
+        b.iter(|| do_encrypt_64(black_box(25u64), black_box(&mut ore)))
     });
     c.bench_function("encrypt-left-8", |b| {
-        b.iter(|| do_encrypt_left_64(25u64, black_box(&mut ore)))
+        b.iter(|| do_encrypt_left_64(black_box(25u64), black_box(&mut ore)))
     });
     c.bench_function("compare-8", |b| {
         b.iter(|| do_compare(black_box(&x_u64), black_box(&y_u64)))
@@ -79,10 +79,10 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 
     c.bench_function("encrypt-4", |b| {
-        b.iter(|| do_encrypt_32(25u32, black_box(&mut ore)))
+        b.iter(|| do_encrypt_32(black_box(25u32), black_box(&mut ore)))
     });
     c.bench_function("encrypt-left-4", |b| {
-        b.iter(|| do_encrypt_left_32(25u32, black_box(&mut ore)))
+        b.iter(|| do_encrypt_left_32(black_box(25u32), black_box(&mut ore)))
     });
     c.bench_function("compare-4", |b| {
         b.iter(|| do_compare(black_box(&x_u32), black_box(&y_u32)))
