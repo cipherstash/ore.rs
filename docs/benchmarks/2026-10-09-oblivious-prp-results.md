@@ -199,7 +199,9 @@ sat in separate heap allocations, and dudect's percentile cropping, on a
 24 MHz timer that gives a one-build sample only a handful of values,
 exaggerates the difference that makes. With both classes in one pool,
 slots assigned at random, and 16 builds per sample, it is gone (uncropped
-t = −0.04, M1 Max); details in the verification doc, §4.2. The rest of
+t = −0.04, M1 Max); details in the verification doc, §4.2. On the M4 it is
+clean too: uncropped |t| ≤ 1.23 in six 150 s runs, DIT off and on (macOS
+26.5.2, mains power, Low Power Mode off). The rest of
 this paragraph is the record of how that was found. An earlier version of this paragraph
 said the classes differ in where their input comes from, one repeated input
 against a 256 KB pool. They do not: the `Left` pool is 512 copies of the
