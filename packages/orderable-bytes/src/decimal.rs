@@ -67,7 +67,6 @@
 //! not distinguish the input's sign, zero-ness, digit count,
 //! trailing-zero count, or scale.
 
-use crate::{FixedOrderableBytes, OrderableBytes};
 use rust_decimal::Decimal;
 
 /// Width of the padded-significand field in bytes (13 bytes = 104 bits).
@@ -90,18 +89,11 @@ const SIGN_BIT: u8 = 0x80;
 /// Mask for the 7-bit exponent field in byte 0.
 const EXP_MASK: u8 = 0x7F;
 
-impl FixedOrderableBytes for Decimal {
-    const ENCODED_LEN: usize = 14;
-}
-
-/// Build the canonical, order-preserving fixed-length byte encoding of a
-/// `Decimal`. Two `Decimal`s that compare equal under `Decimal::cmp`
-/// produce identical byte arrays.
-impl OrderableBytes for Decimal {
-    type Bytes<'a> = [u8; Self::ENCODED_LEN];
-
-    fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
-        let d = self;
+impl_fixed_orderable_bytes! {
+    /// Build the canonical, order-preserving fixed-length byte encoding of a
+    /// `Decimal`. Two `Decimal`s that compare equal under `Decimal::cmp`
+    /// produce identical byte arrays.
+    Decimal, 14, |d| {
         let mut out = [0u8; Self::ENCODED_LEN];
 
         // The pipeline runs unconditionally — no early return for zero inputs.
@@ -335,6 +327,7 @@ fn digit_count(m: u128) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{FixedOrderableBytes, OrderableBytes};
     use rust_decimal_macros::dec;
 
     // --- Canonical encoding: structure and equivalence ---

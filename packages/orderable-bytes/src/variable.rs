@@ -37,8 +37,9 @@
 //! [`crate::FixedOrderableBytes`]: code that pads must bound on the
 //! latter, and then rejects these types at compile time.
 
-use crate::{OrderableBytes, VariableOrderableBytes};
+use crate::{private::Sealed, OrderableBytes, VariableOrderableBytes};
 
+impl Sealed for str {}
 impl VariableOrderableBytes for str {}
 
 impl OrderableBytes for str {
@@ -49,6 +50,7 @@ impl OrderableBytes for str {
     }
 }
 
+impl Sealed for String {}
 impl VariableOrderableBytes for String {}
 
 impl OrderableBytes for String {
@@ -59,6 +61,7 @@ impl OrderableBytes for String {
     }
 }
 
+impl Sealed for [u8] {}
 impl VariableOrderableBytes for [u8] {}
 
 impl OrderableBytes for [u8] {
@@ -69,6 +72,7 @@ impl OrderableBytes for [u8] {
     }
 }
 
+impl Sealed for Vec<u8> {}
 impl VariableOrderableBytes for Vec<u8> {}
 
 impl OrderableBytes for Vec<u8> {

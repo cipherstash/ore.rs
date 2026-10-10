@@ -11,11 +11,22 @@ Every supported type implements the `OrderableBytes` trait. The bytes have two g
 
 Every type also implements exactly one of two subtraits, which say how its bytes may be handled:
 
-- **`FixedOrderableBytes`**: every value encodes to the same length, named as `ENCODED_LEN`. Fixed-length bytes may be zero-extended to a larger block.
-- **`VariableOrderableBytes`**: the length varies with the value. Strings and byte strings (see [Variable-length encodings](#variable-length-encodings)). These must never be padded or concatenated.
+- **`FixedOrderableBytes`**: every value encodes to the same length, named as `ENCODED_LEN`. `to_fixed_orderable_bytes` returns the bytes as an owned array that can be stored or returned. Fixed-length bytes may be zero-extended to a larger block.
+- **`VariableOrderableBytes`**: the length varies with the value, and the bytes are borrowed from it. Strings and byte strings (see [Variable-length encodings](#variable-length-encodings)). These must never be padded or concatenated.
 
-Bound generic code on the subtrait it relies on. Code that pads to a block size must bound on `FixedOrderableBytes`, so that strings are rejected at compile time. Bound on `OrderableBytes` only when you handle both kinds correctly.
+A reference `&T` implements the same traits as `T`.
 
+Bound generic code on the trait it relies on:
+
+| Need | Bound | Call |
+|---|---|---|
+| Pad, store or return fixed-length bytes | `T: FixedOrderableBytes` | `to_fixed_orderable_bytes()` (owned) |
+| Bytes of either kind, used immediately | `T: OrderableBytes` | `to_orderable_bytes()` (may borrow) |
+| Strings or byte strings specifically | `T: VariableOrderableBytes` | `to_orderable_bytes()` (borrowed) |
+
+Code that pads to a block size must bound on `FixedOrderableBytes`, so that strings are rejected at compile time.
+
+The traits are sealed: only this crate implements them, so every encoding is pinned by its golden vectors and the rules above hold for every implementing type.
 
 The crate is scheme-agnostic — the encodings drop into `ore-rs` BlockORE (this workspace), any OPE construction, an ordered hash, or anything else that compares as bytes.
 
@@ -26,6 +37,7 @@ Encoders are gated behind per-type feature flags so callers only pay for the dep
 | Feature   | Module       | Type                                                   | Encoded length  |
 |-----------|--------------|--------------------------------------------------------|-----------------|
 | (none)    | `primitive`  | `bool`, `u8`–`u128`, `i8`–`i128`, `char`, `f32`, `f64` | fixed, per type |
+| (none)    | `primitive`  | `[u8; N]`                                              | `N`             |
 | (none)    | `variable`   | `str`, `String`, `[u8]`, `Vec<u8>`                     | the value's own |
 | `decimal` | `decimal`    | `rust_decimal::Decimal`                                | 14              |
 | `chrono`  | `chrono`     | `chrono::NaiveDate`                                    | 4               |
@@ -43,7 +55,7 @@ orderable-bytes = { version = "0.2", features = ["decimal", "chrono"] }
 ```rust
 use orderable_bytes::{FixedOrderableBytes, OrderableBytes};
 
-let bytes = 1.5f64.to_orderable_bytes();
+let bytes: [u8; 8] = 1.5f64.to_fixed_orderable_bytes();
 assert_eq!(bytes.len(), <f64 as FixedOrderableBytes>::ENCODED_LEN);
 
 // Byte-wise comparison matches the value's order
@@ -53,6 +65,12 @@ assert!(a < b);
 
 // Strings encode to their own bytes, borrowed: no copy is made.
 assert!("ab".to_orderable_bytes() < "abc".to_orderable_bytes());
+
+// Generic code that keeps fixed-length bytes bounds on FixedOrderableBytes.
+fn term<T: FixedOrderableBytes>(value: T) -> T::Array {
+    value.to_fixed_orderable_bytes()
+}
+assert_eq!(term(7u32), [0, 0, 0, 7]);
 ```
 
 ## Variable-length encodings
@@ -64,7 +82,28 @@ A string encodes to its UTF-8 bytes and a byte string to itself, borrowed from t
 
 ## Upgrading from 0.1
 
-`ToOrderableBytes` is now `OrderableBytes`, and `ENCODED_LEN` moved to `FixedOrderableBytes`. The 0.1 trait was fixed-length only, so replace a `T: ToOrderableBytes` bound with `T: FixedOrderableBytes`, and import `OrderableBytes` wherever you call `to_orderable_bytes`. The old name was removed on purpose: had it been kept as the general trait, 0.1 code would still compile and silently accept strings. Encoded bytes are unchanged.
+Encoded bytes are unchanged. The traits changed:
+
+- **`ToOrderableBytes` is now `OrderableBytes`, and `ENCODED_LEN` moved to `FixedOrderableBytes`.** The 0.1 trait was fixed-length only, so replace a `T: ToOrderableBytes` bound with `T: FixedOrderableBytes`. The old name was removed on purpose: had it been kept as the general trait, 0.1 code would still compile and silently accept strings.
+- **`OrderableBytes::Bytes` now takes a lifetime**, because variable-length bytes borrow from the value. Where generic code stores or returns the bytes, use the owned form: `T::Bytes` becomes `T::Array`, and `to_orderable_bytes()` becomes `to_fixed_orderable_bytes()`.
+
+  ```rust,ignore
+  // 0.1
+  fn term<T: ToOrderableBytes>(value: T) -> T::Bytes { value.to_orderable_bytes() }
+  struct Cached<T: ToOrderableBytes> { bytes: T::Bytes }
+  ```
+
+  ```rust
+  // 0.2
+  use orderable_bytes::FixedOrderableBytes;
+
+  fn term<T: FixedOrderableBytes>(value: T) -> T::Array { value.to_fixed_orderable_bytes() }
+  struct Cached<T: FixedOrderableBytes> { bytes: T::Array }
+  ```
+
+- **Calling `to_orderable_bytes()` on a concrete type** still works and returns the same array; import `OrderableBytes` to call it.
+- **The traits are sealed.** 0.1 allowed implementing `ToOrderableBytes` for your own types; 0.2 doesn't. Encode a wrapper through the value it wraps.
+- **`chrono::datetime_utc::ENCODED_LEN` is removed.** Use `<DateTime<Utc> as FixedOrderableBytes>::ENCODED_LEN`.
 
 ## How the encoding works
 

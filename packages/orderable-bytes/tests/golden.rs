@@ -23,13 +23,18 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn check<T: FixedOrderableBytes>(label: &str, value: T, expected: &str) {
-    let actual = value.to_orderable_bytes();
+    let actual = value.to_fixed_orderable_bytes();
     assert_eq!(
         actual.as_ref().len(),
         T::ENCODED_LEN,
         "{label}: encoded length"
     );
     assert_eq!(hex(actual.as_ref()), expected, "{label}");
+    assert_eq!(
+        value.to_orderable_bytes().as_ref(),
+        actual.as_ref(),
+        "{label}: to_orderable_bytes and to_fixed_orderable_bytes agree"
+    );
 }
 
 #[test]
@@ -365,4 +370,11 @@ fn bytes_golden() {
         assert_eq!(value.to_orderable_bytes(), value);
         assert_eq!(value.to_vec().to_orderable_bytes(), value);
     }
+}
+
+#[test]
+fn byte_array_golden() {
+    check("[u8; 0]", [0u8; 0], "");
+    check("[u8; 3]", [0x00u8, 0x7f, 0xff], "007fff");
+    check("[u8; 16]", [0xabu8; 16], "abababababababababababababababab");
 }
