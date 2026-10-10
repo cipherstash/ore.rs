@@ -19,6 +19,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Miscellaneous
 
 - release
+- release
+
+### Refactoring
+
+- read block lengths through FixedOrderableBytes
+- import OrderableBytes and derive the bench's block length
+
+### Testing
+
+- make ZeroizeOnDrop marker check compile-time
+
+### Harden
+
+- make the ZA-0001 wipe guarantee self-enforcing
+
+
+### Documentation
+
+- refresh crates.io/docs.rs-facing docs and crate metadata
+- fix 'initalize' typo in crate-level rustdoc
+
+### Fixes
+
+- zeroize Aes128Prng keystream on drop (ZA-0001)
+
+### Miscellaneous
+
+- release
 
 ### Refactoring
 
