@@ -1,8 +1,8 @@
 //! Canonical, order-preserving fixed-length byte encodings for the
 //! `chrono` types `NaiveDate` and `DateTime<Utc>`.
 //!
-//! Each submodule exposes an `ENCODED_LEN` constant and an
-//! [`crate::ToOrderableBytes`] impl on its target type. The bytes
+//! Each submodule implements [`crate::ToOrderableBytes`] and
+//! [`crate::FixedOrderableBytes`] on its target type. The bytes
 //! returned have the property that byte-wise lex comparison agrees with
 //! chronological ordering (and byte equality with value equality), so
 //! any comparison-as-bytes scheme (`ore-rs` BlockORE, OPE, an ordered
@@ -10,8 +10,12 @@
 
 /// Order-preserving byte encoding for [`::chrono::NaiveDate`].
 pub mod naive_date {
-    use crate::ToOrderableBytes;
+    use crate::{FixedOrderableBytes, ToOrderableBytes};
     use ::chrono::{Datelike, NaiveDate};
+
+    impl FixedOrderableBytes for NaiveDate {
+        const ENCODED_LEN: usize = 4;
+    }
 
     /// Build the canonical, order-preserving byte encoding of a `NaiveDate`.
     ///
@@ -21,8 +25,7 @@ pub mod naive_date {
     /// big-endian byte serialisation gives a 4-byte sequence whose lex
     /// order matches the natural date order.
     impl ToOrderableBytes for NaiveDate {
-        const ENCODED_LEN: usize = 4;
-        type Bytes = [u8; Self::ENCODED_LEN];
+        type Bytes<'a> = [u8; Self::ENCODED_LEN];
 
         fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
             let biased = (self.num_days_from_ce() as u32) ^ (1u32 << 31);
@@ -73,13 +76,17 @@ pub mod naive_date {
 
 /// Order-preserving byte encoding for [`::chrono::DateTime<::chrono::Utc>`].
 pub mod datetime_utc {
-    use crate::ToOrderableBytes;
+    use crate::{FixedOrderableBytes, ToOrderableBytes};
     use ::chrono::{DateTime, Utc};
 
     /// Number of bytes in the canonical orderable-bytes form. Mirrors
-    /// `<DateTime<Utc> as ToOrderableBytes>::ENCODED_LEN` for use in
+    /// `<DateTime<Utc> as FixedOrderableBytes>::ENCODED_LEN` for use in
     /// const contexts that can't easily name the trait impl.
     pub const ENCODED_LEN: usize = 12;
+
+    impl FixedOrderableBytes for DateTime<Utc> {
+        const ENCODED_LEN: usize = ENCODED_LEN;
+    }
 
     /// Build the canonical, order-preserving byte encoding of a
     /// `DateTime<Utc>`.
@@ -93,8 +100,7 @@ pub mod datetime_utc {
     /// `0..2_000_000_000` (the upper half encodes leap-second moments),
     /// which fits in `u32` and preserves chronological order.
     impl ToOrderableBytes for DateTime<Utc> {
-        const ENCODED_LEN: usize = ENCODED_LEN;
-        type Bytes = [u8; ENCODED_LEN];
+        type Bytes<'a> = [u8; ENCODED_LEN];
 
         fn to_orderable_bytes(&self) -> [u8; ENCODED_LEN] {
             let secs = self.timestamp();

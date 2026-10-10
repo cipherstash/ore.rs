@@ -67,7 +67,7 @@
 //! not distinguish the input's sign, zero-ness, digit count,
 //! trailing-zero count, or scale.
 
-use crate::ToOrderableBytes;
+use crate::{FixedOrderableBytes, ToOrderableBytes};
 use rust_decimal::Decimal;
 
 /// Width of the padded-significand field in bytes (13 bytes = 104 bits).
@@ -90,12 +90,15 @@ const SIGN_BIT: u8 = 0x80;
 /// Mask for the 7-bit exponent field in byte 0.
 const EXP_MASK: u8 = 0x7F;
 
+impl FixedOrderableBytes for Decimal {
+    const ENCODED_LEN: usize = 14;
+}
+
 /// Build the canonical, order-preserving fixed-length byte encoding of a
 /// `Decimal`. Two `Decimal`s that compare equal under `Decimal::cmp`
 /// produce identical byte arrays.
 impl ToOrderableBytes for Decimal {
-    const ENCODED_LEN: usize = 14;
-    type Bytes = [u8; Self::ENCODED_LEN];
+    type Bytes<'a> = [u8; Self::ENCODED_LEN];
 
     fn to_orderable_bytes(&self) -> [u8; Self::ENCODED_LEN] {
         let d = self;
@@ -395,7 +398,7 @@ mod tests {
         assert_eq!(neg_one[0] & EXP_MASK, !(EXP_BIAS as u8) & EXP_MASK);
 
         // Negative mantissa bytes are bitwise complements of the positive.
-        for i in 1..<Decimal as ToOrderableBytes>::ENCODED_LEN {
+        for i in 1..<Decimal as FixedOrderableBytes>::ENCODED_LEN {
             assert_eq!(neg_one[i], !pos_one[i]);
         }
     }

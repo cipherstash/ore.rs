@@ -6,10 +6,13 @@
 //! over existing data. A failing vector here means a released encoding
 //! changed: fix the code, never the vector.
 //!
+//! The variable-length encodings are the value's own bytes; their rows
+//! pin that no transform or normalisation is ever added.
+//!
 //! The NaN rows pin current behaviour, not a promise about NaN ordering (see
 //! the `primitive` module docs): the raw bit pattern passes through.
 
-use orderable_bytes::ToOrderableBytes;
+use orderable_bytes::{FixedOrderableBytes, ToOrderableBytes};
 
 fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write;
@@ -19,7 +22,7 @@ fn hex(bytes: &[u8]) -> String {
     })
 }
 
-fn check<T: ToOrderableBytes>(label: &str, value: T, expected: &str) {
+fn check<T: FixedOrderableBytes>(label: &str, value: T, expected: &str) {
     let actual = value.to_orderable_bytes();
     assert_eq!(
         actual.as_ref().len(),
@@ -334,5 +337,32 @@ fn datetime_utc_golden() {
         ),
     ] {
         check(label, value, expected);
+    }
+}
+
+#[test]
+fn str_golden() {
+    for (value, expected) in [
+        ("", ""),
+        ("a", "61"),
+        ("a\0", "6100"),
+        ("\u{e9}", "c3a9"),
+        ("e\u{301}", "65cc81"),
+        ("\u{10ffff}", "f48fbfbf"),
+    ] {
+        assert_eq!(hex(value.to_orderable_bytes()), expected, "{value:?}");
+        assert_eq!(
+            hex(String::from(value).to_orderable_bytes()),
+            expected,
+            "{value:?}"
+        );
+    }
+}
+
+#[test]
+fn bytes_golden() {
+    for value in [&b""[..], b"\0", b"\xff\x00\x01"] {
+        assert_eq!(value.to_orderable_bytes(), value);
+        assert_eq!(value.to_vec().to_orderable_bytes(), value);
     }
 }
