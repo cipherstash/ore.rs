@@ -418,10 +418,11 @@ it replaced; review brief A4, "Status".)* The two pull in opposite directions an
   Apple M4 (NEON), 710 ns for the portable SWAR fallback. Bit8's legacy Knuth PRP is
   wire-frozen and has no oblivious build.)*
 
-Because leakage is unfixable and encrypt-side CT is purchasable at either width, the
-lower-leakage width (Bit8) is the conservative **default**, with Bit6 an explicit opt-in.
-Width is therefore a **per-domain / per-deployment policy** keyed on the target data and
-threat model, not a global default:
+*(Superseded 2026-10-12, see below: the only Bit8 scheme is the legacy one, and it leaks
+zero runs from a single ciphertext.)* Because leakage is unfixable and encrypt-side CT is
+purchasable at either width, the lower-leakage width (Bit8) was the conservative
+**default**, with Bit6 an explicit opt-in. Width was therefore a **per-domain /
+per-deployment policy** keyed on the target data and threat model, not a global default:
 
 | Dominant threat | Encryptor environment | Choose |
 |---|---|---|
@@ -429,9 +430,19 @@ threat model, not a global default:
 | Online inference on the plaintext distribution | trusted / dedicated | **Bit8** — encrypt-side moot, take the lower leakage |
 | Online inference | hostile / multi-tenant | **Bit8 + oblivious-swap-FY** (low leakage *and* CT, ~522k ct-ops; not built: the legacy Bit8 PRP has no oblivious form), or Bit6, whose key generation is oblivious by default, if 2 bits of resolution is acceptable |
 
-Default numerics to Bit8 (lower leakage, and it is the wire-frozen compatible scheme);
+~~Default numerics to Bit8 (lower leakage, and it is the wire-frozen compatible scheme);
 strings pick width per the size/leakage trade in the PR 6 design. This supersedes the
-earlier lean toward "Bit6 as the default" (Open Q3).
+earlier lean toward "Bit6 as the default" (Open Q3).~~
+
+**Decision (2026-10-12): Bit6 for new data.** The comparison above assumed both widths
+leak only order and the first differing block. The legacy Bit8 scheme leaks more: its
+PRP seeds bind neither the block index nor the block count, so one ciphertext shows its
+zero runs and an integer's magnitude (Context, "Known leakage of the legacy scheme").
+That leak needs no query or comparison, and it is larger than Bit6's finer first-differing
+block. So the table's "At rest … tie" row is true only for right-only storage, and every
+"Bit8" choice in it carries the zero-run leak. Recommend **Bit6 for new data**; Bit8 stays
+the compatibility scheme for data already stored. A new Bit8 scheme that binds the block
+index into its seeds would restore Bit8's lower comparison leakage, but it is not built.
 
 **Numeric encodings: fixed-point vs log/scientific (an encoding-layer option, not a
 low-entropy mitigation).** Block ORE is parameterised by *how* a value maps to blocks,
@@ -647,7 +658,9 @@ PR 2's trait change, which should be called out in the changelog).
 2. **`u16` vs `u8` block count in the v2 header:** u16 chosen for strings; confirm no
    need for >65 535 blocks (≈48 KiB plaintext at Bit6).
 3. **Block width is a per-domain / per-deployment choice, not a global default
-   (RESOLVED — see §5(b) "Block width is a leakage decision").** Earlier framing asked
+   (RESOLVED — see §5(b) "Block width is a leakage decision"; REVISED 2026-10-12:
+   Bit6 for new data, because the legacy Bit8 scheme leaks zero runs from a single
+   ciphertext, see the §5(b) decision).** Earlier framing asked
    "should Bit6 be the default"; the answer is no, because width trades online
    prefix-leakage (Bit8 leaks less — the unfixable axis) against encrypt-side
    constant-time cost (Bit6 cheaper — a fixable axis). Default numerics to **Bit8**

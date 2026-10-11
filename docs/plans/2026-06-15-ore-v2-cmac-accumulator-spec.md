@@ -15,10 +15,16 @@ algorithm, the security argument, and the test plan.
 ## 1. What this replaces, and why
 
 The fixed-N Bit6 scheme (#82) derives every per-block secret by packing the
-**prefix** `x[0..n-1]` into one 16-byte AES block and encrypting it:
+**prefix** `x[0..n-1]` into one 16-byte AES block and encrypting it. It runs
+under two derived keys, never the caller's raw keys (so that legacy ciphertexts
+under shared keys cannot publish Bit6 masking keys):
+`prf1 = E_{k1}("ORE.v2.bit6.prf1")` and `prf2 = E_{k2}("ORE.v2.bit6.prf2")`, each
+label exactly 16 ASCII bytes.
 
-- **PRP seed** (`derive_prp_seeds`, key `prf2`): `seed_n = E_{prf2}( x[0..n-1] ‖ 0… ‖ N@[15] )`
-- **RO key / left tag** (key `prf1`): `ro(n, v) = E_{prf1}( x[0..n-1] ‖ v@[n] ‖ n@[N] ‖ N@[15] )`,
+- **PRP seed** (`derive_prp_seeds`, key `prf2`): `seed_n = E_{prf2}( x[0..n-1] ‖ 0… ‖ n@[14] ‖ N@[15] )`.
+  The block index in byte 14 keeps a prefix padded with zero blocks from
+  colliding with a shorter prefix (the legacy scheme's zero-run leak).
+- **RO key / left tag** (key `prf1`): `ro(n, v) = E_{prf1}( x[0..n-1] ‖ v@[n] ‖ 0… ‖ n@[N] ‖ N@[15] )`,
   where `v = j` for the right-vector mask at domain position `j`, and `v = xt[n]`
   (the permuted current symbol) for the published left tag `f[n]`. **So
   `f[n] = ro(n, xt[n])`** — the same function at the value's permuted position;
@@ -69,10 +75,15 @@ a labelled KDF distinct from every other use (the fixed-N `prf1`/`prf2`, H's
 public `π`, the nonce RNG):
 
 ```
-k = E_{k_master}( "ORE.v2.chain.acc\x00" )      # 16-byte ASCII label, single AES call
+k = E_{k1}( "ORE.v2.chain.acc" )      # the 16 ASCII bytes, no terminator; one AES call
 ```
 
-(`k_master` = one of the `init(k1, k2)` keys; concrete slot TBD in review.) A
+The label is exactly one AES block: the 16 bytes
+`4f 52 45 2e 76 32 2e 63 68 61 69 6e 2e 61 63 63`. The key slot is `k1`; the
+chained scheme's `init` takes that one key (`chained.rs`, `ACC_KEY_LABEL`). No
+legacy PRF input equals the label: legacy PRF₁ inputs end in a block index
+`0..=14` and legacy PRF₂ inputs end in `0x00`, and the label ends in `c` (`0x63`).
+It also differs from the Bit6 labels, which are encrypted under the same `k1`. A
 dedicated key makes the accumulator's PRF security self-contained: no cross-use
 collisions with the fixed-N schemes or with H. The chained scheme therefore
 **unifies the old `prf1` and `prf2`** into one key, domain-separated by the
@@ -90,10 +101,9 @@ Two consequences for review:
 - **vs fixed-N (#82):** that scheme keeps two secret keys (`prf1`/`prf2`); the
   unification is a *chained-scheme* choice, not retroactive.
 - **vs the `init(k1, k2)` API:** `k` is KDF-derived, so a single master input
-  suffices here — `k2` is redundant for this scheme unless retained for API
-  compatibility (open question 1). The alternative design — two keys, one per
-  branch, no branch tag — is equivalent in security but costs a second key
-  schedule/subkey pair; the single-key choice should be explicitly blessed.
+  suffices, and the chained scheme's `init` takes `k1` only (open question 1,
+  resolved). The alternative design — two keys, one per branch, no branch tag —
+  is equivalent in security but costs a second key schedule/subkey pair.
 
 ---
 
@@ -231,9 +241,17 @@ Length **comparability** is enforced at the comparator, not in the derivation:
 4. **The chain state is never published.** `S_n` is an internal CBC value; the
    only outputs are `finalize(S_n, F)` with the K1-treated final block. So the
    "published-outputs-vs-chaining-value" interaction that complicates cascade/GGM
-   does **not** arise — it is subsumed by the CMAC PRF abstraction. (`absorb`
-   and `finalize` from the same `S_n` are E_k at different points: `S_n⊕P_n` vs
-   `S_n⊕F⊕K1`, with `P_n` byte0=`0x00` and `F` byte0≠`0x00`.)
+   does **not** arise — it is subsumed by the CMAC PRF abstraction. In
+   particular, a chain value and a published tag are separated only by that
+   bound. `absorb` and `finalize` from the same `S_n` evaluate `E_k` at
+   `S_n ⊕ P_n` and `S_n ⊕ F ⊕ K1`, which are equal exactly when
+   `K1 = P_n ⊕ F`. `K1` is secret and uniform, and any of its bytes can take
+   any value, so the byte-0 tags do not keep the two inputs apart: they collide
+   with probability `2⁻¹²⁸` per pair, as any two CMAC-internal inputs do. That
+   collision probability is part of the CMAC PRF advantage `≈ σ²/2¹²⁸` in item
+   2, which already covers collisions between chain values and finalised
+   inputs. The byte-0 tags matter only for the injectivity of the message
+   encoding (§4).
 5. **Many outputs per state** (32 stream + DOMAIN ro per block) is sound for the
    same reason: distinct final blocks ⇒ distinct messages ⇒ independent tags.
 6. **Birthday budget.** `σ ≈ q · L · (DOMAIN + STREAM + 1)`. For `q = 2^32`
@@ -275,8 +293,9 @@ existing `SeedBuf`/template zeroization in #82.)
 
 ## 11. Open questions for review
 
-1. **Key slot for `k`** (§3): which `init` key + exact label; confirm the KDF
-   (single labelled AES call) is acceptable.
+1. **Key slot for `k`** (§3): RESOLVED. `k = E_{k1}("ORE.v2.chain.acc")`, the
+   16-byte label with no terminator, one AES call; the chained `init` takes `k1`
+   only.
 2. **`width`/scheme tag** (§4): is a 1-byte width enough domain separation, or
    should the final block also carry a scheme id (as the wire header does)?
 3. **PRP_STREAM vs a single seed:** spec derives the full FY stream as 32 CMAC

@@ -83,7 +83,7 @@ Beyond the order and the first differing block of a compared pair, an `OreAes128
 * the number of leading zero bytes of an integer, which is its order of magnitude, as the same value in every ciphertext under a key;
 * other runs of zero bytes, such as the trailing zero mantissa bytes of a round float.
 
-The wire format of `OreAes128` is frozen, so this cannot change for existing data. See "Known leakage of the legacy scheme" in [the v2 plan](https://github.com/cipherstash/ore.rs/blob/main/docs/plans/2026-06-12-ore-v2-architecture.md).
+The wire format of `OreAes128` is frozen, so this cannot change for existing data. For new data, use `OreAes128Bit6` (`scheme::bit2_w6`, ORE v2), which binds the block index and the block count into its seeds. It covers types up to 64 bits; `u128`, `i128` and `Decimal` stay on `OreAes128` for now. See "Known leakage of the legacy scheme" in [the v2 plan](https://github.com/cipherstash/ore.rs/blob/main/docs/plans/2026-06-12-ore-v2-architecture.md).
 
 To report a security issue, see [SECURITY.md](https://github.com/cipherstash/ore.rs/blob/main/SECURITY.md) or email security@cipherstash.com.
 
