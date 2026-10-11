@@ -68,6 +68,7 @@ impl<const SEED: u8> SeedableRng for TestRng<SEED> {
 
 type OreA = OreAes128<TestRng<0x2a>>;
 type OreB = OreAes128<TestRng<0x77>>;
+type OreC = OreAes128<TestRng<0x5c>>;
 
 fn cipher_a() -> OreA {
     OreCipher::init(&K1, &K2).unwrap()
@@ -76,6 +77,21 @@ fn cipher_a() -> OreA {
 fn cipher_b() -> OreB {
     OreCipher::init(&K1, &K2).unwrap()
 }
+
+fn cipher_c() -> OreC {
+    OreCipher::init(&K1, &K2).unwrap()
+}
+
+/// Plaintexts for [`FULL_U64_ONE_CIPHER`], in ascending order. Blocks are the
+/// big-endian bytes, so pairs first differ at the last block (`BASE` and
+/// `BASE + 1`), a middle block (`+ (1 << 32)`, block 3) and block 0
+/// (`+ (1 << 56)`).
+const ONE_CIPHER_U64: [u64; 4] = [
+    0x1020_3040_5060_7080,
+    0x1020_3040_5060_7081,
+    0x1020_3041_5060_7080,
+    0x1120_3040_5060_7080,
+];
 
 fn cipher_left() -> OreAes128ChaCha20 {
     OreCipher::init(&K1, &K2).unwrap()
@@ -152,6 +168,22 @@ fn full_f64_vector() {
 }
 
 #[test]
+fn full_u64_one_cipher_vectors() {
+    // One cipher for every value, so its nonce stream advances and each
+    // ciphertext has a different nonce.
+    let ore = cipher_c();
+    for (value, (pinned_value, expected)) in ONE_CIPHER_U64.iter().zip(FULL_U64_ONE_CIPHER) {
+        assert_eq!(value, pinned_value);
+        let ct = value.encrypt(&ore).unwrap();
+        assert_eq!(
+            hex::encode(ct.to_bytes()),
+            *expected,
+            "full ciphertext mismatch for u64 {value}"
+        );
+    }
+}
+
+#[test]
 fn full_u64_456_alternate_nonce() {
     let ct = 456u64.encrypt(&cipher_b()).unwrap();
     assert_eq!(hex::encode(ct.to_bytes()), FULL_U64_456_SEED_B);
@@ -189,6 +221,35 @@ fn compare_raw_slices_equality_across_nonces() {
         OreAes128ChaCha20::compare_raw_slices(&pinned(seed_a), &pinned(FULL_U64_456_SEED_B)),
         Some(Ordering::Equal)
     );
+}
+
+#[test]
+fn compare_raw_slices_across_nonces() {
+    // Every unequal pair here has two different nonces, and the comparator
+    // must hash under the nonce of its second argument. FULL_U64 cannot pin
+    // this: its unequal pairs share one nonce.
+    // The nonce opens the right half, after 8 left blocks of 17 bytes.
+    let nonce = |ct: &str| pinned(ct)[8 * 17..8 * 17 + 16].to_vec();
+    for (i, (_, a)) in FULL_U64_ONE_CIPHER.iter().enumerate() {
+        for (j, (_, b)) in FULL_U64_ONE_CIPHER.iter().enumerate() {
+            if i != j {
+                assert_ne!(nonce(a), nonce(b), "pair ({i}, {j}) shares a nonce");
+            }
+            let expected = i.cmp(&j);
+            assert_eq!(
+                OreAes128ChaCha20::compare_raw_slices(&pinned(a), &pinned(b)),
+                Some(expected),
+                "raw order mismatch at ({i}, {j})"
+            );
+            let ct_a = CipherText::<OreAes128ChaCha20, 8>::from_slice(&pinned(a)).unwrap();
+            let ct_b = CipherText::<OreAes128ChaCha20, 8>::from_slice(&pinned(b)).unwrap();
+            assert_eq!(
+                ct_a.cmp(&ct_b),
+                expected,
+                "typed order mismatch at ({i}, {j})"
+            );
+        }
+    }
 }
 
 #[test]
@@ -279,4 +340,13 @@ fn generate() {
         "pub const FULL_U64_456_SEED_B: &str = \"{}\";",
         hex::encode(alt.to_bytes())
     );
+    println!();
+
+    let ore = cipher_c();
+    println!("pub const FULL_U64_ONE_CIPHER: &[(u64, &str)] = &[");
+    for value in ONE_CIPHER_U64 {
+        let ct = value.encrypt(&ore).unwrap();
+        println!("    ({}, \"{}\"),", value, hex::encode(ct.to_bytes()));
+    }
+    println!("];");
 }
