@@ -3,7 +3,7 @@ pub mod prng;
 use crate::primitives::prp::prng::Aes128Prng;
 use crate::primitives::{AesBlock, Prp, PrpError, PrpResult};
 use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
-use aes::Aes128;
+use aes::Aes128Enc;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Read `table[index]` without a secret-dependent memory access: every
@@ -196,7 +196,8 @@ macro_rules! impl_lemire_fy_prp {
                 // Fixed-count AES-CTR keystream from the seed: counter in
                 // the first 4 bytes (big-endian), matching the existing
                 // PRNG's counter convention.
-                let cipher = Aes128::new(GenericArray::from_slice(&key[0..16]));
+                // Encryption only: no decryption schedule is built or copied.
+                let cipher = Aes128Enc::new(GenericArray::from_slice(&key[0..16]));
                 let mut blocks = [AesBlock::default(); $stream_blocks];
                 for (i, b) in blocks.iter_mut().enumerate() {
                     b[0..4].copy_from_slice(&(i as u32).to_be_bytes());

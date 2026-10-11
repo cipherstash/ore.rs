@@ -2,6 +2,7 @@ pub mod hash;
 pub mod prf;
 pub mod prp;
 pub mod simd;
+pub(crate) mod stack;
 
 use aes::cipher::{consts::U16, generic_array::GenericArray};
 use aes::Block;

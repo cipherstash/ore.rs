@@ -27,7 +27,7 @@
 use crate::{
     ciphertext::*,
     primitives::{
-        hash::FixedPiZ2Hash, prf::Aes128Prf, AesBlock, Hash, HashKey, Prf, Prp, NONCE_SIZE,
+        hash::FixedPiZ2Hash, prf::Aes128Prf, stack, AesBlock, Hash, HashKey, Prf, Prp, NONCE_SIZE,
     },
     scheme::width::{ct_assign_bytes, AesBlockBuf, Bit6, BlockWidth},
     OreCipher, OreError, PlainText,
@@ -142,31 +142,14 @@ impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
     }
 }
 
-// Right-block encoding is the width-/hash-generic helper shared with the
-// legacy scheme: `crate::scheme::bit2::encode_right_block::<Bit6, Z2Hash>`.
-
-impl<R: Rng + SeedableRng> OreCipher for OreAes128Bit6<R> {
-    type LeftBlockType = LeftBlock16;
-    type RightBlockType = RightBlock8;
-
-    const WIRE_HEADER: Option<WireHeader> = Some(WIRE);
-    const SYMBOL_DOMAIN: usize = <Bit6 as BlockWidth>::DOMAIN;
-
-    fn init(k1: &[u8; 16], k2: &[u8; 16]) -> Result<Self, OreError> {
-        let rng: R = SeedableRng::from_entropy();
-
-        Ok(OreAes128Bit6 {
-            prf1: derive_prf(k1, &PRF1_LABEL),
-            prf2: derive_prf(k2, &PRF2_LABEL),
-            rng: RefCell::new(rng),
-        })
-    }
-
-    /// Encrypt `x`, whose entries are **6-bit block values** (`< 64`,
-    /// produced by [`crate::scheme::decompose`]); `N` is the block count
-    /// (≤ [`MAX_BLOCKS`]). The [`crate::OreEncrypt`] impls handle the
-    /// byte→block decomposition for primitive types.
-    fn encrypt_left<const N: usize>(&self, x: &PlainText<N>) -> EncryptLeftResult<R, N> {
+/// The encrypt paths without the stack scrub. Every caller runs them inside
+/// [`stack::scrubbed`]: building a block's PRP leaves its seed and tables in
+/// dead stack (see `primitives::stack`).
+impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
+    pub(crate) fn encrypt_left_unscrubbed<const N: usize>(
+        &self,
+        x: &PlainText<N>,
+    ) -> EncryptLeftResult<R, N> {
         assert!(N <= MAX_BLOCKS);
         debug_assert!(x
             .iter()
@@ -189,7 +172,10 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128Bit6<R> {
         Ok(output)
     }
 
-    fn encrypt<const N: usize>(&self, x: &PlainText<N>) -> EncryptResult<R, N> {
+    pub(crate) fn encrypt_unscrubbed<const N: usize>(
+        &self,
+        x: &PlainText<N>,
+    ) -> EncryptResult<R, N> {
         assert!(N <= MAX_BLOCKS);
         debug_assert!(x
             .iter()
@@ -251,6 +237,39 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128Bit6<R> {
         }
 
         Ok(CipherText { left, right })
+    }
+}
+
+// Right-block encoding is the width-/hash-generic helper shared with the
+// legacy scheme: `crate::scheme::bit2::encode_right_block::<Bit6, Z2Hash>`.
+
+impl<R: Rng + SeedableRng> OreCipher for OreAes128Bit6<R> {
+    type LeftBlockType = LeftBlock16;
+    type RightBlockType = RightBlock8;
+
+    const WIRE_HEADER: Option<WireHeader> = Some(WIRE);
+    const SYMBOL_DOMAIN: usize = <Bit6 as BlockWidth>::DOMAIN;
+
+    fn init(k1: &[u8; 16], k2: &[u8; 16]) -> Result<Self, OreError> {
+        let rng: R = SeedableRng::from_entropy();
+
+        Ok(OreAes128Bit6 {
+            prf1: derive_prf(k1, &PRF1_LABEL),
+            prf2: derive_prf(k2, &PRF2_LABEL),
+            rng: RefCell::new(rng),
+        })
+    }
+
+    /// Encrypt `x`, whose entries are **6-bit block values** (`< 64`,
+    /// produced by [`crate::scheme::decompose`]); `N` is the block count
+    /// (≤ [`MAX_BLOCKS`]). The [`crate::OreEncrypt`] impls handle the
+    /// byte→block decomposition for primitive types.
+    fn encrypt_left<const N: usize>(&self, x: &PlainText<N>) -> EncryptLeftResult<R, N> {
+        stack::scrubbed(|| self.encrypt_left_unscrubbed(x))
+    }
+
+    fn encrypt<const N: usize>(&self, x: &PlainText<N>) -> EncryptResult<R, N> {
+        stack::scrubbed(|| self.encrypt_unscrubbed(x))
     }
 
     fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering> {
@@ -406,8 +425,9 @@ impl<const N: usize> Eq for CipherText<OreAes128Bit6ChaCha20, N> {}
 
 mod encrypt_impls {
     use super::{OreAes128Bit6, MAX_BLOCKS};
+    use crate::primitives::stack;
     use crate::scheme::decompose::{decompose_6bit, num_blocks_6bit};
-    use crate::{CipherText, Left, OreCipher, OreEncrypt, OreError};
+    use crate::{CipherText, Left, OreEncrypt, OreError};
     use orderable_bytes::{FixedOrderableBytes, OrderableBytes};
     use rand::{Rng, SeedableRng};
 
@@ -427,17 +447,23 @@ mod encrypt_impls {
                     &self,
                     cipher: &OreAes128Bit6<R>,
                 ) -> Result<Self::LeftOutput, OreError> {
-                    let bytes = self.to_orderable_bytes();
-                    let mut blocks = [0u8; $blocks_const];
-                    decompose_6bit(&bytes, &mut blocks);
-                    cipher.encrypt_left(&blocks)
+                    // The plaintext's bytes and blocks are copies in this
+                    // frame, so they go inside the scrub too.
+                    stack::scrubbed(|| {
+                        let bytes = self.to_orderable_bytes();
+                        let mut blocks = [0u8; $blocks_const];
+                        decompose_6bit(&bytes, &mut blocks);
+                        cipher.encrypt_left_unscrubbed(&blocks)
+                    })
                 }
 
                 fn encrypt(&self, cipher: &OreAes128Bit6<R>) -> Result<Self::FullOutput, OreError> {
-                    let bytes = self.to_orderable_bytes();
-                    let mut blocks = [0u8; $blocks_const];
-                    decompose_6bit(&bytes, &mut blocks);
-                    cipher.encrypt(&blocks)
+                    stack::scrubbed(|| {
+                        let bytes = self.to_orderable_bytes();
+                        let mut blocks = [0u8; $blocks_const];
+                        decompose_6bit(&bytes, &mut blocks);
+                        cipher.encrypt_unscrubbed(&blocks)
+                    })
                 }
             }
         };
@@ -685,5 +711,81 @@ mod tests {
         let b = 1000u32.encrypt(&ore2).unwrap().to_bytes();
 
         assert_ne!(Some(Ordering::Equal), Ore::compare_raw_slices(&a, &b));
+    }
+
+    /// The PRP seeds and permutation tables of every block, which must not
+    /// survive an encryption in dead stack (review of #82).
+    fn block_secrets(ore: &Ore, blocks: &[u8; 11]) -> Vec<Vec<u8>> {
+        let seeds = ore.derive_prp_seeds(blocks);
+        let mut needles = Vec::new();
+        for seed in seeds.0.iter() {
+            let prp: <Bit6 as BlockWidth>::Prp = Prp::new(seed).unwrap();
+            needles.push(seed.to_vec());
+            needles.push((0..64).map(|i| prp.permute(i).unwrap()).collect());
+            needles.push((0..64).map(|i| prp.invert(i).unwrap()).collect());
+        }
+        needles
+    }
+
+    fn assert_no_block_secrets(encrypt: fn(&Ore, u64), unscrubbed: fn(&Ore, u64)) {
+        use crate::primitives::stack::{residue, SCRUB_BYTES};
+        let k1 = [0x3cu8; 16];
+        let k2 = [0xc3u8; 16];
+        let x = 0x0123_4567_89ab_cdefu64;
+        let needles = block_secrets(&Ore::init(&k1, &k2).unwrap(), &u64_blocks(x));
+
+        // Positive control and depth: without the scrub the secrets are
+        // there, and the scrub must reach deeper than the encryption did.
+        let ore = Ore::init(&k1, &k2).unwrap();
+        let dead = residue::after(move || unscrubbed(&ore, x));
+        assert!(needles.iter().any(|n| residue::contains(&dead, n)));
+        let depth = residue::depth(&dead);
+        assert!(
+            depth < SCRUB_BYTES,
+            "encryption reached {} bytes of stack, past the {}-byte scrub",
+            depth,
+            SCRUB_BYTES
+        );
+
+        let ore = Ore::init(&k1, &k2).unwrap();
+        let dead = residue::after(move || encrypt(&ore, x));
+        for (i, needle) in needles.iter().enumerate() {
+            assert!(
+                !residue::contains(&dead, needle),
+                "block {} {} left in dead stack",
+                i / 3,
+                ["seed", "permutation", "inverse"][i % 3]
+            );
+        }
+    }
+
+    fn u64_blocks(x: u64) -> [u8; 11] {
+        let mut blocks = [0u8; 11];
+        crate::scheme::decompose::decompose_6bit(&x.to_be_bytes(), &mut blocks);
+        blocks
+    }
+
+    #[test]
+    fn encrypt_leaves_no_prp_secrets_on_the_stack() {
+        assert_no_block_secrets(
+            |ore, x| {
+                core::hint::black_box(x.encrypt(ore).unwrap());
+            },
+            |ore, x| {
+                core::hint::black_box(ore.encrypt_unscrubbed(&u64_blocks(x)).unwrap());
+            },
+        );
+    }
+
+    #[test]
+    fn encrypt_left_leaves_no_prp_secrets_on_the_stack() {
+        assert_no_block_secrets(
+            |ore, x| {
+                core::hint::black_box(x.encrypt_left(ore).unwrap());
+            },
+            |ore, x| {
+                core::hint::black_box(ore.encrypt_left_unscrubbed(&u64_blocks(x)).unwrap());
+            },
+        );
     }
 }
