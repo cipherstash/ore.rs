@@ -69,9 +69,14 @@ fn derive_prp_seeds<const N: usize>(prf2: &Aes128Prf, x: &PlainText<N>) -> SeedB
     let mut seeds = [AesBlock::default(); N];
     for (n, block) in seeds.iter_mut().enumerate() {
         block[0..n].clone_from_slice(&x[0..n]);
-        // TODO (tracked in v2 plan, fixed for new schemes by the §5(b)
-        // accumulator): the block index is not bound here, so a run of
-        // identical prefix bytes yields identical seeds.
+        // Known leakage, kept because the wire format is frozen: the seed
+        // input binds neither the block index nor the block count, so the
+        // seeds for blocks n < m are equal when x[n..m] is all zero. Those
+        // blocks share one permutation, so a zero run repeats π(0) in `xt`
+        // and a single Left ciphertext shows it. See "Known leakage of the
+        // legacy scheme" in the v2 plan. New schemes bind the block index
+        // and count into the seed:
+        // https://github.com/cipherstash/ore.rs/pull/82
     }
     prf2.encrypt_all(&mut seeds);
     SeedBuf(seeds)

@@ -13,7 +13,7 @@ It makes the following improvements on the original scheme:
 * Exclusive use of AES as a Random Oracle
 * Pipeline optimisations, for higher throughput
 * Hardware AES acceleration on `x86_64` and ARM (via the [`aes`](https://crates.io/crates/aes) crate's runtime detection, on stable Rust)
-* Inclusion of the block number in block prefixes, to avoid repeated prefixes
+* Inclusion of the block number in the left-tag (PRF₁) input, to avoid repeated tags. The PRP seed input does not include it: see [Known leakage](#known-leakage-of-oreaes128)
 
 ## Usage Documentation
 
@@ -61,6 +61,15 @@ Hardware AES is provided by the [`aes`](https://crates.io/crates/aes) crate, whi
 ## Security
 
 The underlying scheme (Lewi-Wu Block-ORE) has been well studied, but this implementation has not had a public third-party audit. Evaluate it against your own threat model before using it in production.
+
+### Known leakage of `OreAes128`
+
+Beyond the order and the first differing block of a compared pair, an `OreAes128` ciphertext shows its runs of zero bytes. The PRP seed for block `n` is derived from the bytes before it, padded with zeros, and binds neither the block index nor the block count. Blocks inside a run of zero bytes therefore share a permutation and encrypt to the same value. One ciphertext (a Left alone is enough) gives away:
+
+* the number of leading zero bytes of an integer, which is its order of magnitude, as the same value in every ciphertext under a key;
+* other runs of zero bytes, such as the trailing zero mantissa bytes of a round float.
+
+The wire format of `OreAes128` is frozen, so this cannot change for existing data. See "Known leakage of the legacy scheme" in [the v2 plan](https://github.com/cipherstash/ore.rs/blob/main/docs/plans/2026-06-12-ore-v2-architecture.md).
 
 To report a security issue, see [SECURITY.md](https://github.com/cipherstash/ore.rs/blob/main/SECURITY.md) or email security@cipherstash.com.
 

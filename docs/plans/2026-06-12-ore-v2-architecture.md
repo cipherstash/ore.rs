@@ -18,6 +18,34 @@
 - **No wire-format header.** `compare_raw_slices` infers the block count from the slice
   length; ciphertexts of different schemes/sizes are distinguishable only by length.
 
+### Known leakage of the legacy scheme
+
+The 8-bit scheme derives the PRP seed for block `n` as `PRF₂(x[0..n] ‖ 0…)`. The input
+binds neither `n` nor the block count, so the seeds for blocks `n < m` are equal when
+`x[n..m]` is all zero. A run of equal non-zero bytes does not collide (`[5, 5, 5]` gives
+three seeds). Blocks with equal seeds share a permutation, so every zero byte in a run
+encrypts to the same `xt` value, `π(0)`. The pinned vectors (`tests/compat_vectors`) show
+it:
+
+- `0u64` gives `xt = 90 90 90 90 90 90 90 90`;
+- `1u64 << 32` gives `xt = 90 90 90 27 d5 d5 d5 d5`;
+- `1.5f64` gives `xt = 92 52 6a 6a 6a 6a 6a 6a`.
+
+One ciphertext is enough (a Left alone shows it). It gives away:
+
+- the number of leading zero bytes of an integer, which is its order of magnitude: the
+  leading-zero seed is `PRF₂(0…)` in every ciphertext, so its `π(0)` is the same value
+  (`0x90` above) in every ciphertext under a key;
+- runs of zero bytes elsewhere, such as the trailing zero mantissa bytes of a "round"
+  float;
+- equal `xt` values across positions and across ciphertexts when their seeds match
+  (`xt[7]` of `1u64` and `xt[3]` of `1u64 << 32` are both `0x27`).
+
+Lewi-Wu ORE leaks only the order and the first differing block of a compared pair; this
+is more. The wire format is frozen (see Non-goals), so the legacy scheme keeps it, and it
+is documented in the crate README. New schemes must bind the block index and the block
+count into the seed input.
+
 This plan covers four goals, structured as a sequence of PRs:
 
 1. **Efficient unary encoding** — replace the per-bit iterative right-block construction
@@ -399,6 +427,9 @@ PR 2's trait change, which should be called out in the changelog).
       never reachable from `Left`/`Right` types (PR 6).
 - [ ] GF(2^128) doubling constant-time, if Candidate C is chosen (PR 6).
 - [ ] String leakage profile documented and acknowledged at product level (PR 6).
+- [ ] Legacy zero-run seed leakage (Context, "Known leakage of the legacy scheme")
+      documented in the README; new schemes bind the block index and count into their
+      PRP seeds (PR 2, 5).
 
 ## Decisions taken (revisit if needed)
 
