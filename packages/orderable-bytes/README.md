@@ -88,18 +88,9 @@ A string encodes to its UTF-8 bytes and a `ByteString` to its own bytes, borrowe
 - **No normalisation.** A string is encoded exactly as given. `é` written as U+00E9 and as `e` + U+0301 encode differently, and strings sort by code point, not by any language's collation. Normalise before encoding if you need canonical equivalence, case folding or accent folding.
 - **Never pad, never concatenate.** These encodings do not mark where they end. Zero-padding to a block size makes `"a"` and `"a\0"` identical; concatenating two values loses the boundary between them. A consumer must keep each value's length and sort a prefix first, as a variable-length ORE or OPE scheme does. Fixed-length encodings are safe to zero-extend; these are not.
 
-## Upgrading from 0.2
-
-Encoded bytes are unchanged. Bare byte types no longer implement the traits:
-
-- **`[u8; N]`** becomes `ByteArray(&array)`.
-- **`[u8]` and `Vec<u8>`** become `ByteString(&bytes)`, or `ByteString::from(&vec)`.
-
-If the bytes were an encoding you built yourself rather than a binary value, pass the value instead (`x`, not `x.to_be_bytes()`), so this crate does the encoding.
-
 ## Upgrading from 0.1
 
-Encoded bytes are unchanged. The traits changed:
+0.2.0 was yanked; upgrade straight to 0.3. Encoded bytes are unchanged. The traits changed:
 
 - **`ToOrderableBytes` is now `OrderableBytes`, and `ENCODED_LEN` moved to `FixedOrderableBytes`.** The 0.1 trait was fixed-length only, so replace a `T: ToOrderableBytes` bound with `T: FixedOrderableBytes`. The old name was removed on purpose: had it been kept as the general trait, 0.1 code would still compile and silently accept strings.
 - **`OrderableBytes::Bytes` now takes a lifetime**, because variable-length bytes borrow from the value. Where generic code stores or returns the bytes, use the owned form: `T::Bytes` becomes `T::Array`, and `to_orderable_bytes()` becomes `to_fixed_orderable_bytes()`.
@@ -111,7 +102,7 @@ Encoded bytes are unchanged. The traits changed:
   ```
 
   ```rust
-  // 0.2
+  // 0.3
   use orderable_bytes::FixedOrderableBytes;
 
   fn term<T: FixedOrderableBytes>(value: T) -> T::Array { value.to_fixed_orderable_bytes() }
@@ -119,7 +110,8 @@ Encoded bytes are unchanged. The traits changed:
   ```
 
 - **Calling `to_orderable_bytes()` on a concrete type** still works and returns the same array; import `OrderableBytes` to call it.
-- **The traits are sealed.** 0.1 allowed implementing `ToOrderableBytes` for your own types; 0.2 doesn't. Encode a wrapper through the value it wraps.
+- **The traits are sealed.** 0.1 allowed implementing `ToOrderableBytes` for your own types; 0.3 doesn't. Encode your own wrapper type through the value it wraps.
+- **Binary values are new**, as `ByteArray` and `ByteString`. Bare `[u8; N]`, `[u8]` and `Vec<u8>` don't implement the traits; see [Supported types](#supported-types).
 - **`chrono::datetime_utc::ENCODED_LEN` is removed.** Use `<DateTime<Utc> as FixedOrderableBytes>::ENCODED_LEN`.
 
 ## How the encoding works
