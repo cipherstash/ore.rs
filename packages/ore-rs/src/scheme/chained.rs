@@ -237,7 +237,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     /// Full Left+Right ciphertext for `x` (one 6-bit symbol per element). A
     /// value `>= 64` returns [`OreError::PrpError`].
     pub fn encrypt_var(&self, x: &[u8]) -> Result<VarCipherText, OreError> {
-        stack::scrubbed(|| self.encrypt_blocks(&Blocks6::check(x)?))
+        stack::scrubbed(|| self.encrypt_blocks(&check_symbols(x)?))
     }
 
     /// [`Self::encrypt_var`] over blocks already known to be in the 6-bit
@@ -314,7 +314,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     /// Left-only ciphertext (smaller; for query plaintexts). A value `>= 64`
     /// returns [`OreError::PrpError`].
     pub fn encrypt_left_var(&self, x: &[u8]) -> Result<VarLeft, OreError> {
-        stack::scrubbed(|| self.encrypt_left_blocks(&Blocks6::check(x)?))
+        stack::scrubbed(|| self.encrypt_left_blocks(&check_symbols(x)?))
     }
 
     /// [`Self::encrypt_left_var`] over blocks already known to be in the
@@ -470,6 +470,16 @@ pub const MAX_STR_BYTES: usize = u16::MAX as usize * 6 / 8;
 const _: () = assert!(num_blocks_6bit(MAX_STR_BYTES) <= u16::MAX as usize);
 const _: () = assert!(num_blocks_6bit(MAX_STR_BYTES + 1) > u16::MAX as usize);
 
+/// Check raw symbols for [`OreAes128Bit6Chained::encrypt_var`] and
+/// [`OreAes128Bit6Chained::encrypt_left_var`], refusing more blocks than the
+/// wire format can number *before* scanning them.
+fn check_symbols(x: &[u8]) -> Result<Blocks6<&[u8]>, OreError> {
+    if x.len() > u16::MAX as usize {
+        return Err(OreError::TooManyBlocks);
+    }
+    Blocks6::check(x)
+}
+
 /// Decompose `s` into 6-bit blocks, refusing a string too long for the wire
 /// format *before* allocating or decomposing it. The decomposition is the
 /// whole plaintext (it inverts), so the buffer is wiped when dropped.
@@ -524,6 +534,23 @@ mod tests {
         ));
         assert!(matches!(
             c.encrypt_left_str(&too_long),
+            Err(OreError::TooManyBlocks)
+        ));
+    }
+
+    /// Raw symbols over the wire limit are refused on their length, before
+    /// any symbol is checked: out-of-domain symbols give `TooManyBlocks`,
+    /// not `PrpError`.
+    #[test]
+    fn raw_symbols_over_the_wire_limit_are_rejected() {
+        let c = ore();
+        let too_many = vec![64u8; u16::MAX as usize + 1];
+        assert!(matches!(
+            c.encrypt_var(&too_many),
+            Err(OreError::TooManyBlocks)
+        ));
+        assert!(matches!(
+            c.encrypt_left_var(&too_many),
             Err(OreError::TooManyBlocks)
         ));
     }
