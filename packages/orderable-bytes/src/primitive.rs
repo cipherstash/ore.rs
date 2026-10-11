@@ -1,7 +1,7 @@
 //! Canonical, order-preserving fixed-length byte encodings for the
 //! primitives `bool`, `char`, `u8`, `i8`, `i16`, `i32`, `i64`, `u128`,
-//! `i128`, the IEEE 754 floats `f32` and `f64`, and byte arrays
-//! `[u8; N]`.
+//! `i128` and the IEEE 754 floats `f32` and `f64`. Fixed-length binary
+//! values, such as hashes and UUIDs, are [`crate::ByteArray`].
 //!
 //! Each impl emits the type's native byte width — no padding:
 //!
@@ -10,7 +10,6 @@
 //! - `i32`, `u32`, `char`, `f32` → `[u8; 4]`
 //! - `i64`, `u64`, `f64` → `[u8; 8]`
 //! - `u128`, `i128` → `[u8; 16]`
-//! - `[u8; N]` → itself
 //!
 //! Consumers that need a fixed wider encoding (e.g. an ORE construction
 //! whose plaintext block size is `[u8; 8]`) should zero-extend the
@@ -166,53 +165,9 @@ impl_fixed_orderable_bytes! {
     }
 }
 
-impl<const N: usize> crate::private::Sealed for [u8; N] {}
-
-/// A byte array encodes to itself: byte-wise order is already the order
-/// Rust defines for arrays. Hashes and UUIDs can be encoded without
-/// copying them into a `Vec<u8>`.
-impl<const N: usize> crate::OrderableBytes for [u8; N] {
-    type Bytes<'a> = &'a [u8];
-
-    fn to_orderable_bytes(&self) -> &[u8] {
-        self
-    }
-}
-
-impl<const N: usize> crate::FixedOrderableBytes for [u8; N] {
-    const ENCODED_LEN: usize = N;
-
-    type Array = [u8; N];
-
-    fn to_fixed_orderable_bytes(&self) -> [u8; N] {
-        *self
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::{FixedOrderableBytes, OrderableBytes};
-
-    // --- [u8; N] ---
-
-    #[test]
-    fn byte_array_encodes_to_itself() {
-        let a = [1u8, 2, 3];
-        assert_eq!(a.to_orderable_bytes(), &a);
-        assert_eq!(a.to_orderable_bytes().as_ptr(), a.as_ptr());
-        assert_eq!(a.to_fixed_orderable_bytes(), a);
-        assert_eq!(<[u8; 3] as FixedOrderableBytes>::ENCODED_LEN, 3);
-    }
-
-    quickcheck! {
-        fn byte_array_order_matches_array_order(a: Vec<u8>, b: Vec<u8>) -> bool {
-            let mut x = [0u8; 8];
-            let mut y = [0u8; 8];
-            for (dst, src) in x.iter_mut().zip(&a) { *dst = *src; }
-            for (dst, src) in y.iter_mut().zip(&b) { *dst = *src; }
-            x.to_orderable_bytes().cmp(y.to_orderable_bytes()) == x.cmp(&y)
-        }
-    }
+    use crate::OrderableBytes;
 
     // --- bool ---
 

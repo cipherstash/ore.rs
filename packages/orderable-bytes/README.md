@@ -14,6 +14,8 @@ Every type also implements exactly one of two subtraits, which say how its bytes
 - **`FixedOrderableBytes`**: every value encodes to the same length, named as `ENCODED_LEN`. `to_fixed_orderable_bytes` returns the bytes as an owned array that can be stored or returned. Fixed-length bytes may be zero-extended to a larger block.
 - **`VariableOrderableBytes`**: the length varies with the value, and the bytes are borrowed from it. Strings and byte strings (see [Variable-length encodings](#variable-length-encodings)). These must never be padded or concatenated.
 
+Binary values are wrapped: `ByteArray` for a fixed-length value such as a hash or a UUID, `ByteString` for a variable-length one. Bare `[u8; N]`, `[u8]` and `Vec<u8>` implement neither trait, because bare bytes are as often bytes something has already encoded, and a hand-rolled encoding (little-endian integers, an unflipped sign bit, `f64::to_bits`) encrypts fine and then sorts wrong. Wrap bytes you received as a value, never bytes you encoded yourself.
+
 A reference `&T` implements the same traits as `T`.
 
 Bound generic code on the trait it relies on:
@@ -37,8 +39,9 @@ Encoders are gated behind per-type feature flags so callers only pay for the dep
 | Feature   | Module       | Type                                                   | Encoded length  |
 |-----------|--------------|--------------------------------------------------------|-----------------|
 | (none)    | `primitive`  | `bool`, `u8`–`u128`, `i8`–`i128`, `char`, `f32`, `f64` | fixed, per type |
-| (none)    | `primitive`  | `[u8; N]`                                              | `N`             |
-| (none)    | `variable`   | `str`, `String`, `[u8]`, `Vec<u8>`                     | the value's own |
+| (none)    | `binary`     | `ByteArray<N>` (wraps `&[u8; N]`)                      | `N`             |
+| (none)    | `variable`   | `str`, `String`                                        | the value's own |
+| (none)    | `binary`     | `ByteString` (wraps `&[u8]`)                           | the value's own |
 | `decimal` | `decimal`    | `rust_decimal::Decimal`                                | 14              |
 | `chrono`  | `chrono`     | `chrono::NaiveDate`                                    | 4               |
 | `chrono`  | `chrono`     | `chrono::DateTime<Utc>`                                | 12              |
@@ -49,11 +52,11 @@ Each fixed-length encoding canonicalises equivalent values to identical bytes �
 
 ```toml
 [dependencies]
-orderable-bytes = { version = "0.2", features = ["decimal", "chrono"] }
+orderable-bytes = { version = "0.3", features = ["decimal", "chrono"] }
 ```
 
 ```rust
-use orderable_bytes::{FixedOrderableBytes, OrderableBytes};
+use orderable_bytes::{ByteArray, ByteString, FixedOrderableBytes, OrderableBytes};
 
 let bytes: [u8; 8] = 1.5f64.to_fixed_orderable_bytes();
 assert_eq!(bytes.len(), <f64 as FixedOrderableBytes>::ENCODED_LEN);
@@ -66,6 +69,11 @@ assert!(a < b);
 // Strings encode to their own bytes, borrowed: no copy is made.
 assert!("ab".to_orderable_bytes() < "abc".to_orderable_bytes());
 
+// Binary values are wrapped, and also borrowed.
+let uuid = [0x12u8; 16];
+assert_eq!(ByteArray(&uuid).to_fixed_orderable_bytes(), uuid);
+assert!(ByteString(b"ab").to_orderable_bytes() < ByteString(b"abc").to_orderable_bytes());
+
 // Generic code that keeps fixed-length bytes bounds on FixedOrderableBytes.
 fn term<T: FixedOrderableBytes>(value: T) -> T::Array {
     value.to_fixed_orderable_bytes()
@@ -75,10 +83,19 @@ assert_eq!(term(7u32), [0, 0, 0, 7]);
 
 ## Variable-length encodings
 
-A string encodes to its UTF-8 bytes and a byte string to itself, borrowed from the value. Byte-wise order is already the order these types define, with a value sorting before any longer value it is a prefix of (`"ab"` < `"abc"`); for strings that is Unicode code-point order.
+A string encodes to its UTF-8 bytes and a `ByteString` to its own bytes, borrowed from the value. Byte-wise order is already the order these types define, with a value sorting before any longer value it is a prefix of (`"ab"` < `"abc"`); for strings that is Unicode code-point order.
 
 - **No normalisation.** A string is encoded exactly as given. `é` written as U+00E9 and as `e` + U+0301 encode differently, and strings sort by code point, not by any language's collation. Normalise before encoding if you need canonical equivalence, case folding or accent folding.
 - **Never pad, never concatenate.** These encodings do not mark where they end. Zero-padding to a block size makes `"a"` and `"a\0"` identical; concatenating two values loses the boundary between them. A consumer must keep each value's length and sort a prefix first, as a variable-length ORE or OPE scheme does. Fixed-length encodings are safe to zero-extend; these are not.
+
+## Upgrading from 0.2
+
+Encoded bytes are unchanged. Bare byte types no longer implement the traits:
+
+- **`[u8; N]`** becomes `ByteArray(&array)`.
+- **`[u8]` and `Vec<u8>`** become `ByteString(&bytes)`, or `ByteString::from(&vec)`.
+
+If the bytes were an encoding you built yourself rather than a binary value, pass the value instead (`x`, not `x.to_be_bytes()`), so this crate does the encoding.
 
 ## Upgrading from 0.1
 

@@ -12,7 +12,7 @@
 //! The NaN rows pin current behaviour, not a promise about NaN ordering (see
 //! the `primitive` module docs): the raw bit pattern passes through.
 
-use orderable_bytes::{FixedOrderableBytes, OrderableBytes};
+use orderable_bytes::{ByteArray, ByteString, FixedOrderableBytes, OrderableBytes};
 
 fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write;
@@ -365,16 +365,23 @@ fn str_golden() {
 }
 
 #[test]
-fn bytes_golden() {
+fn byte_string_golden() {
     for value in [&b""[..], b"\0", b"\xff\x00\x01"] {
-        assert_eq!(value.to_orderable_bytes(), value);
-        assert_eq!(value.to_vec().to_orderable_bytes(), value);
+        assert_eq!(ByteString(value).to_orderable_bytes(), value);
+        assert_eq!(
+            ByteString::from(&value.to_vec()).to_orderable_bytes(),
+            value
+        );
     }
 }
 
 #[test]
 fn byte_array_golden() {
-    check("[u8; 0]", [0u8; 0], "");
-    check("[u8; 3]", [0x00u8, 0x7f, 0xff], "007fff");
-    check("[u8; 16]", [0xabu8; 16], "abababababababababababababababab");
+    check("ByteArray<0>", ByteArray(&[0u8; 0]), "");
+    check("ByteArray<3>", ByteArray(&[0x00u8, 0x7f, 0xff]), "007fff");
+    check(
+        "ByteArray<16>",
+        ByteArray(&[0xabu8; 16]),
+        "abababababababababababababababab",
+    );
 }

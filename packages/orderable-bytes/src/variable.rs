@@ -1,9 +1,10 @@
 //! Canonical, order-preserving variable-length byte encodings for
-//! `str`, `String`, `[u8]` and `Vec<u8>`.
+//! `str`, `String` and [`crate::ByteString`].
 //!
 //! The encoding is the value's own bytes, borrowed: a string encodes to
 //! its UTF-8 bytes, and a byte string to itself. No copy is made, so no
-//! second copy of the plaintext is left in memory.
+//! second copy of the plaintext is left in memory. Bare `[u8]` and
+//! `Vec<u8>` are not byte strings here; see [`crate::binary`] for why.
 //!
 //! Byte-wise lexicographic order is already the order these types
 //! define, with a value sorting before any longer value it is a prefix
@@ -61,28 +62,6 @@ impl OrderableBytes for String {
     }
 }
 
-impl Sealed for [u8] {}
-impl VariableOrderableBytes for [u8] {}
-
-impl OrderableBytes for [u8] {
-    type Bytes<'a> = &'a [u8];
-
-    fn to_orderable_bytes(&self) -> &[u8] {
-        self
-    }
-}
-
-impl Sealed for Vec<u8> {}
-impl VariableOrderableBytes for Vec<u8> {}
-
-impl OrderableBytes for Vec<u8> {
-    type Bytes<'a> = &'a [u8];
-
-    fn to_orderable_bytes(&self) -> &[u8] {
-        self
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,8 +71,6 @@ mod tests {
         fn is_variable<T: VariableOrderableBytes + ?Sized>() {}
         is_variable::<str>();
         is_variable::<String>();
-        is_variable::<[u8]>();
-        is_variable::<Vec<u8>>();
     }
 
     #[test]
@@ -108,8 +85,6 @@ mod tests {
     fn encoding_borrows_rather_than_copies() {
         let s = String::from("borrowed");
         assert_eq!(s.to_orderable_bytes().as_ptr(), s.as_ptr());
-        let v = vec![1u8, 2, 3];
-        assert_eq!(v.to_orderable_bytes().as_ptr(), v.as_ptr());
     }
 
     #[test]
@@ -142,10 +117,6 @@ mod tests {
 
         fn string_byte_equality_matches_string_equality(a: String, b: String) -> bool {
             (a.to_orderable_bytes() == b.to_orderable_bytes()) == (a == b)
-        }
-
-        fn bytes_byte_order_matches_bytes_order(a: Vec<u8>, b: Vec<u8>) -> bool {
-            a.to_orderable_bytes().cmp(b.to_orderable_bytes()) == a.cmp(&b)
         }
 
         fn str_and_string_encode_identically(a: String) -> bool {
