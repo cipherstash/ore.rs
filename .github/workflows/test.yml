@@ -45,6 +45,11 @@ jobs:
       - name: test
         run: cargo test --all-features
 
+      # `ct_bench` and its tests compile only with this feature; the clippy
+      # step above builds them but never runs them.
+      - name: test (ct-bench)
+        run: cargo test -p ore-rs --features ct-bench --lib ct_bench
+
   bench:
     runs-on: ubuntu-latest
     name: "⏱ Benchmark"
