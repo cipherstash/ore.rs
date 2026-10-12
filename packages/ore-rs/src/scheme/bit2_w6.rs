@@ -434,7 +434,8 @@ mod encrypt_impls {
     macro_rules! impl_ore_encrypt_bit6 {
         ($type:ty, $blocks_const:ident) => {
             /// Block count for this type at 6-bit width.
-            const $blocks_const: usize = num_blocks_6bit(<$type as FixedOrderableBytes>::ENCODED_LEN);
+            const $blocks_const: usize =
+                num_blocks_6bit(<$type as FixedOrderableBytes>::ENCODED_LEN);
             // The packed prefix caps the block count; types beyond it
             // (u128, i128, Decimal) must not get these impls.
             const _: () = assert!($blocks_const <= MAX_BLOCKS);
