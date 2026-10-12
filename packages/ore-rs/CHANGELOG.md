@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0-rc.1] - 2026-10-12
+
+Pre-release for testing with external projects. The Bit6 (`scheme::bit2_w6`) and chained
+wire formats are not frozen yet: do not store their ciphertexts until 0.9.0.
 
 ### Benchmarks
 
@@ -109,6 +113,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - rustfmt
 - rustfmt the orderable-bytes 0.2 port
 
+## [0.8.4] and earlier
+
+Entries for 0.4.0 to 0.8.4, which were released without per-version headings.
 
 ### Documentation
 

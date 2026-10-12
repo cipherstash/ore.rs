@@ -2,6 +2,8 @@
 changelog_config = "cliff.toml"
 git_tag_enable = true
 git_release_enable = true
+# Mark GitHub releases of versions like 0.9.0-rc.1 as pre-releases.
+git_release_type = "auto"
 publish = true
 semver_check = false
 
