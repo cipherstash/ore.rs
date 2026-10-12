@@ -2,7 +2,7 @@
 //! prefix, fixed-N)` scheme from the ORE v2 plan.
 //!
 //! Plaintext bytes are decomposed MSB-first into 6-bit block values (see
-//! [`crate::scheme::decompose`]); `N` in the types below counts *blocks*,
+//! the crate-private `scheme::decompose`); `N` in the types below counts *blocks*,
 //! not bytes (a `u64` is 11 blocks). Compared to the legacy 8-bit scheme,
 //! each block costs 64 random-oracle evaluations instead of 256 and stores
 //! an 8-byte right block instead of 32 — a `u64` ciphertext is 295 bytes
@@ -17,7 +17,7 @@
 //!
 //! **Status: wire format NOT yet frozen.** The Z2 hash is the fixed-π MMO
 //! construction proposed in plan §6 (option 3), pending crypto review;
-//! flipping [`Z2Hash`] re-keys the right ciphertexts without any other
+//! flipping the private `Z2Hash` alias re-keys the right ciphertexts without any other
 //! code change. Do not store ciphertexts produced by this scheme until
 //! the review lands and vectors are pinned.
 //!
@@ -258,7 +258,7 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128Bit6<R> {
     }
 
     /// Encrypt `x`, whose entries are **6-bit block values** (`< 64`, as
-    /// [`crate::scheme::decompose`] produces); `N` is the block count
+    /// the crate-private `scheme::decompose` produces); `N` is the block count
     /// (≤ [`MAX_BLOCKS`]). The [`crate::OreEncrypt`] impls handle the
     /// byte→block decomposition for primitive types and skip the check
     /// below. A value `>= 64` returns [`OreError::PrpError`].

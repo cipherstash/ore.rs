@@ -208,7 +208,7 @@ pub mod ct_bench {
 
     /// The reference builder's Fisher–Yates swap loop alone (no inverse
     /// fill): swaps at the secret draw-derived index. The loop is
-    /// [`oblivious::reference::build`]'s, restated so it can be timed
+    /// `oblivious::reference::build`'s, restated so it can be timed
     /// without the fill; a test pins it to that builder's permutation.
     #[inline(never)]
     pub fn fy_swaps_only(stream: &[u8; 512], out: &mut Line) {
