@@ -15,8 +15,19 @@ defaults:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    name: "🧪 Test"
+    # Both architectures: aarch64 runs hardware AES (`--cfg aes_armv8`), the
+    # NEON kernels and the NEON PRP builder, which x86_64 never reaches, against
+    # the same pinned vectors.
+    runs-on: ${{ matrix.os }}
+    name: "🧪 Test (${{ matrix.arch }})"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x86_64
+          - os: ubuntu-24.04-arm
+            arch: aarch64
 
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +40,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: setup rust 1.78
         uses: dtolnay/rust-toolchain@1.78.0
