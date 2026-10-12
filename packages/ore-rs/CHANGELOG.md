@@ -7,6 +7,109 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+### Benchmarks
+
+- black-box every result and input, and record the effect
+- criterion bench for the Bit6 PRP builder alone
+
+### CI
+
+- make the default harness set fit CI; time-limit the job
+
+### Documentation
+
+- document the legacy zero-run seed leakage
+- restate A1 on a correct exposure model; correct A4's read paths
+- correct the CMAC spec, and recommend Bit6 for new data
+- u128/i128 fit neither scheme; stop recommending OreAes128 for them
+- every ciphertext reveals the exact plaintext length
+
+### Features
+
+- 6-bit block width scheme (OreAes128Bit6) with v2 wire format
+- CMAC accumulator primitive + LemireFyPrp::from_stream (PR 6 foundation)
+- chained-prefix variable-length scheme + string encryption (PR 6)
+
+### Fixes
+
+- derive scheme-separated PRF keys and bind the block index
+- refuse malformed lengths in the legacy raw comparator
+- refuse oversized raw symbols before scanning them
+
+### Miscellaneous
+
+- update the detached lockfiles to orderable-bytes 0.2
+
+### Performance
+
+- bulk unary encoding, allocation-free encrypt path, hardware AES on aarch64
+- NEON and AVX2 kernels for indicator and hash-bit masks
+- Bit6 PRP via fixed-draw Fisher-Yates (closes timing channel)
+- vectorize GF(2^128) doubling in the sigma-MMO hash
+
+### Refactoring
+
+- width abstraction, seed/tag separation, template RO keys
+- derive BlockWidth::DOMAIN from BITS
+- address #80 self-review (shared bit-packer, drop dead code)
+- from_stream delegates to one from_stream_with
+- reuse lemire_draw and the reference builder in the isolation hooks
+
+### Testing
+
+- pin compatibility vectors and bench baseline for ORE v2 refactor
+- name the generator's real output path
+- pin cross-nonce comparison fixtures
+- pin v2 Bit6 wire-format vectors
+- pin cross-nonce comparison fixtures
+- property tests for ORE comparator, left/full consistency, and CMAC accumulator
+- pin wire-format vectors
+- libFuzzer targets for the ciphertext parsers and comparators
+- dudect timing benches for the comparators and encryptors
+- kani harnesses for the pure building blocks
+- run the two exhaustive-length Kani harnesses only with kani-full
+- prove order preservation across different lengths
+- round-trip Right::from_slice for Bit6 and legacy
+- prove lemire_draw itself; test every swap of the shipped builders on their targets
+
+### Ct-taint
+
+- refuse a vacuous pass; cover more types and the raw entry points
+
+### Fuzz
+
+- check that the raw comparator and the typed Ord agree
+
+### Harden
+
+- assert gather length; precise dispatch cfg (#81 self-review)
+- real length asserts; set_bit assigns
+- count=0 guard, shared encoder, ct bit-extract, opaque Debug (#82 review)
+- restore the #81 review hardening that #82 overwrote
+- build the Bit6 permutation with no secret-dependent address
+- reject out-of-domain symbols; assert the 64-lane mask length
+- read permute/invert tables obliviously; latch the comparator's block
+- scrub the stack after each encryption
+- size the scrub by optimisation level, not debug_assertions
+- zeroize L/ro, Branch enum, count guard, single-key init, left-query comparator (#83 review)
+- encrypt the mixed state in place in absorb and finalize
+- oblivious tag and bit reads, string length guard, symbol checks; correct at-rest leakage docs
+- scrub the stack after each encryption; wipe the decomposed string
+- latch first differing block in legacy and Bit6 typed comparators; accept zero-block legacy input
+- zeroize the latched first-difference copies
+- typed in-domain Symbol; infallible permute; drop taint suppressions
+
+### Ore
+
+- harden PRP/comparator constant-time, add N<=64 guard
+- resolve A1 — adopt BHKR sigma-MMO for the 1-bit hash H
+
+### Style
+
+- rustfmt
+- rustfmt the orderable-bytes 0.2 port
+
+
 ### Documentation
 
 - refresh crates.io/docs.rs-facing docs and crate metadata
