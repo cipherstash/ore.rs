@@ -7,7 +7,7 @@
 # `Symbol`, and `OreEncrypt` and the string encryptors get their symbols from
 # the 6-bit decomposition, which masks rather than checks.
 #
-# The one accepted report is `Blocks6::check`, on the raw-block entry points
+# Two reports are accepted. The first is `Blocks6::check`, on the raw-block entry points
 # (`OreCipher::encrypt`/`encrypt_left` for Bit6, `encrypt_var`/
 # `encrypt_left_var` for the chained scheme). A caller of those passes symbols
 # that may be out of the 6-bit domain, and the function must refuse them. It
@@ -22,4 +22,19 @@
    blocks6-check: one branch on whether any raw symbol is out of domain
    Memcheck:Cond
    fun:*Blocks6*check*
+}
+
+# The second is `refuse_trailing_nul`, on the chained string encryptors
+# (`encrypt_str`/`encrypt_left_str`) under a padding policy, which the harness
+# uses (the default). Padded with NUL bytes, a string that ends in NUL would
+# encrypt the same as the string without it, so it must be refused. The
+# function branches once, on whether the last byte is NUL, and returns a
+# constant on each path, so the branch reveals only whether the encryption is
+# refused. It is `#[inline(never)]`, and its frame is
+# `ore_rs::scheme::chained::refuse_trailing_nul`.
+
+{
+   chained-trailing-nul: one branch on whether a padded string ends in NUL
+   Memcheck:Cond
+   fun:*chained*refuse_trailing_nul*
 }

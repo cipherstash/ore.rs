@@ -207,6 +207,8 @@ fn tainted_str(buf: &mut [u8; 17]) -> &str {
     unsafe { std::str::from_utf8_unchecked(buf) }
 }
 
+/// The chained cipher with the default string padding, so the string modes
+/// cover the padding path, including the trailing-NUL check.
 fn chained() -> OreAes128Bit6ChainedChaCha20 {
     let (mut k1, _) = keys();
     taint(&mut k1);
