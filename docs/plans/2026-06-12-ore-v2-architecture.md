@@ -238,7 +238,9 @@ A new fixed-N scheme instantiating `(Bit6, Packed, fixed-N)`:
   `u64` (11 six-bit blocks) packs `11 prefix bytes + xt + index = 13 ≤ 16`. The packed
   construction caps Bit6 at **14 blocks** (= 10 plaintext bytes), which covers every
   primitive up to 64-bit and dates, but **not** `u128`/`i128` (22 blocks) or `Decimal`
-  (19 blocks) — those remain on the 8-bit scheme (or wait for the chained prefix, §5).
+  (19 blocks). `Decimal` (14 bytes) remains on the 8-bit scheme until the chained prefix
+  (§5). `u128`/`i128` (16 bytes) fit neither: the 8-bit scheme puts the block index at
+  byte `N` of its left-tag input, so it takes at most 15 bytes and panics on 16.
   This constraint must be a compile-time assertion.
 - **Naming:** new module `scheme::bit2_w6` exposing `OreAes128Bit6ChaCha20` (exact name
   bikesheddable in the PR). The existing `scheme::bit2` module and types are untouched.

@@ -11,8 +11,9 @@
 //! The packed prefix caps `N` at 14 (`prefix ≤ 13 ‖ value ‖ index` plus
 //! the block count in byte 15 must fit one AES block; seeds also use byte
 //! 14 for the block index), which covers all
-//! primitives up to 64 bits. `u128`/`i128`/`Decimal` stay on the legacy
-//! scheme until the chained-prefix construction lands (plan §5).
+//! primitives up to 64 bits. `Decimal` stays on the legacy scheme until the
+//! chained-prefix construction lands (plan §5). `u128`/`i128` fit neither:
+//! the legacy scheme takes at most 15 bytes and panics on 16.
 //!
 //! **Status: wire format NOT yet frozen.** The Z2 hash is the fixed-π MMO
 //! construction proposed in plan §6 (option 3), pending crypto review;
