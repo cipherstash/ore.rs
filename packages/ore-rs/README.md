@@ -72,6 +72,16 @@ examples get hardware AES); the flag is per-final-binary, so downstream
 projects need it in their own build configuration. x86_64 AES-NI is
 auto-detected and needs no flag.
 
+A `RUSTFLAGS` environment variable (common in CI, Docker and dev shells)
+replaces the `rustflags` in `.cargo/config.toml`, so the flag can disappear
+without any error. To catch that, assert `ore_rs::hardware_aes()` at
+startup or in a test: it returns `true` only when the build will use
+hardware AES on the current CPU.
+
+`aes` 0.9 removes the need for this flag, but on aarch64 it is currently
+2–2.5x slower per AES call than 0.8 with the flag, so ore-rs stays on 0.8
+for now. See `docs/benchmarks/2026-10-12-aes-0.9-results.md`.
+
 ## Security
 
 The underlying scheme (Lewi-Wu Block-ORE) has been well studied, but this implementation has not had a public third-party audit. Evaluate it against your own threat model before using it in production.
