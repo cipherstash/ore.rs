@@ -18,6 +18,16 @@
 //! matches throughout, the shorter sorts first. A comparison reveals the
 //! common-prefix length.
 //!
+//! **Every ciphertext reveals the exact length of its plaintext.** The header
+//! stores the block count, and the size is `4 + 25*count + 16` bytes for a
+//! full ciphertext (`4 + 17*count` for a left). For a string of `n` UTF-8
+//! bytes, `count = ⌈8n/6⌉`, which is strictly increasing in `n`, so one
+//! ciphertext gives `n` exactly, with no comparison or query. The right half
+//! alone is `count * 8` bytes, so right-only storage would not hide it either.
+//! Padding to a length bucket needs a pad symbol below every real symbol, a
+//! 65-value domain and a wire-format change:
+//! <https://github.com/cipherstash/ore.rs/issues/104>.
+//!
 //! **Stored rows compare offline.** A full ciphertext carries its
 //! deterministic left half (`xt`, `f`), so anyone holding two stored full
 //! ciphertexts can run `compare_raw_slices` with no
@@ -335,13 +345,17 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
 
     /// Encrypt a string (UTF-8 bytes → MSB-first 6-bit blocks). Strings
     /// longer than [`MAX_STR_BYTES`] return [`OreError::TooManyBlocks`].
-
+    ///
+    /// The ciphertext reveals the string's exact UTF-8 byte length, as well
+    /// as the order and common-prefix length that comparisons reveal; see
+    /// the module docs.
     pub fn encrypt_str(&self, s: &str) -> Result<VarCipherText, OreError> {
         stack::scrubbed(|| self.encrypt_var_unscrubbed(&str_to_blocks(s)?))
     }
 
     /// Left-only string ciphertext. Strings longer than [`MAX_STR_BYTES`]
-    /// return [`OreError::TooManyBlocks`].
+    /// return [`OreError::TooManyBlocks`]. Like [`Self::encrypt_str`], it
+    /// reveals the string's exact length.
     pub fn encrypt_left_str(&self, s: &str) -> Result<VarLeft, OreError> {
         stack::scrubbed(|| self.encrypt_left_var_unscrubbed(&str_to_blocks(s)?))
     }

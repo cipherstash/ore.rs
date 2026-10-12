@@ -374,7 +374,22 @@ length of the common prefix**, which is materially more revealing than for fixed
 numerics. But this leakage is scoped to the **comparison operation**, not to stored
 data, because Lewi-Wu is a left/right scheme: a comparison is only ever evaluated
 between a left ciphertext and a right ciphertext, and a right ciphertext in isolation
-reveals nothing about order. Three threat tiers follow:
+reveals nothing about order. It does reveal **length**, below.
+
+**Every ciphertext reveals the exact plaintext length** (review of #83). The header
+stores the block count, the ciphertext size is `4 + 25*count + 16` bytes (`4 + 17*count`
+for a left), and for a string of `n` UTF-8 bytes `count = ⌈8n/6⌉`, strictly increasing
+in `n`. So one ciphertext, full, left or right alone (`count * 8` bytes), gives `n`
+exactly, with no comparison or query. Short, low-entropy columns (country codes,
+statuses, first names) are often unique or nearly unique by length, and length plus
+common-prefix length is a strong frequency-analysis signal. Hiding it needs padding to
+a length bucket (Padmé, or a fixed maximum per column). Padding must keep order, so the
+pad symbol must sort below every real symbol: a 65-value domain, which changes the PRP
+domain and the wire format. Tracked in
+[#104](https://github.com/cipherstash/ore.rs/issues/104); decide it before ore-v2 freezes
+the chained wire format, or it needs a new scheme id. Until then, the string leakage
+profile is **exact length, plus order and common-prefix length**. Three threat tiers
+follow for the order and prefix leakage (length leaks in all of them):
 
 - **Offline / at rest:** right ciphertexts are semantically secure, so right-only
   storage would make this tier clean: an attacker holding only rights recovers
@@ -605,7 +620,8 @@ PR 2's trait change, which should be called out in the changelog).
 - [ ] Accumulator chain state treated as key material: zeroized, never serialized,
       never reachable from `Left`/`Right` types (PR 6).
 - [ ] GF(2^128) doubling constant-time, if Candidate C is chosen (PR 6).
-- [ ] String leakage profile documented and acknowledged at product level. Stored
+- [ ] String leakage profile documented and acknowledged at product level. Every
+      ciphertext reveals the exact plaintext length (padding tracked in #104). Stored
       full ciphertexts compare offline, revealing order and common-prefix length, as
       legacy does, until right-only storage is supported (#99); see §5(b) (PR 6).
 - [ ] Legacy zero-run seed leakage (Context, "Known leakage of the legacy scheme")
