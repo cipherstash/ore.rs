@@ -31,16 +31,16 @@ use std::cmp::Ordering;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use subtle_ng::{Choice, ConditionallySelectable, ConstantTimeEq};
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
-use aes::Aes128;
+use aes::Aes128Enc;
 
 use crate::ciphertext::{parse_header, ParseError};
 use crate::primitives::cmac::{final_block, prefix_block, Branch, CmacAccumulator, WIDTH_BIT6};
 use crate::primitives::hash::FixedPiZ2Hash;
 use crate::primitives::prp::LemireFyPrp;
-use crate::primitives::{AesBlock, Hash, HashKey, Prp};
+use crate::primitives::{stack, AesBlock, Hash, HashKey, Prp};
 use crate::scheme::decompose::{decompose_6bit, num_blocks_6bit};
 use crate::scheme::width::{ct_assign_bytes, ct_bit, ct_select_byte};
 use crate::OreError;
@@ -199,7 +199,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     /// (spec §3), so there is no second key. The accumulator key is `k1` run
     /// through a labelled AES call for domain separation.
     pub fn init(k1: &[u8; 16]) -> Result<Self, OreError> {
-        let cipher = Aes128::new(GenericArray::from_slice(k1));
+        let cipher = Aes128Enc::new(GenericArray::from_slice(k1));
         let mut k_acc = ACC_KEY_LABEL;
         cipher.encrypt_block(GenericArray::from_mut_slice(&mut k_acc));
         Ok(Self {
@@ -226,6 +226,19 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
 
     /// Full Left+Right ciphertext for `x` (one 6-bit symbol per element).
     pub fn encrypt_var(&self, x: &[u8]) -> Result<VarCipherText, OreError> {
+        stack::scrubbed(|| self.encrypt_var_unscrubbed(x))
+    }
+
+    /// Left-only ciphertext (smaller; for query plaintexts).
+    pub fn encrypt_left_var(&self, x: &[u8]) -> Result<VarLeft, OreError> {
+        stack::scrubbed(|| self.encrypt_left_var_unscrubbed(x))
+    }
+
+    /// [`Self::encrypt_var`] without the stack scrub. Every caller runs it
+    /// inside [`stack::scrubbed`]: building a block's PRP and running the
+    /// accumulator leave their secrets in dead stack (see
+    /// `primitives::stack`).
+    fn encrypt_var_unscrubbed(&self, x: &[u8]) -> Result<VarCipherText, OreError> {
         let count = x.len();
         debug_assert!(x.iter().all(|&b| (b as usize) < DOMAIN));
         if count > u16::MAX as usize {
@@ -291,8 +304,9 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         })
     }
 
-    /// Left-only ciphertext (smaller; for query plaintexts).
-    pub fn encrypt_left_var(&self, x: &[u8]) -> Result<VarLeft, OreError> {
+    /// [`Self::encrypt_left_var`] without the stack scrub; see
+    /// [`Self::encrypt_var_unscrubbed`].
+    fn encrypt_left_var_unscrubbed(&self, x: &[u8]) -> Result<VarLeft, OreError> {
         let count = x.len();
         debug_assert!(x.iter().all(|&b| (b as usize) < DOMAIN));
         if count > u16::MAX as usize {
@@ -321,14 +335,15 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
 
     /// Encrypt a string (UTF-8 bytes → MSB-first 6-bit blocks). Strings
     /// longer than [`MAX_STR_BYTES`] return [`OreError::TooManyBlocks`].
+
     pub fn encrypt_str(&self, s: &str) -> Result<VarCipherText, OreError> {
-        self.encrypt_var(&str_to_blocks(s)?)
+        stack::scrubbed(|| self.encrypt_var_unscrubbed(&str_to_blocks(s)?))
     }
 
     /// Left-only string ciphertext. Strings longer than [`MAX_STR_BYTES`]
     /// return [`OreError::TooManyBlocks`].
     pub fn encrypt_left_str(&self, s: &str) -> Result<VarLeft, OreError> {
-        self.encrypt_left_var(&str_to_blocks(s)?)
+        stack::scrubbed(|| self.encrypt_left_var_unscrubbed(&str_to_blocks(s)?))
     }
 
     /// Compare two serialised full ciphertexts (lexicographic; shorter prefix
@@ -446,14 +461,15 @@ const _: () = assert!(num_blocks_6bit(MAX_STR_BYTES) <= u16::MAX as usize);
 const _: () = assert!(num_blocks_6bit(MAX_STR_BYTES + 1) > u16::MAX as usize);
 
 /// Decompose `s` into 6-bit blocks, refusing a string too long for the wire
-/// format *before* allocating or decomposing it.
-fn str_to_blocks(s: &str) -> Result<Vec<u8>, OreError> {
+/// format *before* allocating or decomposing it. The decomposition is the
+/// whole plaintext (it inverts), so the buffer is wiped when dropped.
+fn str_to_blocks(s: &str) -> Result<Zeroizing<Vec<u8>>, OreError> {
     let bytes = s.as_bytes();
     if bytes.len() > MAX_STR_BYTES {
         return Err(OreError::TooManyBlocks);
     }
     let nb = num_blocks_6bit(bytes.len());
-    let mut blocks = vec![0u8; nb];
+    let mut blocks = Zeroizing::new(vec![0u8; nb]);
     if nb > 0 {
         decompose_6bit(bytes, &mut blocks);
     }
@@ -714,5 +730,76 @@ mod tests {
                 Err(_) => false,
             }
         }
+    }
+
+    /// Every block's PRP tables for `s`, which must not survive an
+    /// encryption in dead stack (review of #82 and #83).
+    fn block_tables(ore: &OreAes128Bit6ChainedChaCha20, s: &str) -> Vec<Vec<u8>> {
+        let blocks = str_to_blocks(s).unwrap();
+        let mut acc = CmacAccumulator::new(&ore.k_acc);
+        let mut needles = Vec::new();
+        for (n, &sym) in blocks.iter().enumerate() {
+            let prp = ore.prp_at(&acc, n as u16).unwrap();
+            needles.push((0..64).map(|i| prp.permute(i).unwrap()).collect());
+            needles.push((0..64).map(|i| prp.invert(i).unwrap()).collect());
+            acc.absorb(&prefix_block(n as u16, sym));
+        }
+        needles
+    }
+
+    fn assert_no_block_tables(
+        encrypt: fn(&OreAes128Bit6ChainedChaCha20, &str),
+        unscrubbed: fn(&OreAes128Bit6ChainedChaCha20, &str),
+    ) {
+        use crate::primitives::stack::{residue, SCRUB_BYTES};
+        const S: &str = "a chained residue test string";
+        let needles = block_tables(&ore(), S);
+
+        // Positive control and depth, as in the Bit6 residue tests.
+        let dead = residue::after(move || unscrubbed(&ore(), S));
+        assert!(needles.iter().any(|n| residue::contains(&dead, n)));
+        let depth = residue::depth(&dead);
+        assert!(
+            depth < SCRUB_BYTES,
+            "encryption reached {} bytes of stack, past the {}-byte scrub",
+            depth,
+            SCRUB_BYTES
+        );
+
+        let dead = residue::after(move || encrypt(&ore(), S));
+        for (i, needle) in needles.iter().enumerate() {
+            assert!(
+                !residue::contains(&dead, needle),
+                "block {} {} left in dead stack",
+                i / 2,
+                ["permutation", "inverse"][i % 2]
+            );
+        }
+    }
+
+    #[test]
+    fn encrypt_str_leaves_no_prp_tables_on_the_stack() {
+        assert_no_block_tables(
+            |ore, s| {
+                core::hint::black_box(ore.encrypt_str(s).unwrap());
+            },
+            |ore, s| {
+                let blocks = str_to_blocks(s).unwrap();
+                core::hint::black_box(ore.encrypt_var_unscrubbed(&blocks).unwrap());
+            },
+        );
+    }
+
+    #[test]
+    fn encrypt_left_str_leaves_no_prp_tables_on_the_stack() {
+        assert_no_block_tables(
+            |ore, s| {
+                core::hint::black_box(ore.encrypt_left_str(s).unwrap());
+            },
+            |ore, s| {
+                let blocks = str_to_blocks(s).unwrap();
+                core::hint::black_box(ore.encrypt_left_var_unscrubbed(&blocks).unwrap());
+            },
+        );
     }
 }

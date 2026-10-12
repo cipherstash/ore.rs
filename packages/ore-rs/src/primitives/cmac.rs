@@ -13,7 +13,7 @@
 
 use crate::primitives::hash::gf128_double_u128;
 use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
-use aes::Aes128;
+use aes::Aes128Enc;
 use zeroize::Zeroize;
 
 /// Block-width tag in the final block (domain separation; see the spec §4).
@@ -63,7 +63,7 @@ pub(crate) fn final_block(branch: Branch, n: u16, s: u16, width: u8) -> [u8; 16]
 /// produces the CMAC tag of `prefix ‖ final_block` without mutating the chain;
 /// [`absorb`](Self::absorb) extends the prefix.
 pub(crate) struct CmacAccumulator {
-    cipher: Aes128,
+    cipher: Aes128Enc,
     k1: [u8; 16],
     state: [u8; 16],
 }
@@ -72,7 +72,8 @@ impl CmacAccumulator {
     /// Schedule AES under `key`, derive `K1 = dbl(E_k(0))`, and start the chain
     /// at the all-zero CBC IV (empty prefix).
     pub(crate) fn new(key: &[u8; 16]) -> Self {
-        let cipher = Aes128::new(GenericArray::from_slice(key));
+        // Encryption only: CMAC never decrypts, so build no decryption schedule.
+        let cipher = Aes128Enc::new(GenericArray::from_slice(key));
         let mut acc = Self {
             cipher,
             k1: [0u8; 16],
@@ -202,7 +203,7 @@ mod tests {
     /// NIST construction without reusing the accumulator's state threading, so
     /// it can validate that threading for any block count (not just t∈{1,4}).
     fn reference_cmac(key: &[u8; 16], blocks: &[[u8; 16]]) -> [u8; 16] {
-        let cipher = Aes128::new(GenericArray::from_slice(key));
+        let cipher = aes::Aes128::new(GenericArray::from_slice(key));
         let enc = |mut b: [u8; 16]| {
             cipher.encrypt_block(GenericArray::from_mut_slice(&mut b));
             b
