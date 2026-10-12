@@ -1,0 +1,25 @@
+# dudect timing-leakage benches for the v2 ORE comparators and encryptors.
+#
+# DETACHED crate (own `[workspace]` table): it is run by hand on a quiet
+# machine and its results are recorded in the docs, not gated in CI, because a
+# t-test over wall-clock timings is too noisy on shared runners. Run with
+#   cargo run --release -- --continuous
+# or a single bench by name; see src/main.rs for the classes each bench
+# compares.
+[package]
+name = "ct-dudect"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[dependencies]
+dudect-bencher = "0.7"
+
+
+[dependencies.ore-rs]
+path = "../ore-rs"
+# `ct-bench` exposes the private PRP builder for the isolated bench.
+features = ["ct-bench"]
+
+[workspace]
+resolver = "2"

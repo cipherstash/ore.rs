@@ -3,9 +3,10 @@ on:
   push:
     branches:
       - main
+  # Run on every pull request regardless of base branch, so stacked PRs that
+  # target a feature/integration branch (e.g. the ore-v2 stack) get CI too —
+  # not only PRs into `main`.
   pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
 defaults:
@@ -14,8 +15,19 @@ defaults:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    name: "🧪 Test"
+    # Both architectures: aarch64 runs hardware AES (`--cfg aes_armv8`), the
+    # NEON kernels and the NEON PRP builder, which x86_64 never reaches, against
+    # the same pinned vectors.
+    runs-on: ${{ matrix.os }}
+    name: "🧪 Test (${{ matrix.arch }})"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x86_64
+          - os: ubuntu-24.04-arm
+            arch: aarch64
 
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +40,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: setup rust 1.78
         uses: dtolnay/rust-toolchain@1.78.0
@@ -43,6 +55,11 @@ jobs:
 
       - name: test
         run: cargo test --all-features
+
+      # `ct_bench` and its tests compile only with this feature; the clippy
+      # step above builds them but never runs them.
+      - name: test (ct-bench)
+        run: cargo test -p ore-rs --features ct-bench --lib ct_bench
 
   bench:
     runs-on: ubuntu-latest

@@ -7,20 +7,19 @@
 use crate::{
     ciphertext::*,
     primitives::{
-        hash::Aes128Z2Hash, prf::Aes128Prf, prp::KnuthShufflePRP, AesBlock, Hash, HashKey, Prf,
-        Prp, NONCE_SIZE,
+        hash::Aes128Z2Hash, prf::Aes128Prf, AesBlock, Hash, HashKey, Prf, Prp, Symbol, NONCE_SIZE,
     },
+    scheme::width::{AesBlockBuf, Bit8, BlockWidth, FirstDiff, RightBitVec},
     OreCipher, OreError, PlainText,
 };
 
 use aes::cipher::generic_array::GenericArray;
-use lazy_static::lazy_static;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use subtle_ng::{Choice, ConditionallySelectable, ConstantTimeEq};
-use zeroize::ZeroizeOnDrop;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Per-block ciphertext component types ([`LeftBlock16`], [`RightBlock32`])
 /// used by this scheme.
@@ -31,12 +30,20 @@ pub use self::block_types::*;
 /// nonces. The two PRF instances are keyed at construction; the RNG is held
 /// in a `RefCell` so encryption can take `&self` while still drawing fresh
 /// randomness. Keys are zeroised on drop.
-#[derive(Debug, ZeroizeOnDrop)]
+#[derive(ZeroizeOnDrop)]
 pub struct OreAes128<R: Rng + SeedableRng> {
     prf1: Aes128Prf,
     prf2: Aes128Prf,
     #[zeroize(skip)]
     rng: RefCell<R>,
+}
+
+// Opaque Debug: never render key material. (`Aes128`'s own Debug is already
+// opaque, but spell it out so the guarantee can't regress.)
+impl<R: Rng + SeedableRng> std::fmt::Debug for OreAes128<R> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OreAes128").finish_non_exhaustive()
+    }
 }
 
 /// Convenience alias for [`OreAes128`] backed by `ChaCha20Rng` — the RNG
@@ -47,8 +54,82 @@ pub type OreAes128ChaCha20 = OreAes128<ChaCha20Rng>;
 type EncryptLeftResult<R, const N: usize> = Result<Left<OreAes128<R>, N>, OreError>;
 type EncryptResult<R, const N: usize> = Result<CipherText<OreAes128<R>, N>, OreError>;
 
-fn cmp(a: u8, b: u8) -> u8 {
-    u8::from(a > b)
+/// Derive the per-block PRP seeds for `x` under `prf2`: seed `n` is
+/// `PRF₂(x[0..n] ‖ 0…)`. The seeds are **key-equivalent material** — anyone
+/// holding seed `n` can rebuild that block's permutation and invert `xt[n]`
+/// — so they live in their own buffer, never in the (serialisable) `Left`,
+/// and the caller must consume them via [`SeedBuf`]'s zeroize-on-drop.
+struct SeedBuf<const N: usize>([AesBlock; N]);
+
+impl<const N: usize> Drop for SeedBuf<N> {
+    fn drop(&mut self) {
+        for seed in self.0.iter_mut() {
+            seed.zeroize();
+        }
+    }
+}
+
+fn derive_prp_seeds<const N: usize>(prf2: &Aes128Prf, x: &PlainText<N>) -> SeedBuf<N> {
+    let mut seeds = [AesBlock::default(); N];
+    for (n, block) in seeds.iter_mut().enumerate() {
+        block[0..n].clone_from_slice(&x[0..n]);
+        // Known leakage, kept because the wire format is frozen: the seed
+        // input binds neither the block index nor the block count, so the
+        // seeds for blocks n < m are equal when x[n..m] is all zero. Those
+        // blocks share one permutation, so a zero run repeats π(0) in `xt`
+        // and a single Left ciphertext shows it. See "Known leakage of the
+        // legacy scheme" in the v2 plan. New schemes bind the block index
+        // and count into the seed:
+        // https://github.com/cipherstash/ore.rs/pull/82
+    }
+    prf2.encrypt_all(&mut seeds);
+    SeedBuf(seeds)
+}
+
+/// Build the right-ciphertext bitvector for one block: for every candidate
+/// value `j`, bit `j` is `(π⁻¹(j) > x) ⊕ h[j]`.
+///
+/// Bulk form (v2 plan §2): the hash bits are packed straight into the
+/// block's bitvector, then the PRP XORs its indicator mask over the top in
+/// one linear pass of its inverse table — no per-bit `invert` lookups, no
+/// heap allocation. `ro_blocks` holds the PRF₁-encrypted RO keys and is
+/// trashed by the hash pass.
+pub(crate) fn encode_right_block<W: BlockWidth, H: Hash>(
+    block: &mut W::RightBlock,
+    prp: &W::Prp,
+    x: W::Symbol,
+    hasher: &H,
+    ro_blocks: &mut [AesBlock],
+) {
+    debug_assert_eq!(ro_blocks.len(), W::DOMAIN);
+    let out = block.as_mut_bytes();
+    hasher.hash_all_into(ro_blocks, out);
+    prp.indicator_mask_xor(x, out);
+}
+
+impl<R: Rng + SeedableRng> OreAes128<R> {
+    /// Fill `left` with the PRF₁ tag inputs and permuted values for `x`,
+    /// using the given PRP seeds. After this returns, `left.f[n]` holds the
+    /// *unencrypted* tag input `(x[0..n] ‖ xt[n] ‖ n)`; the caller runs the
+    /// final PRF₁ pass once any other use of the inputs (the RO key
+    /// template) is done.
+    fn build_left<const N: usize>(
+        &self,
+        left: &mut Left<Self, N>,
+        seeds: &SeedBuf<N>,
+        x: &PlainText<N>,
+    ) -> Result<(), OreError> {
+        for n in 0..N {
+            let prp: <Bit8 as BlockWidth>::Prp = Prp::new(&seeds.0[n])?;
+            left.xt[n] = prp.permute(Symbol::from(x[n])).get();
+
+            left.f[n][0..n].clone_from_slice(&x[0..n]);
+            left.f[n][n] = left.xt[n];
+            // Include the block number in the value passed to the Random Oracle
+            left.f[n][N] = n as u8;
+        }
+        Ok(())
+    }
 }
 
 impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
@@ -71,37 +152,8 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
     fn encrypt_left<const N: usize>(&self, x: &PlainText<N>) -> EncryptLeftResult<R, N> {
         let mut output = Left::<Self, N>::init();
 
-        // Build the prefixes
-        // TODO: Don't modify struct values directly - use a function on a "Left" trait
-        output.f.iter_mut().enumerate().for_each(|(n, block)| {
-            block[0..n].clone_from_slice(&x[0..n]);
-            // TODO: Include the block number in the prefix to avoid repeating values for common
-            // blocks in a long prefix
-            // e.g. when plaintext is 4700 (2-bytes/blocks)
-            // xt = [17, 17, 17, 17, 17, 17, 223, 76]
-        });
-
-        self.prf2.encrypt_all(&mut output.f);
-
-        for (n, xn) in x.iter().enumerate().take(N) {
-            // Set prefix and create PRP for the block
-            let prp: KnuthShufflePRP<u8, 256> = Prp::new(&output.f[n])?;
-
-            output.xt[n] = prp.permute(*xn)?;
-        }
-
-        // Reset the f block
-        // We don't actually need to clear sensitive data here, we
-        // just need fast "zero set". Reassigning the value will drop the old one and allocate new
-        // data to the stack
-        output.f = [Default::default(); N];
-
-        for n in 0..N {
-            output.f[n][0..n].clone_from_slice(&x[0..n]);
-            output.f[n][n] = output.xt[n];
-            // Include the block number in the value passed to the Random Oracle
-            output.f[n][N] = n as u8;
-        }
+        let seeds = derive_prp_seeds(&self.prf2, x);
+        self.build_left(&mut output, &seeds, x)?;
         self.prf1.encrypt_all(&mut output.f);
 
         Ok(output)
@@ -114,73 +166,69 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
         // Generate a 16-byte random nonce
         self.rng.borrow_mut().try_fill(&mut right.nonce)?;
 
-        // Build the prefixes
-        // TODO: Don't modify struct values directly - use a function on a "Left"
-        left.f.iter_mut().enumerate().for_each(|(n, block)| {
-            block[0..n].clone_from_slice(&x[0..n]);
-        });
+        let seeds = derive_prp_seeds(&self.prf2, x);
 
-        self.prf2.encrypt_all(&mut left.f);
+        /* TODO: This seems to work but it is technically using the nonce as the key
+         * (instead of using it as the plaintext). This appears to be how the original
+         * ORE implementation does it but it feels a bit wonky to me.
+         * Alternatives are catalogued in the v2 plan §6 and will be settled
+         * there for new schemes; this scheme keeps the construction for
+         * wire compatibility.
+         */
+        let hasher: Aes128Z2Hash = Hash::new(AesBlock::from_slice(&right.nonce));
 
-        // To make zeroizing / resetting the RO keys
-        // Since the AesBlock type is stack allocated this should get optimised to a single memcpy
-        lazy_static! {
-            static ref ZEROED_RO_KEYS: [AesBlock; 256] = [Default::default(); 256];
+        // RO key template: entry `j` of the template holds the *input*
+        // `(x[0..n] ‖ j ‖ n)` for the current block. Between blocks only
+        // three bytes per entry change (the prefix byte just fixed, the
+        // candidate byte position, and the block index), so the template is
+        // maintained incrementally; `work` receives a copy each block for
+        // the in-place PRF/hash passes. Template and work hold secret
+        // intermediate state and are zeroized at the end.
+        let mut template = <Bit8 as BlockWidth>::RoKeyBuf::zeroed();
+        for (j, entry) in template.iter_mut().enumerate() {
+            entry[0] = j as u8;
         }
-
-        let mut ro_keys = *ZEROED_RO_KEYS;
+        let mut work = <Bit8 as BlockWidth>::RoKeyBuf::zeroed();
 
         for n in 0..N {
-            // Set prefix and create PRP for the block
-            let prp: KnuthShufflePRP<u8, 256> = Prp::new(&left.f[n])?;
-
-            left.xt[n] = prp.permute(x[n])?;
-
-            // Reset the f block
-            left.f[n].default_in_place();
+            let prp: <Bit8 as BlockWidth>::Prp = Prp::new(&seeds.0[n])?;
+            left.xt[n] = prp.permute(Symbol::from(x[n])).get();
 
             left.f[n][0..n].clone_from_slice(&x[0..n]);
             left.f[n][n] = left.xt[n];
             // Include the block number in the value passed to the Random Oracle
             left.f[n][N] = n as u8;
 
-            for (j, ro_key) in ro_keys.iter_mut().enumerate() {
-                /*
-                 * The output of F in H(F(k1, y|i-1||j), r)
-                 */
-                ro_key[0..n].clone_from_slice(&x[0..n]);
-                ro_key[n] = j as u8;
-                ro_key[N] = n as u8;
+            if n > 0 {
+                // Extend the prefix over the previous candidate position and
+                // move the candidate byte and block index along.
+                for (j, entry) in template.iter_mut().enumerate() {
+                    entry[n - 1] = x[n - 1];
+                    entry[n] = j as u8;
+                    entry[N] = n as u8;
+                }
             }
 
-            self.prf1.encrypt_all(&mut ro_keys);
+            work.copy_from(&template);
+            self.prf1.encrypt_all(work.as_mut_slice());
 
-            /* TODO: This seems to work but it is technically using the nonce as the key
-             * (instead of using it as the plaintext). This appears to be how the original
-             * ORE implementation does it but it feels a bit wonky to me. Should check with David.
-             * It is useful though because the AES crate makes it easy to encrypt groups of 8
-             * plaintexts under the same key. We really want the ability to encrypt the same
-             * plaintext (i.e. the nonce) under different keys but this may be an acceptable
-             * approximation.
-             *
-             * If not, we will probably need to implement our own parallel encrypt using intrisics
-             * like in the AES crate: https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/ni/aes128.rs#L26
-             */
-            let hasher: Aes128Z2Hash = Hash::new(AesBlock::from_slice(&right.nonce));
-            let hashes = hasher.hash_all(&mut ro_keys);
-
-            // FIXME: force casting to u8 from usize could cause a panic
-            for (j, h) in hashes.iter().enumerate() {
-                let jstar = prp.invert(j as u8)?;
-                let indicator = cmp(jstar, x[n]);
-                right.data[n].set_bit(j, indicator ^ h);
-            }
-
-            // Zeroize / reset the RO keys before the next loop iteration
-            ro_keys.clone_from_slice(&*ZEROED_RO_KEYS);
+            encode_right_block::<Bit8, _>(
+                &mut right.data[n],
+                &prp,
+                Symbol::from(x[n]),
+                &hasher,
+                &mut work,
+            );
         }
 
         self.prf1.encrypt_all(&mut left.f);
+
+        for entry in template.iter_mut() {
+            entry.zeroize();
+        }
+        for entry in work.as_mut_slice() {
+            entry.zeroize();
+        }
 
         Ok(CipherText { left, right })
     }
@@ -192,41 +240,60 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
         let left_size = Self::LeftBlockType::BLOCK_SIZE;
         let right_size = Self::RightBlockType::BLOCK_SIZE;
 
-        // TODO: This calculation slows things down a bit - maybe store the number of blocks in the
-        // first byte?
-        let num_blocks = (a.len() - NONCE_SIZE) / (left_size + right_size + 1);
+        // The legacy wire has no header: the block count is implied by the
+        // length, `n·(1 + left + right) + nonce`. Anything that does not fit
+        // that shape exactly (too short for a nonce, or a partial block) is
+        // not a ciphertext of this scheme, and the slicing below would panic
+        // on it. A nonce-only input is the valid `N = 0` ciphertext, which
+        // `CipherText::<_, 0>::from_slice` also accepts; it compares Equal.
+        let body = a.len().checked_sub(NONCE_SIZE)?;
+        let per_block = left_size + right_size + 1;
+        if body % per_block != 0 {
+            return None;
+        }
+        let num_blocks = body / per_block;
 
         let mut is_equal = Choice::from(1);
-        let mut l: u64 = 0; // Unequal block
+        // What the resolution step needs from the first differing block `l`:
+        // `a`'s permuted symbol and PRF tag, and `b`'s right bitvector. All
+        // three are latched *inside* the scan, under the choice "this is the
+        // first difference", so no load after the loop is indexed by `l`.
+        // The right blocks are the one region the scan would otherwise never
+        // touch, so a direct `right[l]` afterwards hits or misses the cache
+        // according to `l`; measured as a timing signal, see `docs/reviews/`.
+        // The wire format is unchanged.
+        let mut diff = FirstDiff::<{ RightBlock32::BLOCK_SIZE }>::new();
 
-        // Slices for the PRF ("f") blocks
+        // Slices for the PRF ("f") blocks and the right half.
         let a_f = &a[num_blocks..];
         let b_f = &b[num_blocks..];
+        let b_right = &b[num_blocks * (left_size + 1)..];
+        let b_right_blocks = &b_right[NONCE_SIZE..];
 
         for n in 0..num_blocks {
             let prp_eq: Choice = !a[n].ct_eq(&b[n]);
             let left_block_comparison: Choice = !left_block(a_f, n).ct_eq(left_block(b_f, n));
             let condition: Choice = prp_eq | left_block_comparison;
+            // Set for exactly one `n`: the first differing block.
+            let first = is_equal & condition;
 
-            l.conditional_assign(&(n as u64), is_equal & condition);
-            is_equal.conditional_assign(&Choice::from(0), is_equal & condition);
+            diff.latch(
+                a[n],
+                left_block(a_f, n),
+                right_block(b_right_blocks, n),
+                first,
+            );
+            is_equal.conditional_assign(&Choice::from(0), first);
         }
-
-        let l: usize = l as usize;
 
         if bool::from(is_equal) {
             return Some(Ordering::Equal);
         }
 
-        let b_right = &b[num_blocks * (left_size + 1)..];
         let hash_key = HashKey::from_slice(&b_right[0..NONCE_SIZE]);
         let hash: Aes128Z2Hash = Hash::new(hash_key);
-        let h = hash.hash(left_block(a_f, l));
 
-        let target_block = right_block(&b_right[NONCE_SIZE..], l);
-        let test = get_bit(target_block, a[l] as usize) ^ h;
-
-        if test == 1 {
+        if diff.resolve(&hash) == 1 {
             return Some(Ordering::Greater);
         }
 
@@ -247,17 +314,6 @@ fn right_block(input: &[u8], n: usize) -> &[u8] {
     &input[f_pos..(f_pos + RightBlock32::BLOCK_SIZE)]
 }
 
-#[inline]
-fn get_bit(block: &[u8], bit: usize) -> u8 {
-    debug_assert!(block.len() == RightBlock32::BLOCK_SIZE);
-    debug_assert!(bit < 256);
-    let byte_index = bit / 8;
-    let position = bit % 8;
-    let v = 1 << position;
-
-    (block[byte_index] & v) >> position
-}
-
 impl<const N: usize> PartialEq for CipherText<OreAes128ChaCha20, N> {
     fn eq(&self, b: &Self) -> bool {
         matches!(self.cmp(b), Ordering::Equal)
@@ -267,27 +323,32 @@ impl<const N: usize> PartialEq for CipherText<OreAes128ChaCha20, N> {
 impl<const N: usize> Ord for CipherText<OreAes128ChaCha20, N> {
     fn cmp(&self, b: &Self) -> Ordering {
         let mut is_equal = Choice::from(1);
-        let mut l: u64 = 0; // Unequal block
+        // Latch the first differing block during the scan, as in
+        // `compare_raw_slices`: no load after the loop is indexed by its
+        // position.
+        let mut diff = FirstDiff::<{ RightBlock32::BLOCK_SIZE }>::new();
 
         for n in 0..N {
             let condition: Choice =
                 !(self.left.xt[n].ct_eq(&b.left.xt[n])) | !(self.left.f[n].ct_eq(&b.left.f[n]));
+            // Set for exactly one `n`: the first differing block.
+            let first = is_equal & condition;
 
-            l.conditional_assign(&(n as u64), is_equal & condition);
-            is_equal.conditional_assign(&Choice::from(0), is_equal & condition);
+            diff.latch(
+                self.left.xt[n],
+                &self.left.f[n],
+                b.right.data[n].bytes(),
+                first,
+            );
+            is_equal.conditional_assign(&Choice::from(0), first);
         }
-
-        let l: usize = l as usize;
 
         if bool::from(is_equal) {
             return Ordering::Equal;
         }
 
         let hash: Aes128Z2Hash = Hash::new(AesBlock::from_slice(&b.right.nonce));
-        let h = hash.hash(&self.left.f[l]);
-
-        let test = b.right.data[l].get_bit(self.left.xt[l] as usize) ^ h;
-        if test == 1 {
+        if diff.resolve(&hash) == 1 {
             return Ordering::Greater;
         }
 
@@ -325,6 +386,44 @@ mod tests {
         rng.fill(&mut k2);
 
         OreCipher::init(&k1, &k2).unwrap()
+    }
+
+    /// The legacy wire has no header, so the comparator infers the block
+    /// count from the length. Lengths that do not fit `n·(1 + 16 + 32) + 16`
+    /// must be refused, not indexed: two empty slices used to underflow the
+    /// nonce subtraction, and a partial block to slice past the end.
+    #[test]
+    fn compare_raw_slices_refuses_malformed_lengths() {
+        let ore = init_ore();
+        let good = 42u64.encrypt(&ore).unwrap().to_bytes();
+        assert!(Ore::compare_raw_slices(&good, &good).is_some());
+
+        assert_eq!(Ore::compare_raw_slices(&[], &[]), None);
+        let short = vec![0u8; NONCE_SIZE - 1];
+        assert_eq!(Ore::compare_raw_slices(&short, &short), None);
+        let partial = &good[..good.len() - 1];
+        assert_eq!(Ore::compare_raw_slices(partial, partial), None);
+        let mut longer = good.clone();
+        longer.push(0);
+        assert_eq!(Ore::compare_raw_slices(&longer, &longer), None);
+    }
+
+    /// A zero-block plaintext encrypts to a nonce-only ciphertext. The raw
+    /// comparator must agree with the parsed one on it, not refuse it.
+    #[test]
+    fn compare_raw_slices_accepts_zero_blocks() {
+        let ore = init_ore();
+        let a = [0u8; 0].encrypt(&ore).unwrap();
+        let b = [0u8; 0].encrypt(&ore).unwrap();
+        let (a_bytes, b_bytes) = (a.to_bytes(), b.to_bytes());
+        assert_eq!(a_bytes.len(), NONCE_SIZE);
+
+        let parsed = CipherText::<Ore, 0>::from_slice(&a_bytes).unwrap();
+        assert_eq!(parsed.cmp(&b), Ordering::Equal);
+        assert_eq!(
+            Ore::compare_raw_slices(&a_bytes, &b_bytes),
+            Some(Ordering::Equal)
+        );
     }
 
     quickcheck! {
