@@ -58,9 +58,15 @@ ORE here is **Lewi-Wu (2016) small-domain "BlockORE"**, a *left/right* scheme:
 
 Leakage (for completeness, not under review): a comparison reveals the index of
 the first differing block. For strings that is common-prefix length. This is a
-property of *comparison*, not stored data — right-only-at-rest reveals nothing;
-the disclosure is query-time/online only (plan §5b, "String semantics and
-leakage").
+property of *comparison*: right ciphertexts are semantically secure (Lewi-Wu),
+so right-only storage at rest reveals nothing. **But right-only storage is not
+supported today** ([#99](https://github.com/cipherstash/ore.rs/issues/99)):
+every scheme here, legacy Bit8 included, stores full ciphertexts, and the only
+comparators (`compare_raw_slices`, `Ord` on `CipherText`) take two full
+ciphertexts. Until #99 lands, an attacker who exfiltrates the database can
+compare any two stored rows offline and learns their order and first differing
+block, with no query. This is the legacy exposure, not a regression (plan §5b,
+"String semantics and leakage").
 
 ---
 
