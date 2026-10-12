@@ -13,10 +13,13 @@
 //! dead stack for the secrets.
 
 /// Bytes of stack zeroed after each encryption. On aarch64 the Bit6 encrypt
-/// paths reach about 6 KiB in a release build and about 49 KiB in a debug
-/// build. The residue tests in each scheme measure the depth and fail if a
-/// change takes it past this.
-pub(crate) const SCRUB_BYTES: usize = if cfg!(debug_assertions) {
+/// paths reach about 49 KiB at `opt-level = 0` and at most about 6.5 KiB at
+/// every other level (1, 2, 3, `s`, `z`), with or without debug assertions.
+/// The size follows the optimisation level (set by `build.rs`), not
+/// `debug_assertions`, which a profile can turn off without optimising. The
+/// residue tests in each scheme measure the depth and fail if a change takes
+/// it past this.
+pub(crate) const SCRUB_BYTES: usize = if cfg!(ore_unoptimized) {
     96 * 1024
 } else {
     16 * 1024
