@@ -1,14 +1,18 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hex_literal::hex;
-use ore_rs::scheme::chained::{OreAes128Bit6Chained, OreAes128Bit6ChainedChaCha20};
+use ore_rs::scheme::chained::{OreAes128Bit6Chained, OreAes128Bit6ChainedChaCha20, Padding};
 
-fn init_ore() -> OreAes128Bit6ChainedChaCha20 {
+/// Unpadded, so that each bench's name gives the length it encrypts and the
+/// results compare with earlier runs. The padded benches below use the
+/// default policy.
+fn init_ore(padding: Padding) -> OreAes128Bit6ChainedChaCha20 {
     let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-    OreAes128Bit6Chained::init(&k1).unwrap()
+    OreAes128Bit6Chained::init_with_padding(&k1, padding).unwrap()
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let ore = init_ore();
+    let ore = init_ore(Padding::None);
+    let padded = init_ore(Padding::default());
 
     // Short (~8 chars ≈ 11 blocks) and long (~40 chars ≈ 54 blocks) strings.
     let short = "alice";
@@ -26,6 +30,14 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
     c.bench_function("chained-encrypt-left-str-17", |b| {
         b.iter(|| ore.encrypt_left_str(black_box(medium)).unwrap())
+    });
+
+    // The default policy pads 5 bytes to 16 and 17 bytes to 18.
+    c.bench_function("chained-encrypt-str-5-padded", |b| {
+        b.iter(|| padded.encrypt_str(black_box(short)).unwrap())
+    });
+    c.bench_function("chained-encrypt-str-17-padded", |b| {
+        b.iter(|| padded.encrypt_str(black_box(medium)).unwrap())
     });
 
     let a = ore.encrypt_str(medium).unwrap().to_bytes();
