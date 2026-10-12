@@ -11,6 +11,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Pre-release for testing with external projects. The Bit6 (`scheme::bit2_w6`) and chained
 wire formats are not frozen yet: do not store their ciphertexts until 0.9.0.
 
+### Highlights
+
+**New: `OreAes128Bit6` (`scheme::bit2_w6`), a 6-bit block scheme, recommended for new data.**
+
+- **Smaller and faster.** Plaintexts are split into 6-bit blocks, so each block costs 64
+  random-oracle evaluations instead of 256 and stores an 8-byte right block instead of 32.
+  A `u64` ciphertext is 295 bytes (legacy: 408). Encrypting a `u64` measured 8.6 µs
+  against 25.1 µs for the legacy scheme, both with hardware AES on an Apple M1 Max
+  (`docs/benchmarks/2026-06-13-bit6-prp-results.md`).
+- **Less leakage than the legacy scheme.** PRP seeds bind the block index and the block
+  count, so a ciphertext no longer reveals its runs of zero bytes (for an integer, its
+  order of magnitude). A comparison reveals the order and the first differing 6-bit block.
+- **Key separation.** PRF keys are derived from the caller's keys under scheme-specific
+  labels, so using the same keys for both schemes can't expose Bit6 masking keys
+  through legacy ciphertexts.
+- **v2 wire format.** A 4-byte header carries the format version, scheme id and block
+  count. Parsers and the raw comparator reject bad headers, lengths and out-of-domain
+  symbols instead of panicking.
+- **Side-channel hardening.** The permutation is built with no secret-dependent memory
+  addresses, table reads and the comparator are constant-time scans, and the stack an
+  encryption used is zeroed afterwards so PRP seeds and tables don't linger in memory.
+- **Coverage.** `bool`, integers up to 64 bits, `char`, `f32` and `f64` (at most 14
+  blocks). `Decimal` stays on `OreAes128`. `u128`/`i128` are supported by neither scheme
+  (#105).
+
+**New: chained-prefix scheme (`scheme::chained`) for variable-length data and strings.**
+Per-block secrets come from a CMAC accumulator over the prefix, so plaintexts aren't
+limited to 14 blocks. Every ciphertext reveals the exact plaintext length; padding is
+tracked in #104.
+
+**Legacy `OreAes128`.** Ciphertexts are byte-for-byte unchanged (pinned by compatibility
+vectors). Encryption is much faster (hardware AES on aarch64 and bulk encoding: a `u64`
+went from 381 µs to 25.1 µs in the same benchmarks), the comparator is hardened, and
+malformed input is refused. The README now documents the scheme's zero-run leakage.
+
+**Hardware AES on ARM.** On aarch64, including Apple Silicon, the `aes` crate uses
+hardware AES only when built with `--cfg aes_armv8`. Downstream projects must set it in
+their own build configuration (see the README); without it, AES falls back to software
+and is far slower.
+
 ### Benchmarks
 
 - black-box every result and input, and record the effect
