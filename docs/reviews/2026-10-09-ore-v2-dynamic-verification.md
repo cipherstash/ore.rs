@@ -20,10 +20,38 @@ each reproducible from the repository:
 ## 1. Valgrind taint — secret-dependent branches and addresses
 
 The harness marks the key and the plaintext as undefined memory and runs each
-v2 encryptor (Bit6 full and left-only, chained full and left-only). Memcheck
-then reports every conditional jump and every memory address that depends on
-them. All four modes are clean, and `packages/ct-taint/valgrind.supp` is
-empty. Two report classes came up along the way:
+v2 encryptor. Memcheck then reports every conditional jump and every memory
+address that depends on them. The modes cover:
+
+- Bit6 through `OreEncrypt`, full and left-only for `u64`, and full for `i64`,
+  `f64` and `u32`. Each type runs its own `to_orderable_bytes` transform on
+  the secret (the float's `-0.0` canonicalisation compiles to a select, not a
+  branch), and `u32` has a different block count (6, not 11).
+- Bit6's raw-block entry points, `OreCipher::encrypt` and `encrypt_left`.
+- The chained scheme, full and left-only, through `encrypt_str` and through
+  the raw-symbol `encrypt_var` and `encrypt_left_var`.
+
+The legacy `OreAes128` encryptor is out of scope. Its Knuth-shuffle PRP
+rejection-samples and swaps at secret indices by design, and its wire format
+is frozen.
+
+The typed modes are clean. The raw-block modes report one branch, in
+`Blocks6::check`, which is the one entry in `packages/ct-taint/valgrind.supp`.
+It ORs the symbols' high bits together and branches once on the result, so the
+branch reveals only whether some symbol was out of the domain, and it goes the
+same way for every well-formed input.
+
+**The gate cannot pass vacuously.** `scripts/ct-taint.sh` sets
+`CT_TAINT_GATE`, under which every taint request must succeed (exit 3
+otherwise), and each mode checks, before it untaints its output, that some of
+the output is still undefined (exit 4 otherwise). That proves on every run
+that the taint flowed from the key and the plaintext into the ciphertext. A
+`canary` mode branches on a tainted byte and indexes a table with it; the
+script requires memcheck to fail it. With crabgrind built without its
+`valgrind` feature, so that every request is a no-op, the gate fails each mode
+with exit 4 and the canary check fails as well.
+
+Two report classes came up along the way:
 
 1. **`oblivious_lookup`'s range check** (`index >= table.len()`) and its
    callers' test of the returned `Result`. A comparison on the plaintext
@@ -36,15 +64,16 @@ empty. Two report classes came up along the way:
    branch. The encryptors take their symbols from the 6-bit decomposition,
    which masks rather than checks. Callers that pass raw symbols
    (`OreCipher::encrypt` for Bit6, chained `encrypt_var`) are checked once at
-   entry by `Blocks6::check`, still returning `OreError::PrpError`; no
-   harness mode takes that path.
+   entry by `Blocks6::check`, still returning `OreError::PrpError`; that is the
+   suppressed branch above.
 2. (Harness only, fixed.) `str::from_utf8`'s validation of the tainted
    string; the harness now builds the `&str` unchecked.
 
 Nothing is reported from the 6-bit decomposition, the CMAC accumulator, the
 σ-MMO hash, the SIMD indicator kernels, `ct_select_byte`, or AES. The gate
-is live: the commit before the `Symbol` change, run with the same empty
-suppression file, fails on exactly the range check.
+was first shown live by hand (the commit before the `Symbol` change fails on
+exactly the range check); the canary and the output check above now show it
+on every run.
 
 A third class, the Fisher–Yates swap at a keystream-derived index in
 `LemireFyPrp::from_stream` (a pointer-sized use of an undefined value), was

@@ -3,9 +3,23 @@
 # scripts/ct-taint.sh fails on anything not listed here. Add an entry only
 # with a reason. Frame names are demangled Rust symbols, matched as globs.
 #
-# There are none. The PRP's range check on the plaintext symbol, the last
-# accepted report, is gone: `permute` takes a typed in-domain `Symbol`, and
-# the encryptors get their symbols from the 6-bit decomposition, which masks
-# rather than checks. (`Blocks6::check`, the validation for callers that pass
-# raw symbols to `OreCipher::encrypt` or `encrypt_var`, is not on any path
-# the harness runs.)
+# The typed entry points report nothing: `permute` takes an in-domain
+# `Symbol`, and `OreEncrypt` and the string encryptors get their symbols from
+# the 6-bit decomposition, which masks rather than checks.
+#
+# The one accepted report is `Blocks6::check`, on the raw-block entry points
+# (`OreCipher::encrypt`/`encrypt_left` for Bit6, `encrypt_var`/
+# `encrypt_left_var` for the chained scheme). A caller of those passes symbols
+# that may be out of the 6-bit domain, and the function must refuse them. It
+# ORs every symbol's high bits together without branching and branches once
+# on the result, so the branch reveals only whether some symbol was out of
+# domain. For a well-formed input it always goes the same way. `check` is
+# `#[inline(never)]`, so the branch is always in its own frame, whose name is
+# `ore_rs::scheme::decompose::Blocks6<B>::check` (or its v0-mangled form, which
+# also contains `Blocks6` and `check`).
+
+{
+   blocks6-check: one branch on whether any raw symbol is out of domain
+   Memcheck:Cond
+   fun:*Blocks6*check*
+}

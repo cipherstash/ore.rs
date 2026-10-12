@@ -63,6 +63,11 @@ impl<B: AsRef<[u8]>> Blocks6<B> {
     /// produced). The values are folded together branch-free and the one
     /// branch is on the folded result, so for well-formed input the branch
     /// always goes the same way.
+    ///
+    /// Kept out of line so that this branch, the one the taint harness
+    /// accepts, has a frame of its own whatever the caller inlines
+    /// (`packages/ct-taint/valgrind.supp`).
+    #[inline(never)]
     pub(crate) fn check(blocks: B) -> Result<Self, OreError> {
         let high = blocks.as_ref().iter().fold(0u8, |acc, &b| acc | (b >> 6));
         if high != 0 {

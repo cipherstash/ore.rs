@@ -2,10 +2,14 @@ name: "Verify"
 # Dynamic and formal evidence for the v2 ORE implementation, beyond the unit
 # and property tests in `test.yml`:
 #
-#   * ct-taint: the ctgrind-style Valgrind run (packages/ct-taint). Key and
-#     plaintext are marked undefined; every secret-dependent branch or
+#   * ct-taint: the ctgrind-style Valgrind run (packages/ct-taint) over the v2
+#     encryptors; the legacy OreAes128 encryptor is out of scope (its PRP
+#     swaps at secret indices by design, and its wire format is frozen). Key
+#     and plaintext are marked undefined; every secret-dependent branch or
 #     secret-indexed access memcheck reports fails the job unless it is one of
-#     the documented exceptions in packages/ct-taint/valgrind.supp.
+#     the documented exceptions in packages/ct-taint/valgrind.supp. The run
+#     fails if the taint never reaches a mode's output, and a canary mode
+#     that branches on a tainted byte must fail.
 #   * fuzz: the libFuzzer targets (packages/ore-rs/fuzz) for the ciphertext
 #     parsers and raw comparators, time-boxed per pull request.
 #   * kani: the bounded model-checking harnesses (`#[cfg(kani)]`) for the pure
