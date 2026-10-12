@@ -78,9 +78,9 @@ without any error. To catch that, assert `ore_rs::hardware_aes()` at
 startup or in a test: it returns `true` only when the build will use
 hardware AES on the current CPU.
 
-`aes` 0.9 removes the need for this flag, but on aarch64 it is currently
-2–2.5x slower per AES call than 0.8 with the flag, so ore-rs stays on 0.8
-for now. See `docs/benchmarks/2026-10-12-aes-0.9-results.md`.
+`aes` 0.9 removes the need for this flag, but 0.9.3, the current release,
+is 2–2.5x slower per AES call on aarch64 than 0.8 with the flag, so ore-rs
+stays on 0.8 for now. See `docs/benchmarks/2026-10-13-aes-0.9-root-cause.md`.
 
 ## Security
 
