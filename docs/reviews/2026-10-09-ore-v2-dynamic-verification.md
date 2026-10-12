@@ -354,7 +354,7 @@ at 215 M (tau 0.0021). The larger figures therefore come from this
 session's conditions, not from the code changes since `6760707`.
 
 **Cause: the harness.** Two things in the bench, not the builder, produce
-the residual. Measured first on an M1 Max, then on the M4 at `b5c8233`
+the residual. Measured first on an M1 Max, then on the M4 at the commit "docs(dudect): the const-vs-random residual was the harness"
 (conditions below), 150 s continuous runs, one build per sample unless
 stated, DIT off unless stated. (The M1 has a data memory-dependent
 prefetcher that DIT cannot switch off; the controls below change only the
