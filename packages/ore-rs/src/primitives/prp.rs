@@ -2,7 +2,7 @@ pub(crate) mod oblivious;
 pub mod prng;
 use crate::primitives::prp::prng::Aes128Prng;
 use crate::primitives::{AesBlock, Prp, PrpError, PrpResult, Symbol};
-use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
+use aes::cipher::{BlockCipherEncrypt, KeyInit};
 use aes::Aes128Enc;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -237,7 +237,7 @@ macro_rules! impl_lemire_fy_prp {
                 // PRNG's counter convention. Shape (i): a fresh key schedule
                 // per call. Shape (ii) skips this via `from_stream`.
                 // Encryption only: no decryption schedule is built or copied.
-                let cipher = Aes128Enc::new(GenericArray::from_slice(&key[0..16]));
+                let cipher = Aes128Enc::new(crate::primitives::block_ref(&key[0..16]));
                 let mut blocks = [AesBlock::default(); $stream_blocks];
                 for (i, b) in blocks.iter_mut().enumerate() {
                     b[0..4].copy_from_slice(&(i as u32).to_be_bytes());

@@ -216,7 +216,8 @@ impl<T: OrderableBytes + ?Sized> private::Sealed for &T {}
 
 /// A reference encodes exactly as the value it points to.
 impl<T: OrderableBytes + ?Sized> OrderableBytes for &T {
-    type Bytes<'a> = T::Bytes<'a>
+    type Bytes<'a>
+        = T::Bytes<'a>
     where
         Self: 'a;
 

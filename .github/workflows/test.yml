@@ -15,7 +15,7 @@ defaults:
 
 jobs:
   test:
-    # Both architectures: aarch64 runs hardware AES (`--cfg aes_armv8`), the
+    # Both architectures: aarch64 runs hardware AES (ARMv8 Crypto Extensions), the
     # NEON kernels and the NEON PRP builder, which x86_64 never reaches, against
     # the same pinned vectors.
     runs-on: ${{ matrix.os }}
@@ -42,8 +42,8 @@ jobs:
             target/
           key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: setup rust 1.78
-        uses: dtolnay/rust-toolchain@1.78.0
+      - name: setup rust 1.89
+        uses: dtolnay/rust-toolchain@1.89.0
         with:
           components: clippy, rustfmt
 
@@ -78,8 +78,8 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: setup rust 1.78
-        uses: dtolnay/rust-toolchain@1.78.0
+      - name: setup rust 1.89
+        uses: dtolnay/rust-toolchain@1.89.0
 
       - name: "Benchmark"
         run: cargo bench

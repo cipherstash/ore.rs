@@ -1,5 +1,5 @@
 use crate::primitives::{AesBlock, Hash, HashKey};
-use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
+use aes::cipher::{BlockCipherEncrypt, KeyInit};
 use aes::Aes128;
 use zeroize::ZeroizeOnDrop;
 
@@ -10,8 +10,7 @@ pub struct Aes128Z2Hash {
 
 impl Hash for Aes128Z2Hash {
     fn new(key: &HashKey) -> Self {
-        let key_array = GenericArray::from_slice(key);
-        let cipher = Aes128::new(key_array);
+        let cipher = Aes128::new(key);
         Self { cipher }
     }
 
@@ -23,10 +22,10 @@ impl Hash for Aes128Z2Hash {
          * See https://stackoverflow.com/questions/38168956/take-slice-of-certain-length-known-at-compile-time
          */
         assert_eq!(data.len(), 16);
-        // Can we clone into GenericArray directly? Are we doing an extra copy?
+        // Can we clone into an AES block directly? Are we doing an extra copy?
         let mut output = [0u8; 16];
         output.clone_from_slice(data);
-        let block = GenericArray::from_mut_slice(&mut output);
+        let block = (&mut output).into();
         self.cipher.encrypt_block(block);
         output[0] & 1u8
     }
@@ -89,7 +88,7 @@ pub const PI_KEY: [u8; 16] = *b"ORE-rs.v2.H-pi.1";
 fn pi() -> &'static Aes128 {
     use std::sync::OnceLock;
     static PI: OnceLock<Aes128> = OnceLock::new();
-    PI.get_or_init(|| Aes128::new(GenericArray::from_slice(&PI_KEY)))
+    PI.get_or_init(|| Aes128::new(&PI_KEY.into()))
 }
 
 /// GF(2^128) doubling `2·x` on a big-endian field element packed in a `u128`
@@ -134,7 +133,7 @@ impl Hash for FixedPiZ2Hash {
             *slot ^= r; // m = σ(x) ⊕ r
         }
         let m_lsb = block[0] & 1u8;
-        let block = GenericArray::from_mut_slice(&mut block);
+        let block: &mut AesBlock = (&mut block).into();
         pi().encrypt_block(block);
         (block[0] & 1u8) ^ m_lsb
     }
@@ -185,7 +184,7 @@ mod tests {
 
     fn init_hash() -> Aes128Z2Hash {
         let key: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-        let key_array = GenericArray::from_slice(&key);
+        let key_array = &key.into();
         Hash::new(key_array)
     }
 
@@ -230,7 +229,7 @@ mod tests {
     #[test]
     fn fixed_pi_scalar_matches_bulk() {
         let nonce: [u8; 16] = hex!("0f0e0d0c 0b0a0908 07060504 03020100");
-        let h: FixedPiZ2Hash = Hash::new(GenericArray::from_slice(&nonce));
+        let h: FixedPiZ2Hash = Hash::new(&nonce.into());
 
         for &n in &[64usize, 256usize] {
             let mut blocks: Vec<AesBlock> = (0..n)
@@ -239,7 +238,7 @@ mod tests {
                     for (j, slot) in b.iter_mut().enumerate() {
                         *slot = (i.wrapping_mul(31).wrapping_add(j)) as u8;
                     }
-                    *GenericArray::from_slice(&b)
+                    AesBlock::from(b)
                 })
                 .collect();
 

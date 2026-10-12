@@ -56,21 +56,11 @@ Example benchmark results below (from December 2021):
 
 ## ARMv8 and Apple Silicon support
 
-ARMv8 and Apple Silicon Macs work out of the box but will default to AES in
-software, which is dramatically slower than the hardware backend (~60x per
-AES block on an M1 Max). To use the ARMv8 Cryptography Extensions, enable
-the `aes` crate's cfg flag — stable Rust is fine (1.61+):
-
-```toml
-# .cargo/config.toml in your project
-[target.'cfg(target_arch = "aarch64")']
-rustflags = ["--cfg", "aes_armv8"]
-```
-
-This repository's own workspace sets this already (tests, benches and
-examples get hardware AES); the flag is per-final-binary, so downstream
-projects need it in their own build configuration. x86_64 AES-NI is
-auto-detected and needs no flag.
+Hardware AES is detected at runtime and used automatically: the ARMv8
+Cryptography Extensions on aarch64 (including Apple Silicon) and AES-NI on
+x86_64. No build flags are needed in this crate or in downstream projects.
+Earlier releases (`aes` 0.8) needed `--cfg aes_armv8` on aarch64; that flag
+no longer has any effect and can be removed.
 
 ## Security
 

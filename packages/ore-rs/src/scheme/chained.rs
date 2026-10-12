@@ -43,14 +43,14 @@ use rand_chacha::ChaCha20Rng;
 use subtle_ng::{Choice, ConditionallySelectable, ConstantTimeEq};
 use zeroize::{Zeroize, Zeroizing};
 
-use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
+use aes::cipher::{BlockCipherEncrypt, KeyInit};
 use aes::Aes128Enc;
 
 use crate::ciphertext::{parse_header, ParseError};
 use crate::primitives::cmac::{final_block, prefix_block, Branch, CmacAccumulator, WIDTH_BIT6};
 use crate::primitives::hash::FixedPiZ2Hash;
 use crate::primitives::prp::LemireFyPrp;
-use crate::primitives::{stack, AesBlock, Hash, HashKey, Prp};
+use crate::primitives::{block_ref, stack, AesBlock, Hash, Prp};
 use crate::scheme::decompose::{num_blocks_6bit, Blocks6};
 use crate::scheme::width::FirstDiff;
 use crate::OreError;
@@ -209,9 +209,9 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     /// (spec §3), so there is no second key. The accumulator key is `k1` run
     /// through a labelled AES call for domain separation.
     pub fn init(k1: &[u8; 16]) -> Result<Self, OreError> {
-        let cipher = Aes128Enc::new(GenericArray::from_slice(k1));
+        let cipher = Aes128Enc::new(k1.into());
         let mut k_acc = ACC_KEY_LABEL;
-        cipher.encrypt_block(GenericArray::from_mut_slice(&mut k_acc));
+        cipher.encrypt_block((&mut k_acc).into());
         Ok(Self {
             k_acc,
             rng: RefCell::new(R::from_entropy()),
@@ -254,7 +254,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         let mut acc = CmacAccumulator::new(&self.k_acc);
         let mut nonce = [0u8; NONCE_LEN];
         self.rng.borrow_mut().try_fill(&mut nonce)?;
-        let hasher = FixedPiZ2Hash::new(HashKey::from_slice(&nonce));
+        let hasher = FixedPiZ2Hash::new((&nonce).into());
 
         let mut xt = Vec::with_capacity(count);
         let mut f = Vec::with_capacity(count);
@@ -440,7 +440,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
             return ca.cmp(&cb);
         }
 
-        let hasher = FixedPiZ2Hash::new(HashKey::from_slice(nonce_at(b, cb)));
+        let hasher = FixedPiZ2Hash::new(block_ref(nonce_at(b, cb)));
         if diff.resolve(&hasher) == 1 {
             Ordering::Greater
         } else {

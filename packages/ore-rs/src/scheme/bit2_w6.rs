@@ -28,14 +28,13 @@
 use crate::{
     ciphertext::*,
     primitives::{
-        hash::FixedPiZ2Hash, prf::Aes128Prf, stack, AesBlock, Hash, HashKey, Prf, Prp, NONCE_SIZE,
+        block_ref, hash::FixedPiZ2Hash, prf::Aes128Prf, stack, AesBlock, Hash, Prf, Prp, NONCE_SIZE,
     },
     scheme::decompose::Blocks6,
     scheme::width::{AesBlockBuf, Bit6, BlockWidth, FirstDiff},
     OreCipher, OreError, PlainText,
 };
 
-use aes::cipher::generic_array::GenericArray;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use std::cell::RefCell;
@@ -116,8 +115,8 @@ const PRF2_LABEL: [u8; 16] = *b"ORE.v2.bit6.prf2";
 
 /// `Aes128Prf` keyed by `AES_k(label)`, wiping the derived key bytes.
 fn derive_prf(k: &[u8; 16], label: &[u8; 16]) -> Aes128Prf {
-    let kdf: Aes128Prf = Prf::new(GenericArray::from_slice(k));
-    let mut derived = [AesBlock::clone_from_slice(label)];
+    let kdf: Aes128Prf = Prf::new(k.into());
+    let mut derived = [AesBlock::from(*label)];
     kdf.encrypt_all(&mut derived);
     let prf = Prf::new(&derived[0]);
     derived[0].as_mut_slice().zeroize();
@@ -184,7 +183,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
         self.rng.borrow_mut().try_fill(&mut right.nonce)?;
 
         let seeds = self.derive_prp_seeds(x.inner());
-        let hasher: Z2Hash = Hash::new(HashKey::from_slice(&right.nonce));
+        let hasher: Z2Hash = Hash::new((&right.nonce).into());
 
         // RO key template, maintained incrementally (see the bit2 sibling).
         // Entry j for block n is (x[0..n] ‖ j ‖ 0… ‖ n@N ‖ N@15).
@@ -340,7 +339,7 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128Bit6<R> {
             return Some(Ordering::Equal);
         }
 
-        let hash: Z2Hash = Hash::new(HashKey::from_slice(&b_right[0..NONCE_SIZE]));
+        let hash: Z2Hash = Hash::new(block_ref(&b_right[0..NONCE_SIZE]));
 
         if diff.resolve(&hash) == 1 {
             return Some(Ordering::Greater);
@@ -395,7 +394,7 @@ impl<const N: usize> Ord for CipherText<OreAes128Bit6ChaCha20, N> {
             return Ordering::Equal;
         }
 
-        let hash: Z2Hash = Hash::new(HashKey::from_slice(&b.right.nonce));
+        let hash: Z2Hash = Hash::new((&b.right.nonce).into());
         if diff.resolve(&hash) == 1 {
             return Ordering::Greater;
         }

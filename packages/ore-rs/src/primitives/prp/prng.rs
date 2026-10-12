@@ -1,10 +1,10 @@
-use aes::cipher::{consts::U16, generic_array::GenericArray, BlockEncrypt, KeyInit};
+use aes::cipher::{consts::U16, Array, BlockCipherEncrypt, KeyInit};
 use aes::Aes128;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub struct Aes128Prng {
     cipher: Aes128,
-    data: [GenericArray<u8, U16>; 16],
+    data: [Array<u8, U16>; 16],
     ptr: usize, // flat index into the 256 buffered bytes (block = ptr >> 4)
     ctr: u32,   // increments with each new encryption
 }
@@ -51,7 +51,7 @@ const _: fn() = || {
  */
 impl Aes128Prng {
     pub fn init(key: &[u8]) -> Self {
-        let key_array = GenericArray::from_slice(key);
+        let key_array = crate::primitives::block_ref(key);
         let cipher = Aes128::new(key_array);
         let mut prng = Self {
             cipher,
@@ -193,7 +193,7 @@ mod tests {
         // the destructor and reading the bytes stays provenance-clean.
         let p: *mut Aes128Prng = &mut *prng as *mut Aes128Prng;
         let data_ptr = unsafe { ptr::addr_of!((*p).data) as *const u8 };
-        let data_len = size_of::<[GenericArray<u8, U16>; 16]>();
+        let data_len = size_of::<[Array<u8, U16>; 16]>();
 
         let survived = unsafe {
             ptr::drop_in_place(p); // runs Drop -> zeroize(); storage stays owned
