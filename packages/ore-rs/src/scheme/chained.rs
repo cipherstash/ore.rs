@@ -18,15 +18,36 @@
 //! matches throughout, the shorter sorts first. A comparison reveals the
 //! common-prefix length.
 //!
-//! **Every ciphertext reveals the exact length of its plaintext.** The header
-//! stores the block count, and the size is `4 + 25*count + 16` bytes for a
-//! full ciphertext (`4 + 17*count` for a left). For a string of `n` UTF-8
-//! bytes, `count = ⌈8n/6⌉`, which is strictly increasing in `n`, so one
-//! ciphertext gives `n` exactly, with no comparison or query. The right half
-//! alone is `count * 8` bytes, so right-only storage would not hide it either.
-//! Padding to a length bucket needs a pad symbol below every real symbol, a
-//! 65-value domain and a wire-format change:
-//! <https://github.com/cipherstash/ore.rs/issues/104>.
+//! **Length.** The header stores the block count, and the size is
+//! `7 + 25*count + 16` bytes for a full ciphertext (`7 + 17*count` for a
+//! left), so every ciphertext gives its block count with no comparison or
+//! query. Unpadded, a string of `n` UTF-8 bytes has `count = ⌈8n/6⌉`, which
+//! is strictly increasing in `n`, so the ciphertext gives `n` exactly. The
+//! string encryptors therefore pad by default
+//! ([`Padding`](crate::scheme::chained::Padding)): the string is extended
+//! with NUL bytes to a length bucket, and a ciphertext reveals only the
+//! bucket. The default is Padmé with a 16-byte floor.
+//!
+//! Padding with NUL bytes keeps order and equality for strings that do not
+//! end in NUL. NUL bytes decompose to zero blocks, the same zero bits the
+//! decomposition already fills a final partial block with. Where the shorter
+//! of two strings ends, the longer one has a non-zero bit within its next
+//! block (its next byte is not NUL), so the shorter string's padding sorts
+//! below it, as "shorter sorts first" requires. Equal strings have equal
+//! lengths, so they pad to the same bucket. A string that ends in NUL would
+//! pad to the same blocks as the string without it, so the padded encryptors
+//! refuse it ([`OreError::TrailingNul`](crate::OreError::TrailingNul)).
+//! Postgres `text` and `jsonb` cannot hold NUL. Pad blocks cannot be told
+//! apart from the string's own blocks in a ciphertext: each block's PRP is
+//! keyed by its position and prefix.
+//!
+//! The header also carries the padding policy, and the comparators return
+//! `None` for two ciphertexts made under different policies: an unpadded
+//! `"abc"` and a padded `"abc"` have different blocks, and would compare
+//! unequal. A column's stored values and its queries must use one policy.
+//! Raw symbol sequences
+//! ([`encrypt_var`](crate::scheme::chained::OreAes128Bit6Chained::encrypt_var))
+//! are never padded, because a trailing zero symbol is a real value there.
 //!
 //! **Stored rows compare offline.** A full ciphertext carries its
 //! deterministic left half (`xt`, `f`), so anyone holding two stored full
@@ -46,7 +67,7 @@ use zeroize::{Zeroize, Zeroizing};
 use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
 use aes::Aes128Enc;
 
-use crate::ciphertext::{parse_header, ParseError};
+use crate::ciphertext::{parse_header, ParseError, WIRE_HEADER_LEN};
 use crate::primitives::cmac::{final_block, prefix_block, Branch, CmacAccumulator, WIDTH_BIT6};
 use crate::primitives::hash::FixedPiZ2Hash;
 use crate::primitives::prp::LemireFyPrp;
@@ -62,7 +83,10 @@ const DOMAIN: usize = 64;
 const STREAM_BLOCKS: usize = 32;
 const F_LEN: usize = 16;
 const RIGHT_LEN: usize = DOMAIN / 8; // 8
-const HEADER_LEN: usize = 4;
+/// The padding policy tag after the common wire header: a kind byte and a
+/// big-endian `u16` (see [`Padding`]).
+const PADDING_LEN: usize = 3;
+const HEADER_LEN: usize = WIRE_HEADER_LEN + PADDING_LEN;
 const NONCE_LEN: usize = 16;
 
 /// Domain-separation label for deriving the accumulator key (spec §3).
@@ -102,11 +126,106 @@ fn right_at(s: &[u8], count: usize, i: usize) -> &[u8] {
     &s[o..o + RIGHT_LEN]
 }
 
+/// How the string encryptors pad a string before encrypting it, so that a
+/// ciphertext reveals a length bucket rather than the exact length (see the
+/// module docs).
+///
+/// Lengths are in UTF-8 bytes. The policy belongs to a column: its stored
+/// values and its queries must use the same one, and changing it means
+/// re-encrypting the column. The comparators refuse to compare ciphertexts
+/// made under different policies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Padding {
+    /// No padding: the ciphertext reveals the exact length.
+    None,
+    /// Pad to the Padmé length (Nikitin et al., PETS 2019) of the string's
+    /// length or `min_bytes`, whichever is larger. A length of `L` bytes
+    /// becomes a multiple of `2^(⌊log₂ L⌋ − ⌊log₂ ⌊log₂ L⌋⌋ − 1)`, which adds
+    /// at most about 12% and leaves `O(log log L)` bits of the length. Every
+    /// string shorter than `min_bytes` pads to the same length, which matters
+    /// for short columns, where Padmé alone hides little.
+    Padme {
+        /// Floor below which every string pads to one bucket.
+        min_bytes: u16,
+    },
+    /// Pad every string to `max_bytes`, so ciphertexts reveal nothing of
+    /// the length. Longer strings are refused
+    /// ([`OreError::ExceedsPadding`]).
+    Fixed {
+        /// The length every string pads to.
+        max_bytes: u16,
+    },
+}
+
+impl Default for Padding {
+    /// Padmé with a 16-byte floor.
+    fn default() -> Self {
+        Padding::Padme { min_bytes: 16 }
+    }
+}
+
+impl Padding {
+    /// The length a string of `len` bytes pads to. Errors if `len` exceeds
+    /// a fixed length, or if the padded string has more blocks than the wire
+    /// format can number.
+    fn padded_len(self, len: usize) -> Result<usize, OreError> {
+        let padded = match self {
+            Padding::None => len,
+            Padding::Padme { min_bytes } => padme(len.max(min_bytes.into())),
+            Padding::Fixed { max_bytes } if len <= max_bytes.into() => max_bytes.into(),
+            Padding::Fixed { .. } => return Err(OreError::ExceedsPadding),
+        };
+        if padded > MAX_STR_BYTES {
+            return Err(OreError::TooManyBlocks);
+        }
+        Ok(padded)
+    }
+
+    /// The policy as it appears in the wire header.
+    fn to_wire(self) -> [u8; PADDING_LEN] {
+        let (kind, n) = match self {
+            Padding::None => (0, 0),
+            Padding::Padme { min_bytes } => (1, min_bytes),
+            Padding::Fixed { max_bytes } => (2, max_bytes),
+        };
+        let [hi, lo] = n.to_be_bytes();
+        [kind, hi, lo]
+    }
+
+    /// Parse a policy written by [`Self::to_wire`]. A policy no cipher
+    /// could have been initialised with is refused, as is an unknown kind.
+    fn from_wire(tag: &[u8]) -> Option<Self> {
+        let n = u16::from_be_bytes([*tag.get(1)?, *tag.get(2)?]);
+        let padding = match *tag.first()? {
+            0 if n == 0 => Padding::None,
+            1 => Padding::Padme { min_bytes: n },
+            2 => Padding::Fixed { max_bytes: n },
+            _ => return None,
+        };
+        padding.padded_len(0).ok().map(|_| padding)
+    }
+}
+
+/// The Padmé length of `len` (Nikitin et al., "Reducing Metadata Leakage
+/// from Encrypted Files and Communication with PURBs", PETS 2019, Algorithm
+/// 1): round `len` up so that only its top `⌊log₂ ⌊log₂ len⌋⌋ + 1` bits after
+/// the leading one may be set.
+const fn padme(len: usize) -> usize {
+    if len < 2 {
+        return len;
+    }
+    let e = len.ilog2();
+    let s = e.ilog2() + 1;
+    let mask = (1usize << (e - s)) - 1;
+    (len + mask) & !mask
+}
+
 /// Left half of a chained ciphertext: per-block permuted symbol + tag.
 #[derive(Clone, Debug)]
 pub struct VarLeft {
     xt: Vec<u8>,
     f: Vec<[u8; F_LEN]>,
+    padding: Padding,
 }
 
 /// Right half: per-ciphertext nonce + per-block masked bitvectors.
@@ -127,14 +246,18 @@ impl VarLeft {
     /// `header ‖ xt ‖ f` (no nonce/right half).
     pub fn to_bytes(&self) -> Vec<u8> {
         let count = self.xt.len();
-        let mut out = Vec::with_capacity(HEADER_LEN + count + count * F_LEN);
-        out.extend_from_slice(&[VERSION, SCHEME_ID]);
-        out.extend_from_slice(&(count as u16).to_be_bytes());
+        let mut out = Vec::with_capacity(left_len(count));
+        write_header(count, self.padding, &mut out);
         out.extend_from_slice(&self.xt);
         for fb in &self.f {
             out.extend_from_slice(fb);
         }
         out
+    }
+
+    /// The padding policy the plaintext was encrypted under.
+    pub fn padding(&self) -> Padding {
+        self.padding
     }
 }
 
@@ -143,8 +266,7 @@ impl VarCipherText {
     pub fn to_bytes(&self) -> Vec<u8> {
         let count = self.left.xt.len();
         let mut out = Vec::with_capacity(total_len(count));
-        out.extend_from_slice(&[VERSION, SCHEME_ID]);
-        out.extend_from_slice(&(count as u16).to_be_bytes());
+        write_header(count, self.left.padding, &mut out);
         out.extend_from_slice(&self.left.xt);
         for fb in &self.left.f {
             out.extend_from_slice(fb);
@@ -156,12 +278,14 @@ impl VarCipherText {
         out
     }
 
+    /// The padding policy the plaintext was encrypted under.
+    pub fn padding(&self) -> Padding {
+        self.left.padding
+    }
+
     /// Parse the bytes produced by [`Self::to_bytes`].
     pub fn from_slice(data: &[u8]) -> Result<Self, ParseError> {
-        let ((ver, sid, count), _body) = parse_header(data)?;
-        if ver != VERSION || sid != SCHEME_ID {
-            return Err(ParseError);
-        }
+        let (count, padding) = parse_chained_header(data).ok_or(ParseError)?;
         if data.len() != total_len(count) {
             return Err(ParseError);
         }
@@ -186,16 +310,35 @@ impl VarCipherText {
             blocks.push(rb);
         }
         Ok(VarCipherText {
-            left: VarLeft { xt, f },
+            left: VarLeft { xt, f, padding },
             right: VarRight { nonce, blocks },
         })
     }
+}
+
+/// Write the wire header: version, scheme id, block count, padding policy.
+fn write_header(count: usize, padding: Padding, out: &mut Vec<u8>) {
+    out.extend_from_slice(&[VERSION, SCHEME_ID]);
+    out.extend_from_slice(&(count as u16).to_be_bytes());
+    out.extend_from_slice(&padding.to_wire());
+}
+
+/// The block count and padding policy of a serialised view, if its header
+/// is this scheme's.
+fn parse_chained_header(view: &[u8]) -> Option<(usize, Padding)> {
+    let ((ver, sid, count), body) = parse_header(view).ok()?;
+    if ver != VERSION || sid != SCHEME_ID {
+        return None;
+    }
+    Some((count, Padding::from_wire(body.get(..PADDING_LEN)?)?))
 }
 
 /// Variable-length / chained-prefix ORE cipher (6-bit blocks).
 pub struct OreAes128Bit6Chained<R: Rng + SeedableRng> {
     /// Dedicated CMAC accumulator key (subsumes the fixed-N `prf1`/`prf2`).
     k_acc: [u8; 16],
+    /// Applied by the string encryptors.
+    padding: Padding,
     rng: RefCell<R>,
 }
 
@@ -208,14 +351,31 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     /// accumulator derives every per-block secret from one key via branch tags
     /// (spec §3), so there is no second key. The accumulator key is `k1` run
     /// through a labelled AES call for domain separation.
+    ///
+    /// Strings are padded with the default policy, Padmé with a 16-byte
+    /// floor ([`Padding::default`]).
     pub fn init(k1: &[u8; 16]) -> Result<Self, OreError> {
+        Self::init_with_padding(k1, Padding::default())
+    }
+
+    /// [`Self::init`] with the given string padding policy. Returns
+    /// [`OreError::InitFailed`] for a policy that would pad even the empty
+    /// string past [`MAX_STR_BYTES`].
+    pub fn init_with_padding(k1: &[u8; 16], padding: Padding) -> Result<Self, OreError> {
+        padding.padded_len(0).map_err(|_| OreError::InitFailed)?;
         let cipher = Aes128Enc::new(GenericArray::from_slice(k1));
         let mut k_acc = ACC_KEY_LABEL;
         cipher.encrypt_block(GenericArray::from_mut_slice(&mut k_acc));
         Ok(Self {
             k_acc,
+            padding,
             rng: RefCell::new(R::from_entropy()),
         })
+    }
+
+    /// The padding policy the string encryptors apply.
+    pub fn padding(&self) -> Padding {
+        self.padding
     }
 
     /// Derive the per-block PRP from the accumulator's `PRP_STREAM` branch.
@@ -235,9 +395,10 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     }
 
     /// Full Left+Right ciphertext for `x` (one 6-bit symbol per element). A
-    /// value `>= 64` returns [`OreError::PrpError`].
+    /// value `>= 64` returns [`OreError::PrpError`]. The symbols are not
+    /// padded, and the ciphertext is tagged [`Padding::None`].
     pub fn encrypt_var(&self, x: &[u8]) -> Result<VarCipherText, OreError> {
-        stack::scrubbed(|| self.encrypt_blocks(&check_symbols(x)?))
+        stack::scrubbed(|| self.encrypt_blocks(&check_symbols(x)?, Padding::None))
     }
 
     /// [`Self::encrypt_var`] over blocks already known to be in the 6-bit
@@ -245,7 +406,12 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     /// [`stack::scrubbed`]: building a block's PRP and running the
     /// accumulator leave their secrets in dead stack (see
     /// `primitives::stack`).
-    fn encrypt_blocks<B: AsRef<[u8]>>(&self, x: &Blocks6<B>) -> Result<VarCipherText, OreError> {
+    /// `padding` is the policy `x` was padded under, for the header.
+    fn encrypt_blocks<B: AsRef<[u8]>>(
+        &self,
+        x: &Blocks6<B>,
+        padding: Padding,
+    ) -> Result<VarCipherText, OreError> {
         let count = x.len();
         if count > u16::MAX as usize {
             return Err(OreError::TooManyBlocks);
@@ -306,20 +472,25 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         }
 
         Ok(VarCipherText {
-            left: VarLeft { xt, f },
+            left: VarLeft { xt, f, padding },
             right: VarRight { nonce, blocks },
         })
     }
 
     /// Left-only ciphertext (smaller; for query plaintexts). A value `>= 64`
-    /// returns [`OreError::PrpError`].
+    /// returns [`OreError::PrpError`]. Not padded, like
+    /// [`Self::encrypt_var`].
     pub fn encrypt_left_var(&self, x: &[u8]) -> Result<VarLeft, OreError> {
-        stack::scrubbed(|| self.encrypt_left_blocks(&check_symbols(x)?))
+        stack::scrubbed(|| self.encrypt_left_blocks(&check_symbols(x)?, Padding::None))
     }
 
     /// [`Self::encrypt_left_var`] over blocks already known to be in the
     /// 6-bit domain, without the stack scrub; see [`Self::encrypt_blocks`].
-    fn encrypt_left_blocks<B: AsRef<[u8]>>(&self, x: &Blocks6<B>) -> Result<VarLeft, OreError> {
+    fn encrypt_left_blocks<B: AsRef<[u8]>>(
+        &self,
+        x: &Blocks6<B>,
+        padding: Padding,
+    ) -> Result<VarLeft, OreError> {
         let count = x.len();
         if count > u16::MAX as usize {
             return Err(OreError::TooManyBlocks);
@@ -343,33 +514,40 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
             )));
             acc.absorb(&prefix_block(n16, sym.get()));
         }
-        Ok(VarLeft { xt, f })
+        Ok(VarLeft { xt, f, padding })
     }
 
-    /// Encrypt a string (UTF-8 bytes → MSB-first 6-bit blocks). Strings
-    /// longer than [`MAX_STR_BYTES`] return [`OreError::TooManyBlocks`].
+    /// Encrypt a string (UTF-8 bytes → MSB-first 6-bit blocks), padded under
+    /// the cipher's [`Padding`] policy.
     ///
-    /// The ciphertext reveals the string's exact UTF-8 byte length, as well
-    /// as the order and common-prefix length that comparisons reveal; see
-    /// the module docs.
+    /// Errors:
+    /// - [`OreError::TrailingNul`] if the policy pads and the string ends in
+    ///   NUL;
+    /// - [`OreError::ExceedsPadding`] if the policy is [`Padding::Fixed`]
+    ///   and the string is longer;
+    /// - [`OreError::TooManyBlocks`] if the padded string is longer than
+    ///   [`MAX_STR_BYTES`].
+    ///
+    /// The ciphertext reveals the string's length bucket under the policy
+    /// (its exact length for [`Padding::None`]), and comparisons reveal the
+    /// order and common-prefix length; see the module docs.
     pub fn encrypt_str(&self, s: &str) -> Result<VarCipherText, OreError> {
-        stack::scrubbed(|| self.encrypt_blocks(&str_to_blocks(s)?))
+        stack::scrubbed(|| self.encrypt_blocks(&str_to_blocks(s, self.padding)?, self.padding))
     }
 
-    /// Left-only string ciphertext. Strings longer than [`MAX_STR_BYTES`]
-    /// return [`OreError::TooManyBlocks`]. Like [`Self::encrypt_str`], it
-    /// reveals the string's exact length.
+    /// Left-only string ciphertext, padded and refused as
+    /// [`Self::encrypt_str`] does.
     pub fn encrypt_left_str(&self, s: &str) -> Result<VarLeft, OreError> {
-        stack::scrubbed(|| self.encrypt_left_blocks(&str_to_blocks(s)?))
+        stack::scrubbed(|| self.encrypt_left_blocks(&str_to_blocks(s, self.padding)?, self.padding))
     }
 
     /// Compare two serialised full ciphertexts (lexicographic; shorter prefix
     /// sorts first). `None` if either is not a well-formed ciphertext of this
-    /// scheme.
+    /// scheme, or if they were padded under different policies.
     pub fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering> {
-        let ((va, sa, ca), _) = parse_header(a).ok()?;
-        let ((vb, sb, cb), _) = parse_header(b).ok()?;
-        if va != VERSION || sa != SCHEME_ID || vb != VERSION || sb != SCHEME_ID {
+        let (ca, pa) = parse_chained_header(a)?;
+        let (cb, pb) = parse_chained_header(b)?;
+        if pa != pb {
             return None;
         }
         if a.len() != total_len(ca) || b.len() != total_len(cb) {
@@ -391,11 +569,12 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     /// make stored data safe at rest: a stored *full* ciphertext also carries
     /// its left half, so two stored rows compare offline (see the module docs). Returns `left`'s order relative to
     /// `full` (`Less` ⇒ the query plaintext sorts before the stored one).
-    /// `None` if either input is malformed.
+    /// `None` if either input is malformed, or if they were padded under
+    /// different policies.
     pub fn compare_left_to_full(left: &[u8], full: &[u8]) -> Option<Ordering> {
-        let ((vl, sl, cl), _) = parse_header(left).ok()?;
-        let ((vf, sf, cf), _) = parse_header(full).ok()?;
-        if vl != VERSION || sl != SCHEME_ID || vf != VERSION || sf != SCHEME_ID {
+        let (cl, pl) = parse_chained_header(left)?;
+        let (cf, pf) = parse_chained_header(full)?;
+        if pl != pf {
             return None;
         }
         // `left` is `header ‖ xt ‖ f` (no nonce/right); `full` is complete.
@@ -480,18 +659,42 @@ fn check_symbols(x: &[u8]) -> Result<Blocks6<&[u8]>, OreError> {
     Blocks6::check(x)
 }
 
-/// Decompose `s` into 6-bit blocks, refusing a string too long for the wire
-/// format *before* allocating or decomposing it. The decomposition is the
-/// whole plaintext (it inverts), so the buffer is wiped when dropped.
-fn str_to_blocks(s: &str) -> Result<Blocks6<Zeroizing<Vec<u8>>>, OreError> {
+/// Decompose `s`, padded with NUL bytes under `padding`, into 6-bit blocks,
+/// refusing a string too long for the policy or the wire format *before*
+/// allocating or decomposing it. The decomposition is the whole plaintext
+/// (it inverts), so the buffer is wiped when dropped.
+fn str_to_blocks(s: &str, padding: Padding) -> Result<Blocks6<Zeroizing<Vec<u8>>>, OreError> {
     let bytes = s.as_bytes();
     if bytes.len() > MAX_STR_BYTES {
         return Err(OreError::TooManyBlocks);
     }
-    Ok(Blocks6::decompose(
+    let padded = padding.padded_len(bytes.len())?;
+    if padding != Padding::None {
+        refuse_trailing_nul(bytes)?;
+    }
+    Ok(Blocks6::decompose_padded(
         bytes,
-        Zeroizing::new(vec![0u8; num_blocks_6bit(bytes.len())]),
+        Zeroizing::new(vec![0u8; num_blocks_6bit(padded)]),
     ))
+}
+
+/// Refuse a string that ends in NUL: padded, it would encrypt to the same
+/// blocks as the string without it. One branch on the last byte, which
+/// reveals only whether the encryption is refused.
+///
+/// The branch must be taken here, not left to the caller. Compiled to a
+/// select, the check would hand back a `Result` that depends on the secret
+/// byte, and every caller's `?` would branch on it. `black_box` on the error
+/// cannot be hoisted above the condition, so the compiler has to branch,
+/// and each path returns a constant. Kept out of line so that the one
+/// branch, which the taint harness accepts, has a frame of its own
+/// (`packages/ct-taint/valgrind.supp`).
+#[inline(never)]
+fn refuse_trailing_nul(bytes: &[u8]) -> Result<(), OreError> {
+    if bytes.last() == Some(&0) {
+        return Err(core::hint::black_box(OreError::TrailingNul));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -501,6 +704,19 @@ mod tests {
     fn ore() -> OreAes128Bit6ChainedChaCha20 {
         OreAes128Bit6Chained::init(&[0x11; 16]).unwrap()
     }
+
+    fn ore_with(padding: Padding) -> OreAes128Bit6ChainedChaCha20 {
+        OreAes128Bit6Chained::init_with_padding(&[0x11; 16], padding).unwrap()
+    }
+
+    /// One of each kind of policy, with a floor and a fixed length that the
+    /// tests' strings cross.
+    const POLICIES: [Padding; 4] = [
+        Padding::None,
+        Padding::Padme { min_bytes: 16 },
+        Padding::Padme { min_bytes: 0 },
+        Padding::Fixed { max_bytes: 48 },
+    ];
 
     /// Symbols passed straight to `encrypt_var` / `encrypt_left_var` are
     /// checked: a value outside the 6-bit domain is refused, and in-domain
@@ -517,10 +733,14 @@ mod tests {
             Err(OreError::PrpError(_))
         ));
 
-        let blocks = str_to_blocks("alice").unwrap();
+        let unpadded = ore_with(Padding::None);
+        let blocks = str_to_blocks("alice", Padding::None).unwrap();
         assert_eq!(
-            c.encrypt_left_var(blocks.as_bytes()).unwrap().to_bytes(),
-            c.encrypt_left_str("alice").unwrap().to_bytes()
+            unpadded
+                .encrypt_left_var(blocks.as_bytes())
+                .unwrap()
+                .to_bytes(),
+            unpadded.encrypt_left_str("alice").unwrap().to_bytes()
         );
     }
 
@@ -584,11 +804,13 @@ mod tests {
 
     #[test]
     fn string_total_order_matches_lexicographic() {
-        let c = ore();
-        // Includes shared prefixes of different lengths and beyond 14 blocks.
-        let mut words = [
+        // Includes shared prefixes of different lengths, beyond 14 blocks,
+        // across Padmé buckets (16 and 17 bytes, 43 and 44), and interior
+        // NULs, which padding allows.
+        let words = [
             "",
             "a",
+            "a\0b",
             "ab",
             "abc",
             "abd",
@@ -596,18 +818,166 @@ mod tests {
             "b",
             "banana",
             "bananas",
+            "sixteen bytes ok",
+            "sixteen bytes ok!",
             "the quick brown fox jumps over the lazy dog",
             "the quick brown fox jumps over the lazy dog.",
             "zzz",
         ];
-        for &a in &words {
-            for &b in &words {
-                assert_eq!(cmp(&c, a, b), a.cmp(b), "order mismatch for {a:?} vs {b:?}");
+        for padding in POLICIES {
+            let c = ore_with(padding);
+            for &a in &words {
+                for &b in &words {
+                    assert_eq!(
+                        cmp(&c, a, b),
+                        a.cmp(b),
+                        "order mismatch for {a:?} vs {b:?} under {padding:?}"
+                    );
+                }
             }
         }
-        words.sort();
-        // sanity: sort is stable and the list is what we expect
-        assert_eq!(words[0], "");
+    }
+
+    #[test]
+    fn padme_lengths() {
+        // Below 9 bytes Padmé changes nothing; then each range rounds to a
+        // coarser multiple.
+        for len in 0..=8 {
+            assert_eq!(padme(len), len);
+        }
+        assert_eq!(padme(9), 10);
+        assert_eq!(padme(16), 16);
+        assert_eq!(padme(17), 18);
+        assert_eq!(padme(33), 36);
+        assert_eq!(padme(100), 104);
+        assert_eq!(padme(129), 144);
+        assert_eq!(padme(1000), 1024);
+        assert_eq!(padme(1025), 1088);
+    }
+
+    #[test]
+    fn padded_ciphertexts_reveal_only_the_bucket() {
+        let c = ore();
+        let size = |s: &str| c.encrypt_str(s).unwrap().to_bytes().len();
+        let left_size = |s: &str| c.encrypt_left_str(s).unwrap().to_bytes().len();
+        // Everything up to the 16-byte floor is one bucket of 22 blocks.
+        for s in ["", "a", "abc", "sixteen bytes ok"] {
+            assert_eq!(size(s), total_len(num_blocks_6bit(16)), "{s:?}");
+            assert_eq!(left_size(s), left_len(num_blocks_6bit(16)), "{s:?}");
+        }
+        // 17 and 18 bytes share Padmé's next bucket.
+        assert_eq!(size("seventeen bytes!!"), total_len(num_blocks_6bit(18)));
+        assert_eq!(size("eighteen bytes ok!"), total_len(num_blocks_6bit(18)));
+
+        let fixed = ore_with(Padding::Fixed { max_bytes: 48 });
+        for s in ["", "abc", &"x".repeat(48)] {
+            assert_eq!(
+                fixed.encrypt_str(s).unwrap().to_bytes().len(),
+                total_len(num_blocks_6bit(48))
+            );
+        }
+    }
+
+    #[test]
+    fn padded_strings_must_not_end_in_nul() {
+        for padding in POLICIES {
+            let c = ore_with(padding);
+            let full = c.encrypt_str("a\0");
+            let left = c.encrypt_left_str("a\0");
+            if padding == Padding::None {
+                // Unpadded, the length tells "a\0" from "a".
+                assert_eq!(cmp(&c, "a", "a\0"), Ordering::Less);
+            } else {
+                assert!(matches!(full, Err(OreError::TrailingNul)), "{:?}", padding);
+                assert!(matches!(left, Err(OreError::TrailingNul)), "{:?}", padding);
+            }
+            // An interior NUL is fine either way.
+            assert!(c.encrypt_str("a\0b").is_ok());
+        }
+    }
+
+    #[test]
+    fn fixed_padding_refuses_longer_strings() {
+        let c = ore_with(Padding::Fixed { max_bytes: 8 });
+        assert!(c.encrypt_str("12345678").is_ok());
+        assert!(matches!(
+            c.encrypt_str("123456789"),
+            Err(OreError::ExceedsPadding)
+        ));
+        assert!(matches!(
+            c.encrypt_left_str("123456789"),
+            Err(OreError::ExceedsPadding)
+        ));
+    }
+
+    #[test]
+    fn padding_policies_past_the_wire_limit_are_refused() {
+        let k = [0x11; 16];
+        type C = OreAes128Bit6ChainedChaCha20;
+        let max = MAX_STR_BYTES as u16;
+        assert!(C::init_with_padding(&k, Padding::Fixed { max_bytes: max }).is_ok());
+        assert!(matches!(
+            C::init_with_padding(&k, Padding::Fixed { max_bytes: max + 1 }),
+            Err(OreError::InitFailed)
+        ));
+        // Padmé rounds the floor itself up past the limit.
+        assert!(matches!(
+            C::init_with_padding(&k, Padding::Padme { min_bytes: max }),
+            Err(OreError::InitFailed)
+        ));
+        // Strings near the limit can pad past it.
+        let c = ore();
+        assert!(matches!(
+            c.encrypt_str(&"a".repeat(MAX_STR_BYTES)),
+            Err(OreError::TooManyBlocks)
+        ));
+    }
+
+    /// Ciphertexts under different policies do not compare: an unpadded and
+    /// a padded "abc" would compare unequal.
+    #[test]
+    fn comparators_refuse_mixed_policies() {
+        type C = OreAes128Bit6ChainedChaCha20;
+        for pa in POLICIES {
+            for pb in POLICIES {
+                let a = ore_with(pa);
+                let b = ore_with(pb);
+                let full_a = a.encrypt_str("abc").unwrap().to_bytes();
+                let full_b = b.encrypt_str("abc").unwrap().to_bytes();
+                let left_a = a.encrypt_left_str("abc").unwrap().to_bytes();
+                let expected = (pa == pb).then_some(Ordering::Equal);
+                assert_eq!(C::compare_raw_slices(&full_a, &full_b), expected);
+                assert_eq!(C::compare_left_to_full(&left_a, &full_b), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn padding_tag_round_trips_and_rejects_unknown_kinds() {
+        let c = ore();
+        let bytes = c.encrypt_str("abc").unwrap().to_bytes();
+        let ct = VarCipherText::from_slice(&bytes).unwrap();
+        assert_eq!(ct.padding(), Padding::default());
+        assert_eq!(
+            c.encrypt_left_str("abc").unwrap().padding(),
+            Padding::default()
+        );
+
+        type C = OreAes128Bit6ChainedChaCha20;
+        let tag = WIRE_HEADER_LEN;
+        let tampered = |at: usize, value: u8| {
+            let mut t = bytes.clone();
+            t[at] = value;
+            t
+        };
+        for bad in [
+            tampered(tag, 3),        // unknown kind
+            tampered(tag, 0),        // Padding::None with a non-zero length
+            tampered(tag + 1, 0xff), // Padmé floor past the wire limit
+        ] {
+            assert!(VarCipherText::from_slice(&bad).is_err());
+            assert_eq!(C::compare_raw_slices(&bad, &bad), None);
+        }
     }
 
     #[test]
@@ -740,15 +1110,48 @@ mod tests {
         }
 
         /// String comparison matches `str::cmp` across arbitrary Unicode and
-        /// independent lengths: the MSB-first 6-bit packing is order-preserving
-        /// even with tail zero-padding (cross-length prefix case included).
+        /// independent lengths, under every padding policy: the MSB-first
+        /// 6-bit packing is order-preserving with tail zero-padding, whether
+        /// the decomposition's own or a padding policy's (cross-length and
+        /// cross-bucket prefix cases included). A padding policy refuses a
+        /// trailing NUL, so those are trimmed.
         fn prop_string_order_matches_str(a: String, b: String) -> bool {
-            let c = ore();
             let a: String = a.chars().take(12).collect();
             let b: String = b.chars().take(12).collect();
-            let ea = c.encrypt_str(&a).unwrap().to_bytes();
-            let eb = c.encrypt_str(&b).unwrap().to_bytes();
-            OreAes128Bit6ChainedChaCha20::compare_raw_slices(&ea, &eb) == Some(a.cmp(&b))
+            let (a, b) = (a.trim_end_matches('\0'), b.trim_end_matches('\0'));
+            POLICIES.iter().all(|&padding| {
+                let c = ore_with(padding);
+                let ea = c.encrypt_str(a).unwrap().to_bytes();
+                let eb = c.encrypt_str(b).unwrap().to_bytes();
+                OreAes128Bit6ChainedChaCha20::compare_raw_slices(&ea, &eb) == Some(a.cmp(b))
+            })
+        }
+
+        /// A string sharing a prefix with another: the case where padding
+        /// meets real blocks. Covers both strings in one bucket and in
+        /// different ones.
+        fn prop_padded_prefix_order(prefix: String, tail: String) -> bool {
+            let a: String = prefix.chars().take(20).collect();
+            let a = a.trim_end_matches('\0');
+            let b: String = a.chars().chain(tail.chars().take(8)).collect();
+            let b = b.trim_end_matches('\0');
+            POLICIES[1..3].iter().all(|&padding| {
+                let c = ore_with(padding);
+                let ea = c.encrypt_str(a).unwrap().to_bytes();
+                let eb = c.encrypt_str(b).unwrap().to_bytes();
+                OreAes128Bit6ChainedChaCha20::compare_raw_slices(&ea, &eb) == Some(a.cmp(b))
+            })
+        }
+
+        /// Padmé never shrinks a length, adds less than 12.5%, is monotone,
+        /// and maps a bucket length to itself.
+        fn prop_padme_buckets(a: u16, b: u16) -> bool {
+            let (a, b) = (usize::from(a), usize::from(b));
+            let pa = padme(a);
+            pa >= a
+                && (pa - a) * 8 < a.max(1)
+                && (a > b || pa <= padme(b))
+                && padme(pa) == pa
         }
 
         /// Two encryptions of one plaintext (fresh nonces each) compare Equal,
@@ -792,7 +1195,7 @@ mod tests {
     /// Every block's PRP tables for `s`, which must not survive an
     /// encryption in dead stack (review of #82 and #83).
     fn block_tables(ore: &OreAes128Bit6ChainedChaCha20, s: &str) -> Vec<Vec<u8>> {
-        let blocks = str_to_blocks(s).unwrap();
+        let blocks = str_to_blocks(s, ore.padding).unwrap();
         let mut acc = CmacAccumulator::new(&ore.k_acc);
         let mut needles = Vec::new();
         for (n, &sym) in blocks.as_bytes().iter().enumerate() {
@@ -842,8 +1245,8 @@ mod tests {
                 core::hint::black_box(ore.encrypt_str(s).unwrap());
             },
             |ore, s| {
-                let blocks = str_to_blocks(s).unwrap();
-                core::hint::black_box(ore.encrypt_blocks(&blocks).unwrap());
+                let blocks = str_to_blocks(s, ore.padding).unwrap();
+                core::hint::black_box(ore.encrypt_blocks(&blocks, ore.padding).unwrap());
             },
         );
     }
@@ -855,8 +1258,8 @@ mod tests {
                 core::hint::black_box(ore.encrypt_left_str(s).unwrap());
             },
             |ore, s| {
-                let blocks = str_to_blocks(s).unwrap();
-                core::hint::black_box(ore.encrypt_left_blocks(&blocks).unwrap());
+                let blocks = str_to_blocks(s, ore.padding).unwrap();
+                core::hint::black_box(ore.encrypt_left_blocks(&blocks, ore.padding).unwrap());
             },
         );
     }

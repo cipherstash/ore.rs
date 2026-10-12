@@ -9,6 +9,10 @@
 //! and must fail here. (Mirror of `compat_w6_vectors.rs`, which does the same
 //! for the fixed-width Bit6 scheme.)
 //!
+//! Strings are pinned under three padding policies: the default (Padmé with
+//! a 16-byte floor), none, and a fixed length. Raw symbol sequences are never
+//! padded.
+//!
 //! Left ciphertexts are deterministic given the key. Full ciphertexts include
 //! a random nonce drawn from the cipher's internal RNG, which `init` seeds via
 //! `SeedableRng::from_entropy`; [`TestRng`] overrides `from_entropy` to a
@@ -20,7 +24,9 @@
 //! cargo test --test compat_chained_vectors -- --ignored --nocapture generate
 //! ```
 
-use ore_rs::scheme::chained::{OreAes128Bit6Chained, OreAes128Bit6ChainedChaCha20, VarCipherText};
+use ore_rs::scheme::chained::{
+    OreAes128Bit6Chained, OreAes128Bit6ChainedChaCha20, Padding, VarCipherText,
+};
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use std::cmp::Ordering;
@@ -73,6 +79,28 @@ fn cipher_left() -> OreAes128Bit6ChainedChaCha20 {
     OreAes128Bit6Chained::init(&K1).unwrap()
 }
 
+const FIXED: Padding = Padding::Fixed { max_bytes: 24 };
+
+fn cipher_a_with(padding: Padding) -> OreA {
+    OreAes128Bit6Chained::init_with_padding(&K1, padding).unwrap()
+}
+
+fn cipher_left_with(padding: Padding) -> OreAes128Bit6ChainedChaCha20 {
+    OreAes128Bit6Chained::init_with_padding(&K1, padding).unwrap()
+}
+
+/// Pinned `(string, hex)` pairs.
+type Pinned = &'static [(&'static str, &'static str)];
+
+/// The pinned string sets other than the default: each policy's left and
+/// full ciphertexts.
+fn other_policies() -> [(Padding, Pinned, Pinned); 2] {
+    [
+        (Padding::None, LEFT_STR_UNPADDED, FULL_STR_UNPADDED),
+        (FIXED, LEFT_STR_FIXED, FULL_STR_FIXED),
+    ]
+}
+
 /// Strings pinned as full ciphertexts. Ordered so that adjacent pairs exercise
 /// each comparator path: equal prefix then shorter-first (`""` < `"a"`,
 /// `"alice"` < `"alice@example.com"`), a difference in the last, padded
@@ -106,6 +134,21 @@ fn left_str_vectors() {
 }
 
 #[test]
+fn left_str_vectors_other_policies() {
+    for (padding, lefts, _) in other_policies() {
+        let ore = cipher_left_with(padding);
+        for (s, expected) in lefts {
+            let left = ore.encrypt_left_str(s).unwrap();
+            assert_eq!(
+                hex::encode(left.to_bytes()),
+                *expected,
+                "left ciphertext mismatch for {s:?} under {padding:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn left_symbol_vectors() {
     let ore = cipher_left();
     for (syms, expected) in LEFT_SYMBOLS {
@@ -135,6 +178,20 @@ fn full_str_vectors() {
 }
 
 #[test]
+fn full_str_vectors_other_policies() {
+    for (padding, _, fulls) in other_policies() {
+        for (s, expected) in fulls {
+            let ct = cipher_a_with(padding).encrypt_str(s).unwrap();
+            assert_eq!(
+                hex::encode(ct.to_bytes()),
+                *expected,
+                "full ciphertext mismatch for {s:?} under {padding:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn full_symbol_vectors() {
     for (syms, expected) in FULL_SYMBOLS {
         let ct = cipher_a().encrypt_var(syms).unwrap();
@@ -156,9 +213,13 @@ fn full_alice_alternate_nonce() {
 /// artefact: `compare_left_to_full` relies on the shared layout.
 #[test]
 fn full_ciphertext_starts_with_the_left_ciphertext() {
-    for ((s, left), (s2, full)) in LEFT_STR.iter().zip(FULL_STR) {
-        assert_eq!(s, s2);
-        assert!(full.starts_with(left), "left prefix mismatch for {:?}", s);
+    let mut sets = vec![(LEFT_STR, FULL_STR)];
+    sets.extend(other_policies().iter().map(|&(_, l, f)| (l, f)));
+    for (lefts, fulls) in sets {
+        for ((s, left), (s2, full)) in lefts.iter().zip(fulls.iter()) {
+            assert_eq!(s, s2);
+            assert!(full.starts_with(left), "left prefix mismatch for {:?}", s);
+        }
     }
 }
 
@@ -183,6 +244,67 @@ fn compare_raw_slices_matches_plaintext_order() {
                 "compare_raw_slices({sa:?}, {sb:?})"
             );
         }
+    }
+}
+
+#[test]
+fn compare_matches_plaintext_order_other_policies() {
+    type C = OreAes128Bit6ChainedChaCha20;
+    for (padding, lefts, fulls) in other_policies() {
+        for ((sa, ha), (_, hl)) in fulls.iter().zip(lefts.iter()) {
+            for (sb, hb) in fulls {
+                let expected = sa.as_bytes().cmp(sb.as_bytes());
+                assert_eq!(
+                    C::compare_raw_slices(&pinned(ha), &pinned(hb)),
+                    Some(expected),
+                    "compare_raw_slices({sa:?}, {sb:?}) under {padding:?}"
+                );
+                assert_eq!(
+                    C::compare_left_to_full(&pinned(hl), &pinned(hb)),
+                    Some(expected),
+                    "compare_left_to_full({sa:?}, {sb:?}) under {padding:?}"
+                );
+            }
+        }
+    }
+}
+
+/// Ciphertexts of one string under different policies do not compare.
+#[test]
+fn comparators_refuse_mixed_policies() {
+    type C = OreAes128Bit6ChainedChaCha20;
+    let alice =
+        |set: &[(&str, &'static str)]| pinned(set.iter().find(|(s, _)| *s == "alice").unwrap().1);
+    let fulls = [
+        alice(FULL_STR),
+        alice(FULL_STR_UNPADDED),
+        alice(FULL_STR_FIXED),
+    ];
+    let lefts = [
+        alice(LEFT_STR),
+        alice(LEFT_STR_UNPADDED),
+        alice(LEFT_STR_FIXED),
+    ];
+    for (i, (full_a, left_a)) in fulls.iter().zip(&lefts).enumerate() {
+        for (j, full_b) in fulls.iter().enumerate() {
+            let expected = (i == j).then_some(Ordering::Equal);
+            assert_eq!(C::compare_raw_slices(full_a, full_b), expected);
+            assert_eq!(C::compare_left_to_full(left_a, full_b), expected);
+        }
+    }
+}
+
+/// Padding changes only the header and adds blocks: the unpadded string
+/// vectors are the raw-symbol encryptions of the string's decomposition,
+/// and each padded vector's blocks begin with the unpadded vector's.
+#[test]
+fn padding_extends_the_unpadded_blocks() {
+    // `xt` follows the 7-byte header.
+    const H: usize = 7;
+    for ((s, unpadded), (_, padded)) in LEFT_STR_UNPADDED.iter().zip(LEFT_STR) {
+        let (u, p) = (pinned(unpadded), pinned(padded));
+        let count = u16::from_be_bytes([u[2], u[3]]) as usize;
+        assert_eq!(u[H..H + count], p[H..H + count], "xt prefix for {s:?}");
     }
 }
 
@@ -248,11 +370,15 @@ fn pinned_bytes_round_trip_the_parser() {
 // Malformed input over pinned bytes
 // ---------------------------------------------------------------------------
 
-/// A pinned ciphertext with its first `xt` byte (just after the 4-byte
-/// header) set to 64, one past the Bit6 symbol domain.
+/// Offset of the first `xt` byte: after the 4-byte common header and the
+/// 3-byte padding policy.
+const XT: usize = 7;
+
+/// A pinned ciphertext with its first `xt` byte set to 64, one past the
+/// Bit6 symbol domain.
 fn with_out_of_domain_symbol(hex_str: &str) -> Vec<u8> {
     let mut bytes = pinned(hex_str);
-    bytes[4] = 64;
+    bytes[XT] = 64;
     bytes
 }
 
@@ -270,7 +396,7 @@ fn parser_rejects_out_of_domain_symbols() {
 
     // The highest in-domain symbol still parses.
     let mut edge = pinned(full_alice());
-    edge[4] = 63;
+    edge[XT] = 63;
     assert!(VarCipherText::from_slice(&edge).is_ok());
 }
 
@@ -333,6 +459,15 @@ fn comparators_reject_wrong_lengths_and_headers() {
         OreAes128Bit6ChainedChaCha20::compare_raw_slices(&s, &full),
         None
     );
+
+    // Unknown padding kind.
+    let mut p = full.clone();
+    p[4] = 3;
+    assert_eq!(
+        OreAes128Bit6ChainedChaCha20::compare_raw_slices(&p, &p),
+        None
+    );
+    assert!(VarCipherText::from_slice(&p).is_err());
 }
 
 #[test]
@@ -384,4 +519,22 @@ fn generate() {
         "pub const FULL_ALICE_SEED_B: &str = \"{}\";",
         hex::encode(ct.to_bytes())
     );
+
+    for (padding, suffix) in [(Padding::None, "UNPADDED"), (FIXED, "FIXED")] {
+        println!();
+        let ore = cipher_left_with(padding);
+        println!("pub const LEFT_STR_{suffix}: &[(&str, &str)] = &[");
+        for s in STRINGS {
+            let left = ore.encrypt_left_str(s).unwrap();
+            println!("    ({s:?}, \"{}\"),", hex::encode(left.to_bytes()));
+        }
+        println!("];");
+        println!();
+        println!("pub const FULL_STR_{suffix}: &[(&str, &str)] = &[");
+        for s in STRINGS {
+            let ct = cipher_a_with(padding).encrypt_str(s).unwrap();
+            println!("    ({s:?}, \"{}\"),", hex::encode(ct.to_bytes()));
+        }
+        println!("];");
+    }
 }

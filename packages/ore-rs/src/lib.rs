@@ -321,6 +321,13 @@ pub enum OreError {
     /// represent (the chained scheme encodes the block count as a `u16`).
     #[error("Too many blocks")]
     TooManyBlocks,
+    /// A string longer than the fixed length its padding policy pads to.
+    #[error("String longer than its padding")]
+    ExceedsPadding,
+    /// A string that ends in NUL, refused by a padding policy: padded with
+    /// NULs, it would encrypt the same as the string without them.
+    #[error("String ends in NUL")]
+    TrailingNul,
 }
 
 /// A BlockORE cipher: a key-bound object that can encrypt fixed-N plaintexts
