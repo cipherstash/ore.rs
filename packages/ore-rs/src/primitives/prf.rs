@@ -1,11 +1,11 @@
 use crate::primitives::{AesBlock, Prf, PrfKey};
 use aes::cipher::{BlockEncrypt, KeyInit};
-use aes::Aes128;
+use aes::Aes128Enc;
 use zeroize::ZeroizeOnDrop;
 
 #[derive(Debug, ZeroizeOnDrop)]
 pub struct Aes128Prf {
-    cipher: Aes128,
+    cipher: Aes128Enc,
 }
 
 /*
@@ -15,7 +15,7 @@ pub struct Aes128Prf {
 impl Prf for Aes128Prf {
     fn new(key: &PrfKey) -> Self {
         //let key_array = GenericArray::from_slice(key);
-        let cipher = Aes128::new(key);
+        let cipher = Aes128Enc::new(key);
         Self { cipher }
     }
 
