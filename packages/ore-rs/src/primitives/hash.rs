@@ -1,17 +1,17 @@
 use crate::primitives::{AesBlock, Hash, HashKey};
 use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
-use aes::Aes128;
+use aes::Aes128Enc;
 use zeroize::ZeroizeOnDrop;
 
 #[derive(ZeroizeOnDrop)]
 pub struct Aes128Z2Hash {
-    cipher: Aes128,
+    cipher: Aes128Enc,
 }
 
 impl Hash for Aes128Z2Hash {
     fn new(key: &HashKey) -> Self {
         let key_array = GenericArray::from_slice(key);
-        let cipher = Aes128::new(key_array);
+        let cipher = Aes128Enc::new(key_array);
         Self { cipher }
     }
 
@@ -67,10 +67,10 @@ pub struct FixedPiZ2Hash {
 /// evaluate H with no key material).
 pub const PI_KEY: [u8; 16] = *b"ORE-rs.v2.H-pi.1";
 
-fn pi() -> &'static Aes128 {
+fn pi() -> &'static Aes128Enc {
     use std::sync::OnceLock;
-    static PI: OnceLock<Aes128> = OnceLock::new();
-    PI.get_or_init(|| Aes128::new(GenericArray::from_slice(&PI_KEY)))
+    static PI: OnceLock<Aes128Enc> = OnceLock::new();
+    PI.get_or_init(|| Aes128Enc::new(GenericArray::from_slice(&PI_KEY)))
 }
 
 /// GF(2^128) doubling `2·x` on a big-endian field element packed in a `u128`

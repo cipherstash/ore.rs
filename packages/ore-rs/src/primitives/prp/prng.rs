@@ -1,9 +1,9 @@
 use aes::cipher::{consts::U16, generic_array::GenericArray, BlockEncrypt, KeyInit};
-use aes::Aes128;
+use aes::Aes128Enc;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub struct Aes128Prng {
-    cipher: Aes128,
+    cipher: Aes128Enc,
     data: [GenericArray<u8, U16>; 16],
     ptr: usize, // flat index into the 256 buffered bytes (block = ptr >> 4)
     ctr: u32,   // increments with each new encryption
@@ -35,13 +35,13 @@ impl Drop for Aes128Prng {
 impl ZeroizeOnDrop for Aes128Prng {}
 
 // The drop-time wipe of `cipher` (the AES key schedule) relies entirely on
-// `aes::Aes128: ZeroizeOnDrop`, which is gated behind the `aes` crate's
+// `aes::Aes128Enc: ZeroizeOnDrop`, which is gated behind the `aes` crate's
 // `zeroize` feature. Assert it at compile time so the build fails fast if that
 // feature is ever lost — otherwise the key-schedule wipe would silently vanish
 // while this type still (falsely) claims `ZeroizeOnDrop`.
 const _: fn() = || {
     fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
-    assert_zeroize_on_drop::<Aes128>();
+    assert_zeroize_on_drop::<Aes128Enc>();
 };
 
 /*
@@ -52,7 +52,7 @@ const _: fn() = || {
 impl Aes128Prng {
     pub fn init(key: &[u8]) -> Self {
         let key_array = GenericArray::from_slice(key);
-        let cipher = Aes128::new(key_array);
+        let cipher = Aes128Enc::new(key_array);
         let mut prng = Self {
             cipher,
             data: Default::default(),
