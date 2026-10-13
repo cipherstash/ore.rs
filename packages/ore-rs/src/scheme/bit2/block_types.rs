@@ -64,7 +64,7 @@ impl CipherTextBlock for LeftBlock16 {
         if data.len() != Self::BLOCK_SIZE {
             Err(ParseError)
         } else {
-            Ok(Self::clone_from_slice(data))
+            Ok(*crate::primitives::block_ref(data))
         }
     }
 

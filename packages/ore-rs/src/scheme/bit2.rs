@@ -7,13 +7,12 @@
 use crate::{
     ciphertext::*,
     primitives::{
-        hash::Aes128Z2Hash, prf::Aes128Prf, AesBlock, Hash, HashKey, Prf, Prp, Symbol, NONCE_SIZE,
+        block_ref, hash::Aes128Z2Hash, prf::Aes128Prf, AesBlock, Hash, Prf, Prp, Symbol, NONCE_SIZE,
     },
     scheme::width::{AesBlockBuf, Bit8, BlockWidth, FirstDiff, RightBitVec},
     OreCipher, OreError, PlainText,
 };
 
-use aes::cipher::generic_array::GenericArray;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use std::cell::RefCell;
@@ -143,8 +142,8 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
         let rng: R = SeedableRng::from_entropy();
 
         Ok(OreAes128 {
-            prf1: Prf::new(GenericArray::from_slice(k1)),
-            prf2: Prf::new(GenericArray::from_slice(k2)),
+            prf1: Prf::new(k1.into()),
+            prf2: Prf::new(k2.into()),
             rng: RefCell::new(rng),
         })
     }
@@ -175,7 +174,7 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
          * there for new schemes; this scheme keeps the construction for
          * wire compatibility.
          */
-        let hasher: Aes128Z2Hash = Hash::new(AesBlock::from_slice(&right.nonce));
+        let hasher: Aes128Z2Hash = Hash::new((&right.nonce).into());
 
         // RO key template: entry `j` of the template holds the *input*
         // `(x[0..n] ‖ j ‖ n)` for the current block. Between blocks only
@@ -290,7 +289,7 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
             return Some(Ordering::Equal);
         }
 
-        let hash_key = HashKey::from_slice(&b_right[0..NONCE_SIZE]);
+        let hash_key = block_ref(&b_right[0..NONCE_SIZE]);
         let hash: Aes128Z2Hash = Hash::new(hash_key);
 
         if diff.resolve(&hash) == 1 {
@@ -347,7 +346,7 @@ impl<const N: usize> Ord for CipherText<OreAes128ChaCha20, N> {
             return Ordering::Equal;
         }
 
-        let hash: Aes128Z2Hash = Hash::new(AesBlock::from_slice(&b.right.nonce));
+        let hash: Aes128Z2Hash = Hash::new((&b.right.nonce).into());
         if diff.resolve(&hash) == 1 {
             return Ordering::Greater;
         }

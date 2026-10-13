@@ -91,7 +91,7 @@
 //! ## Serializing/Deserializing
 //!
 //! *Note: this library doesn't use [Serde](https://crates.io/crates/serde) due to some complexities
-//! with GenericArray used in the [AES](https://crates.io/crates/aes) library. This may change in the future.*
+//! with the array types used by the [AES](https://crates.io/crates/aes) library. This may change in the future.*
 //!
 //! To serialize a [`CipherText<S, N>`] to a vector of bytes:
 //!

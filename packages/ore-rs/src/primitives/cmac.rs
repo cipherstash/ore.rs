@@ -12,7 +12,7 @@
 //! the σ-MMO GF(2^128) doubling.
 
 use crate::primitives::hash::gf128_double_u128;
-use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
+use aes::cipher::{BlockCipherEncrypt, KeyInit};
 use aes::Aes128Enc;
 use zeroize::Zeroize;
 
@@ -73,7 +73,7 @@ impl CmacAccumulator {
     /// at the all-zero CBC IV (empty prefix).
     pub(crate) fn new(key: &[u8; 16]) -> Self {
         // Encryption only: CMAC never decrypts, so build no decryption schedule.
-        let cipher = Aes128Enc::new(GenericArray::from_slice(key));
+        let cipher = Aes128Enc::new(key.into());
         let mut acc = Self {
             cipher,
             k1: [0u8; 16],
@@ -87,8 +87,7 @@ impl CmacAccumulator {
 
     #[inline]
     fn encrypt(&self, mut b: [u8; 16]) -> [u8; 16] {
-        self.cipher
-            .encrypt_block(GenericArray::from_mut_slice(&mut b));
+        self.cipher.encrypt_block((&mut b).into());
         b
     }
 
@@ -102,8 +101,7 @@ impl CmacAccumulator {
     pub(crate) fn absorb(&mut self, block: &[u8; 16]) {
         let mut mixed =
             (u128::from_be_bytes(self.state) ^ u128::from_be_bytes(*block)).to_be_bytes();
-        self.cipher
-            .encrypt_block(GenericArray::from_mut_slice(&mut mixed));
+        self.cipher.encrypt_block((&mut mixed).into());
         self.state = mixed;
     }
 
@@ -119,8 +117,7 @@ impl CmacAccumulator {
             ^ u128::from_be_bytes(*final_block)
             ^ u128::from_be_bytes(self.k1))
         .to_be_bytes();
-        self.cipher
-            .encrypt_block(GenericArray::from_mut_slice(&mut mixed));
+        self.cipher.encrypt_block((&mut mixed).into());
         mixed
     }
 
@@ -203,9 +200,9 @@ mod tests {
     /// NIST construction without reusing the accumulator's state threading, so
     /// it can validate that threading for any block count (not just t∈{1,4}).
     fn reference_cmac(key: &[u8; 16], blocks: &[[u8; 16]]) -> [u8; 16] {
-        let cipher = aes::Aes128::new(GenericArray::from_slice(key));
+        let cipher = aes::Aes128::new(key.into());
         let enc = |mut b: [u8; 16]| {
-            cipher.encrypt_block(GenericArray::from_mut_slice(&mut b));
+            cipher.encrypt_block((&mut b).into());
             b
         };
         let k1 = gf128_double_u128(u128::from_be_bytes(enc([0u8; 16]))).to_be_bytes();

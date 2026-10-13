@@ -5,13 +5,20 @@ pub mod prp;
 pub mod simd;
 pub(crate) mod stack;
 
-use aes::cipher::{consts::U16, generic_array::GenericArray};
+use aes::cipher::{consts::U16, Array};
 use aes::Block;
+use core::convert::TryFrom;
 use thiserror::Error;
 pub type AesBlock = Block;
-pub type PrfKey = GenericArray<u8, U16>;
-pub type HashKey = GenericArray<u8, U16>;
+pub type PrfKey = Array<u8, U16>;
+pub type HashKey = Array<u8, U16>;
 pub const NONCE_SIZE: usize = 16;
+
+/// View a 16-byte slice as an AES-sized array. Panics on any other length,
+/// as `GenericArray::from_slice` did; every caller passes a fixed 16-byte range.
+pub(crate) fn block_ref(s: &[u8]) -> &Array<u8, U16> {
+    <&Array<u8, U16>>::try_from(s).expect("AES block slice must be 16 bytes")
+}
 
 pub trait Prf {
     fn new(key: &PrfKey) -> Self;
