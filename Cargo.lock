@@ -5,8 +5,7 @@ version = 4
 [[package]]
 name = "aes"
 version = "0.9.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35f0f96ce78e38c3dc6d8948aa8163d06385be74000f3c7a95bf1eef35d3ea32"
+source = "git+https://github.com/RustCrypto/block-ciphers?rev=b99ebe6a2d394833a14a84b79aac60c0c0611577#b99ebe6a2d394833a14a84b79aac60c0c0611577"
 dependencies = [
  "cipher",
  "cpubits",
