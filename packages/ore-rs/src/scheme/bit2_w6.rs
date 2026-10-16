@@ -28,6 +28,10 @@
 //! the legacy scheme does not let legacy ciphertexts reveal Bit6 masking
 //! keys, and ciphertexts under different salts share no key material.
 
+#[cfg(feature = "vitaminc")]
+use crate::scheme::decompose::num_blocks_6bit;
+#[cfg(feature = "vitaminc")]
+use crate::OreOutput;
 use crate::{
     ciphertext::*,
     primitives::{
@@ -269,6 +273,50 @@ impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
             prf1,
             prf2,
             rng: RefCell::new(SeedableRng::from_entropy()),
+        })
+    }
+}
+
+impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
+    /// Encrypt bytes already encoded so that byte order is value order
+    /// (MSB-first 6-bit blocks, `⌈8n/6⌉` of them). Up to ten bytes fit the
+    /// [`MAX_BLOCKS`] cap; more returns [`OreError::TooManyBlocks`].
+    ///
+    /// The block count depends on the length, which is only known at
+    /// runtime, so the result is the serialised full ciphertext rather
+    /// than a `CipherText<_, N>`; compare it with
+    /// [`compare_raw_slices`](crate::OreCipher::compare_raw_slices).
+    ///
+    /// Crate-private on purpose: the only encoded bytes this crate accepts
+    /// from outside arrive sealed, as a vitaminc `OrderPlaintext` through
+    /// the `vitaminc` module, so a caller cannot hand the scheme bytes that
+    /// skipped the encoding. The typed impls above remain the public way in.
+    #[cfg(feature = "vitaminc")]
+    pub(crate) fn encrypt_bytes(&self, bytes: &[u8]) -> Result<Vec<u8>, OreError> {
+        match bytes.len() {
+            0 => self.encrypt_bytes_as::<0>(bytes),
+            1 => self.encrypt_bytes_as::<2>(bytes),
+            2 => self.encrypt_bytes_as::<3>(bytes),
+            3 => self.encrypt_bytes_as::<4>(bytes),
+            4 => self.encrypt_bytes_as::<6>(bytes),
+            5 => self.encrypt_bytes_as::<7>(bytes),
+            6 => self.encrypt_bytes_as::<8>(bytes),
+            7 => self.encrypt_bytes_as::<10>(bytes),
+            8 => self.encrypt_bytes_as::<11>(bytes),
+            9 => self.encrypt_bytes_as::<12>(bytes),
+            10 => self.encrypt_bytes_as::<14>(bytes),
+            _ => Err(OreError::TooManyBlocks),
+        }
+    }
+
+    /// [`Self::encrypt_bytes`] at a block count the caller has matched to
+    /// the length: `B == num_blocks_6bit(bytes.len())`.
+    #[cfg(feature = "vitaminc")]
+    fn encrypt_bytes_as<const B: usize>(&self, bytes: &[u8]) -> Result<Vec<u8>, OreError> {
+        debug_assert_eq!(B, num_blocks_6bit(bytes.len()));
+        stack::scrubbed(|| {
+            let blocks = Blocks6::decompose(bytes, [0u8; B]);
+            self.encrypt_blocks(&blocks).map(|ct| ct.to_bytes())
         })
     }
 }

@@ -30,6 +30,23 @@ Reference documentation is on [docs.rs/ore-rs](https://docs.rs/ore-rs).
 
 The v2 schemes (`OreAes128Bit6`, `OreAes128Bit6Chained`) take **one 16-byte key** and an optional **salt**: `init(key)` or `init_with_salt(key, salt)`; on the chained scheme the salt is also an `Options` field (`Options::with_salt`), beside the padding policy and the ceiling, for `init_with(key, options)`. The salt is any byte string naming what the key is for, such as a column or a tenant. Ciphertexts under different salts share no key material and never compare `Equal`, but nothing on the wire records the salt, so a comparison across salts returns a confident, meaningless order; keep the salt with the data's identity, as you keep the key. Use one key or salt per column: under one key and salt, values of different types whose order-preserving encodings coincide (`0u64` and `i64::MIN`, say) encrypt to the same bytes. The legacy `OreAes128` keeps its frozen two-key `init(k1, k2)`.
 
+## Use from vitaminc
+
+The `vitaminc` feature implements [`vitaminc-ore`](https://docs.rs/vitaminc-ore)'s
+`OrderScheme` for three schemes, so a vitaminc order index can encrypt
+the sealed order plaintexts it builds here. `vitaminc::Bit6BlockOre` is
+the ORE v2 fixed-width six-bit scheme (`OreAes128Bit6`) at each kind's
+own width, up to ten bytes, the one to prefer for new fixed-width data;
+`vitaminc::ChainedBlockOre` is the chained, variable-length scheme, which
+takes every kind, text and bytes included, and is not yet frozen;
+`vitaminc::BlockOre` is the legacy eight-bit scheme (`OreAes128`) up to
+15 bytes. None of them takes a salt, so each derives its keys per term
+with HMAC-SHA256 under the salt vitaminc binds (scheme, domain and the
+caller's context). The feature is off by default, changes nothing in the
+typed API above, and needs Rust 1.88. This is a trial against vitaminc's
+`feat/ore-crate` branch; it moves to the published release when that
+lands.
+
 ## Need help?
 
 Please [open an issue](https://github.com/cipherstash/ore.rs/issues) and we'll get back to you.

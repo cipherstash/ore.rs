@@ -841,6 +841,23 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         })
     }
 
+    /// Encrypt bytes already encoded so that byte order is value order
+    /// (MSB-first 6-bit blocks): [`Self::encrypt_str`] over bytes rather
+    /// than a string, padded and refused as it is. Crate-private on
+    /// purpose: the only encoded bytes this crate accepts from outside
+    /// arrive sealed, as a vitaminc `OrderPlaintext` through the `vitaminc`
+    /// module, so a caller cannot hand the scheme bytes that skipped the
+    /// encoding.
+    #[cfg(feature = "vitaminc")]
+    pub(crate) fn encrypt_bytes(&self, bytes: &[u8]) -> Result<VarCipherText, OreError> {
+        stack::scrubbed(|| {
+            self.encrypt_blocks(
+                &padded_bytes_to_blocks(bytes, &self.options)?,
+                self.padding(),
+            )
+        })
+    }
+
     /// Compare two serialised full ciphertexts (lexicographic; shorter prefix
     /// sorts first). `None` if either is not a well-formed ciphertext of this
     /// scheme, or if they were padded under different policies.
@@ -1193,7 +1210,14 @@ fn check_symbols(x: &[u8]) -> Result<Blocks6<&[u8]>, OreError> {
 /// allocating or decomposing it. The decomposition is the whole plaintext
 /// (it inverts), so the buffer is wiped when dropped.
 fn str_to_blocks(s: &str, options: &Options) -> Result<Blocks6<Zeroizing<Vec<u8>>>, OreError> {
-    let bytes = s.as_bytes();
+    padded_bytes_to_blocks(s.as_bytes(), options)
+}
+
+/// [`str_to_blocks`] over any bytes.
+fn padded_bytes_to_blocks(
+    bytes: &[u8],
+    options: &Options,
+) -> Result<Blocks6<Zeroizing<Vec<u8>>>, OreError> {
     if bytes.len() > MAX_STR_BYTES {
         return Err(OreError::TooManyBlocks);
     }
