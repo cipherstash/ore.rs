@@ -21,7 +21,7 @@ Reference documentation is on [docs.rs/ore-rs](https://docs.rs/ore-rs).
 
 ## Supported plaintext types
 
-`OreEncrypt` is implemented for `bool`, all integer widths (`u8`–`u128`, `i8`–`i128`), `char`, `f32`, and `f64`. `u128` and `i128` cannot be encrypted yet: `OreAes128` takes at most 15 bytes (its left-tag input puts the block index at byte `N` of one AES block), so encrypting a 16-byte value panics, and `OreAes128Bit6` covers types up to 64 bits. Two optional features extend this via the sibling [`orderable-bytes`](https://crates.io/crates/orderable-bytes) crate:
+`OreEncrypt` is implemented for `bool`, integers up to 64 bits (`u8`–`u64`, `i8`–`i64`), `char`, `f32`, and `f64` on both `OreAes128` and `OreAes128Bit6`. `u128` and `i128` are implemented on the chained scheme only (`OreAes128Bit6Chained`, `scheme::chained`): at 16 bytes they exceed both the 15-byte limit of `OreAes128` and the 14-block packed prefix of `OreAes128Bit6`, and the chained scheme's CMAC accumulator has no length cap. Their ciphertexts are `ChainedCipherText<22>` / `ChainedLeft<22>`, which pin the block count: the typed parsers and comparators refuse a ciphertext of another length. That is a length guard, not a type guard; a 16-byte string or an `i128` is 22 blocks too, and under one key equal encodings (`0u128`, `i128::MIN`) encrypt identically, so use one key per column. Two optional features extend this via the sibling [`orderable-bytes`](https://crates.io/crates/orderable-bytes) crate:
 
 - `chrono` — ORE support for `chrono::NaiveDate` and `chrono::DateTime<Utc>`
 - `decimal` — ORE support for `rust_decimal::Decimal`
@@ -83,7 +83,7 @@ Beyond the order and the first differing block of a compared pair, an `OreAes128
 * the number of leading zero bytes of an integer, which is its order of magnitude, as the same value in every ciphertext under a key;
 * other runs of zero bytes, such as the trailing zero mantissa bytes of a round float.
 
-The wire format of `OreAes128` is frozen, so this cannot change for existing data. For new data, use `OreAes128Bit6` (`scheme::bit2_w6`, ORE v2), which binds the block index and the block count into its seeds. It covers types up to 64 bits; `Decimal` stays on `OreAes128` for now. `u128` and `i128` are supported by neither scheme (see [Supported plaintext types](#supported-plaintext-types)). See "Known leakage of the legacy scheme" in [the v2 plan](https://github.com/cipherstash/ore.rs/blob/main/docs/plans/2026-06-12-ore-v2-architecture.md).
+The wire format of `OreAes128` is frozen, so this cannot change for existing data. For new data, use `OreAes128Bit6` (`scheme::bit2_w6`, ORE v2), which binds the block index and the block count into its seeds. It covers types up to 64 bits; `Decimal` stays on `OreAes128` for now. `u128` and `i128` use the chained scheme (see [Supported plaintext types](#supported-plaintext-types)). See "Known leakage of the legacy scheme" in [the v2 plan](https://github.com/cipherstash/ore.rs/blob/main/docs/plans/2026-06-12-ore-v2-architecture.md).
 
 To report a security issue, see [SECURITY.md](https://github.com/cipherstash/ore.rs/blob/main/SECURITY.md) or email security@cipherstash.com.
 

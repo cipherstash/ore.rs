@@ -610,7 +610,9 @@ PR 2's trait change, which should be called out in the changelog).
 > with variable-length `Var*` types and string encryption. Lexicographic cross-length
 > comparison, equality-across-nonces, and >14-block plaintexts are tested; perf
 > `docs/benchmarks/2026-06-15-chained-results.md` (~0.69 µs/block, below fixed-N's ~0.81).
-> Not yet in: `u128`/`Decimal` via the const-N + accumulator path. Wire vectors are
+> `u128`/`i128` landed 2026-10 as `OreEncrypt` impls on the chained scheme with
+> block-count-typed outputs (`ChainedCipherText<22>`), not a separate const-N scheme
+> (issue #105). `Decimal` can follow the same way via `encrypt_fixed`. Wire vectors are
 > pinned (`tests/compat_chained_vectors.rs`).
 
 ## Testing strategy

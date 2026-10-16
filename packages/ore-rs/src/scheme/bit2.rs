@@ -107,6 +107,14 @@ pub(crate) fn encode_right_block<W: BlockWidth, H: Hash>(
     prp.indicator_mask_xor(x, out);
 }
 
+/// Maximum number of blocks (= plaintext bytes): the left-tag input packs
+/// `prefix ‖ xt ‖ index@N` into one 16-byte AES block, so `N ≤ 15`. A
+/// 16-byte plaintext (`u128`/`i128`) used to index past the block and panic
+/// (issue #105); `encrypt`/`encrypt_left` now return
+/// [`OreError::TooManyBlocks`], and the `OreEncrypt` impls refuse such types
+/// at compile time.
+pub const MAX_BLOCKS: usize = 15;
+
 impl<R: Rng + SeedableRng> OreAes128<R> {
     /// Fill `left` with the PRF₁ tag inputs and permuted values for `x`,
     /// using the given PRP seeds. After this returns, `left.f[n]` holds the
@@ -150,6 +158,9 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
     }
 
     fn encrypt_left<const N: usize>(&self, x: &PlainText<N>) -> EncryptLeftResult<R, N> {
+        if N > MAX_BLOCKS {
+            return Err(OreError::TooManyBlocks);
+        }
         let mut output = Left::<Self, N>::init();
 
         let seeds = derive_prp_seeds(&self.prf2, x);
@@ -160,6 +171,9 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
     }
 
     fn encrypt<const N: usize>(&self, x: &PlainText<N>) -> EncryptResult<R, N> {
+        if N > MAX_BLOCKS {
+            return Err(OreError::TooManyBlocks);
+        }
         let mut left = Left::<Self, N>::init();
         let mut right = Right::<Self, N>::init();
 
@@ -375,6 +389,23 @@ mod tests {
     use quickcheck::TestResult;
 
     type Ore = OreAes128ChaCha20;
+
+    /// A 16-byte plaintext does not fit the left-tag input (issue #105): an
+    /// error, not an out-of-bounds panic. 15 bytes is the most the scheme takes.
+    #[test]
+    fn sixteen_bytes_is_an_error_not_a_panic() {
+        let ore = init_ore();
+        assert!(matches!(
+            ore.encrypt(&[0u8; 16]),
+            Err(OreError::TooManyBlocks)
+        ));
+        assert!(matches!(
+            ore.encrypt_left(&[0u8; 16]),
+            Err(OreError::TooManyBlocks)
+        ));
+        assert!(ore.encrypt(&[0u8; 15]).is_ok());
+        assert!(ore.encrypt_left(&[0u8; 15]).is_ok());
+    }
 
     fn init_ore() -> Ore {
         let mut k1: [u8; 16] = Default::default();

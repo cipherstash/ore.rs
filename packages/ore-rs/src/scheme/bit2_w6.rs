@@ -12,8 +12,9 @@
 //! the block count in byte 15 must fit one AES block; seeds also use byte
 //! 14 for the block index), which covers all
 //! primitives up to 64 bits. `Decimal` stays on the legacy scheme until the
-//! chained-prefix construction lands (plan §5). `u128`/`i128` fit neither:
-//! the legacy scheme takes at most 15 bytes and panics on 16.
+//! chained-prefix construction lands (plan §5). `u128`/`i128` (22 blocks)
+//! fit neither this scheme nor the legacy one (15 bytes at most); they are
+//! encrypted with [`crate::scheme::chained`], which has no length cap.
 //!
 //! **Status: wire format NOT yet frozen.** The Z2 hash is the fixed-π MMO
 //! construction proposed in plan §6 (option 3), pending crypto review;
@@ -424,8 +425,11 @@ mod encrypt_impls {
     use orderable_bytes::{FixedOrderableBytes, OrderableBytes};
     use rand::{Rng, SeedableRng};
 
+    // Each invocation also emits a test that the type round-trips, orders
+    // `$lo` below `$hi`, and compares equal across nonces, so a type cannot
+    // be listed as supported without being exercised (issue #105).
     macro_rules! impl_ore_encrypt_bit6 {
-        ($type:ty, $blocks_const:ident) => {
+        ($type:ty, $blocks_const:ident, $tests:ident, $lo:expr, $hi:expr) => {
             /// Block count for this type at 6-bit width.
             const $blocks_const: usize =
                 num_blocks_6bit(<$type as FixedOrderableBytes>::ENCODED_LEN);
@@ -458,21 +462,68 @@ mod encrypt_impls {
                     })
                 }
             }
+
+            #[cfg(test)]
+            mod $tests {
+                use super::*;
+                use crate::scheme::bit2_w6::OreAes128Bit6ChaCha20;
+                use crate::{OreCipher, OreOutput};
+                use std::cmp::Ordering;
+
+                #[test]
+                fn round_trip_order_and_equality() {
+                    let ore: OreAes128Bit6ChaCha20 =
+                        OreCipher::init(&[0x11; 16], &[0x22; 16]).unwrap();
+                    let (lo, hi): ($type, $type) = ($lo, $hi);
+                    assert!(lo < hi);
+
+                    let lo_ct = lo.encrypt(&ore).unwrap();
+                    let hi_ct = hi.encrypt(&ore).unwrap();
+                    let lo_left = lo.encrypt_left(&ore).unwrap();
+                    let lo_ct2 = lo.encrypt(&ore).unwrap();
+
+                    let lo_bytes = lo_ct.to_bytes();
+                    let hi_bytes = hi_ct.to_bytes();
+                    assert_eq!(
+                        CipherText::<OreAes128Bit6ChaCha20, $blocks_const>::from_slice(&lo_bytes)
+                            .unwrap()
+                            .to_bytes(),
+                        lo_bytes
+                    );
+                    assert_eq!(
+                        Left::<OreAes128Bit6ChaCha20, $blocks_const>::from_slice(
+                            &lo_left.to_bytes()
+                        )
+                        .unwrap()
+                        .to_bytes(),
+                        lo_left.to_bytes()
+                    );
+
+                    let cmp = OreAes128Bit6ChaCha20::compare_raw_slices;
+                    assert_eq!(cmp(&lo_bytes, &hi_bytes), Some(Ordering::Less));
+                    assert_eq!(cmp(&hi_bytes, &lo_bytes), Some(Ordering::Greater));
+                    assert_ne!(lo_bytes, lo_ct2.to_bytes());
+                    assert_eq!(cmp(&lo_bytes, &lo_ct2.to_bytes()), Some(Ordering::Equal));
+                    assert_eq!(lo_ct.cmp(&hi_ct), Ordering::Less);
+                }
+            }
         };
     }
 
-    impl_ore_encrypt_bit6!(bool, BOOL_BLOCKS);
-    impl_ore_encrypt_bit6!(u8, U8_BLOCKS);
-    impl_ore_encrypt_bit6!(i8, I8_BLOCKS);
-    impl_ore_encrypt_bit6!(u16, U16_BLOCKS);
-    impl_ore_encrypt_bit6!(i16, I16_BLOCKS);
-    impl_ore_encrypt_bit6!(u32, U32_BLOCKS);
-    impl_ore_encrypt_bit6!(i32, I32_BLOCKS);
-    impl_ore_encrypt_bit6!(u64, U64_BLOCKS);
-    impl_ore_encrypt_bit6!(i64, I64_BLOCKS);
-    impl_ore_encrypt_bit6!(char, CHAR_BLOCKS);
-    impl_ore_encrypt_bit6!(f32, F32_BLOCKS);
-    impl_ore_encrypt_bit6!(f64, F64_BLOCKS);
+    impl_ore_encrypt_bit6!(bool, BOOL_BLOCKS, bool_tests, false, true);
+    impl_ore_encrypt_bit6!(u8, U8_BLOCKS, u8_tests, 0u8, u8::MAX);
+    impl_ore_encrypt_bit6!(i8, I8_BLOCKS, i8_tests, i8::MIN, i8::MAX);
+    impl_ore_encrypt_bit6!(u16, U16_BLOCKS, u16_tests, 0u16, u16::MAX);
+    impl_ore_encrypt_bit6!(i16, I16_BLOCKS, i16_tests, i16::MIN, i16::MAX);
+    impl_ore_encrypt_bit6!(u32, U32_BLOCKS, u32_tests, 0u32, u32::MAX);
+    impl_ore_encrypt_bit6!(i32, I32_BLOCKS, i32_tests, i32::MIN, i32::MAX);
+    impl_ore_encrypt_bit6!(u64, U64_BLOCKS, u64_tests, 0u64, u64::MAX);
+    impl_ore_encrypt_bit6!(i64, I64_BLOCKS, i64_tests, i64::MIN, i64::MAX);
+    // `u128`/`i128` (22 blocks) exceed `MAX_BLOCKS` and are provided by
+    // `scheme::chained` instead (issue #105).
+    impl_ore_encrypt_bit6!(char, CHAR_BLOCKS, char_tests, '\0', char::MAX);
+    impl_ore_encrypt_bit6!(f32, F32_BLOCKS, f32_tests, f32::MIN, f32::MAX);
+    impl_ore_encrypt_bit6!(f64, F64_BLOCKS, f64_tests, f64::MIN, f64::MAX);
 }
 
 #[cfg(test)]
