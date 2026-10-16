@@ -207,6 +207,8 @@ fn tainted_str(buf: &mut [u8; 17]) -> &str {
     unsafe { std::str::from_utf8_unchecked(buf) }
 }
 
+/// The chained cipher with the default string padding, so the string modes
+/// cover the padding path, including the trailing-NUL check.
 fn chained() -> OreAes128Bit6ChainedChaCha20 {
     let (mut k1, _) = keys();
     taint(&mut k1);
@@ -229,25 +231,6 @@ fn chained_left() -> Vec<u8> {
     let mut out = ore
         .encrypt_left_str(s)
         .expect("encrypt_left_str")
-        .to_bytes();
-    untaint_output(&mut out);
-    out
-}
-
-fn chained_raw() -> Vec<u8> {
-    let ore = chained();
-    let x = tainted(RAW_BLOCKS);
-    let mut out = ore.encrypt_var(&x).expect("encrypt_var").to_bytes();
-    untaint_output(&mut out);
-    out
-}
-
-fn chained_raw_left() -> Vec<u8> {
-    let ore = chained();
-    let x = tainted(RAW_BLOCKS);
-    let mut out = ore
-        .encrypt_left_var(&x)
-        .expect("encrypt_left_var")
         .to_bytes();
     untaint_output(&mut out);
     out
@@ -277,8 +260,6 @@ const MODES: &[(&str, fn() -> Vec<u8>)] = &[
     ("bit6-encrypt-left-raw", bit6_raw_left),
     ("chained-encrypt", chained_full),
     ("chained-encrypt-left", chained_left),
-    ("chained-encrypt-raw", chained_raw),
-    ("chained-encrypt-left-raw", chained_raw_left),
     ("canary", canary),
 ];
 

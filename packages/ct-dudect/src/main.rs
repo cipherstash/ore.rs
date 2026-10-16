@@ -18,7 +18,7 @@ use dudect_bencher::rand::RngExt;
 use dudect_bencher::{ctbench_main, BenchRng, Class, CtRunner};
 use ore_rs::ct_bench::{self, Line};
 use ore_rs::scheme::bit2_w6::OreAes128Bit6ChaCha20;
-use ore_rs::scheme::chained::{OreAes128Bit6Chained, OreAes128Bit6ChainedChaCha20};
+use ore_rs::scheme::chained::{OreAes128Bit6Chained, OreAes128Bit6ChainedChaCha20, Padding, Options};
 use ore_rs::{OreCipher, OreEncrypt, OreOutput};
 use std::hint::black_box;
 
@@ -84,9 +84,12 @@ fn bit6() -> OreAes128Bit6ChaCha20 {
     OreCipher::init(&K1, &K2).unwrap()
 }
 
-fn chained() -> OreAes128Bit6ChainedChaCha20 {
+/// The chained cipher under `padding`. A harness that places the differing
+/// byte at a chosen block must pass [`Padding::None`]: a padded 17-byte
+/// string becomes 32 bytes, and its last byte is no longer the last block.
+fn chained(padding: Padding) -> OreAes128Bit6ChainedChaCha20 {
     data_independent_timing();
-    OreAes128Bit6Chained::init(&K1).unwrap()
+    OreAes128Bit6Chained::init_with(&K1, Options::default().with_padding(padding)).unwrap()
 }
 
 /// Random class assignment, so the two classes interleave.
@@ -137,9 +140,10 @@ fn bit6_compare_first_vs_last_block(runner: &mut CtRunner, rng: &mut BenchRng) {
 }
 
 /// Chained string comparator over 17-character strings: first byte differs
-/// (`Left`) versus only the last byte differs (`Right`).
+/// (`Left`) versus only the last byte differs (`Right`). Unpadded, so that
+/// the last byte is in the last block.
 fn chained_compare_first_vs_last_byte(runner: &mut CtRunner, rng: &mut BenchRng) {
-    let ore = chained();
+    let ore = chained(Padding::None);
     let mut left = Vec::with_capacity(pool_size());
     let mut right = Vec::with_capacity(pool_size());
     for _ in 0..pool_size() {
@@ -397,9 +401,11 @@ fn bit6_encrypt_left_fixed_a_vs_fixed_b(runner: &mut CtRunner, rng: &mut BenchRn
 }
 
 /// Chained encryption of 17 bytes: all-`a` plaintext (`Left`) versus random
-/// lowercase (`Right`), both from precomputed pools.
+/// lowercase (`Right`), both from precomputed pools. Under the default
+/// padding, so the padding path (32 bytes, the trailing-NUL check) is what
+/// is timed.
 fn chained_encrypt_fixed_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
-    let ore = chained();
+    let ore = chained(Padding::default());
     let left: Vec<String> = vec!["a".repeat(17); pool_size()];
     let right: Vec<String> = (0..pool_size())
         .map(|_| {

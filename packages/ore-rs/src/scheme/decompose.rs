@@ -109,6 +109,18 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> Blocks6<B> {
         decompose_6bit(bytes, out.as_mut());
         Self(out)
     }
+
+    /// Decompose `bytes` followed by NUL bytes: `bytes` into the first
+    /// `num_blocks_6bit(bytes.len())` blocks of `out`, and zeros after. NUL
+    /// bytes add only zero bits, so this is the decomposition of `bytes`
+    /// padded with NULs to any length with `out.as_ref().len()` blocks,
+    /// which must be at least `num_blocks_6bit(bytes.len())`.
+    pub(crate) fn decompose_padded(bytes: &[u8], mut out: B) -> Self {
+        let (head, tail) = out.as_mut().split_at_mut(num_blocks_6bit(bytes.len()));
+        decompose_6bit(bytes, head);
+        tail.fill(0);
+        Self(out)
+    }
 }
 
 #[cfg(test)]
@@ -157,6 +169,17 @@ mod tests {
             let mut out = vec![0u8; num_blocks_6bit(bytes.len())];
             decompose_6bit(&bytes, &mut out);
             out.iter().all(|&b| b < 64)
+        }
+
+        /// Padding the decomposition is the same as decomposing the bytes
+        /// padded with NULs.
+        fn decompose_padded_matches_nul_padding(bytes: Vec<u8>, pad: u8) -> bool {
+            let mut padded = bytes.clone();
+            padded.resize(bytes.len() + usize::from(pad % 16), 0);
+            let n = num_blocks_6bit(padded.len());
+            let a = Blocks6::decompose_padded(&bytes, vec![0xffu8; n]);
+            let b = Blocks6::decompose(&padded, vec![0u8; n]);
+            a.as_bytes() == b.as_bytes()
         }
 
         /// Decomposition is injective: it can be inverted by re-concatenating

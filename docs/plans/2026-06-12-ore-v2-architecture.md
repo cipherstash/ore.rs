@@ -376,20 +376,46 @@ data, because Lewi-Wu is a left/right scheme: a comparison is only ever evaluate
 between a left ciphertext and a right ciphertext, and a right ciphertext in isolation
 reveals nothing about order. It does reveal **length**, below.
 
-**Every ciphertext reveals the exact plaintext length** (review of #83). The header
-stores the block count, the ciphertext size is `4 + 25*count + 16` bytes (`4 + 17*count`
-for a left), and for a string of `n` UTF-8 bytes `count = ⌈8n/6⌉`, strictly increasing
-in `n`. So one ciphertext, full, left or right alone (`count * 8` bytes), gives `n`
-exactly, with no comparison or query. Short, low-entropy columns (country codes,
-statuses, first names) are often unique or nearly unique by length, and length plus
-common-prefix length is a strong frequency-analysis signal. Hiding it needs padding to
-a length bucket (Padmé, or a fixed maximum per column). Padding must keep order, so the
-pad symbol must sort below every real symbol: a 65-value domain, which changes the PRP
-domain and the wire format. Tracked in
-[#104](https://github.com/cipherstash/ore.rs/issues/104); decide it before ore-v2 freezes
-the chained wire format, or it needs a new scheme id. Until then, the string leakage
-profile is **exact length, plus order and common-prefix length**. Three threat tiers
-follow for the order and prefix leakage (length leaks in all of them):
+**Length is padded to a bucket** (review of #83, #104). The header stores the block
+count, and the ciphertext size is `7 + 25*count + 16` bytes (`7 + 17*count` for a left),
+so every ciphertext, full, left or right alone (`count * 8` bytes), gives its block count
+with no comparison or query. Unpadded, a string of `n` UTF-8 bytes has `count = ⌈8n/6⌉`,
+strictly increasing in `n`, so the count gives `n` exactly. Short, low-entropy columns
+(country codes, statuses, first names) are often unique or nearly unique by length, and
+length plus common-prefix length is a strong frequency-analysis signal.
+
+So the string encryptors pad by default. A string is extended with NUL bytes to a length
+bucket: powers of two with a 16-byte floor by default (16, 32, 64, … bytes), a fixed
+length per column, or none. NUL bytes decompose to zero blocks, which is the decomposition's own
+zero fill, so padding needs no 65th symbol and no change to the PRP domain or the
+comparator. It keeps order and equality for every string that does not end in NUL: where
+the shorter of two strings ends, the longer has a non-zero bit somewhere in its remaining
+bytes (its last byte is not NUL) and the shorter has only zeros there, and equal strings
+pad to the same bucket. A string that ends in NUL would encrypt the same as
+the string without it, so the padded encryptors refuse it; Postgres `text` and `jsonb`
+cannot hold NUL. Pad blocks look like any other blocks, because each block's PRP is keyed
+by its position and prefix. The header carries the padding policy (kind and length, 3
+bytes after the common header), and the comparators refuse ciphertexts made under
+different policies, since an unpadded and a padded copy of one string compare unequal. A
+column's stored values and queries must therefore use one policy.
+
+Padmé (Nikitin et al., PETS 2019) was the first candidate and was set aside. It leaves
+`O(log log L)` bits of the length and adds under 12.5%, but it was designed for
+kilobyte-to-gigabyte messages; at database string lengths its buckets are narrow (below 9
+bytes it changes nothing, 9 to 31 bytes round only to an even length, 32 to 63 to a
+multiple of 4), so above a floor it is barely better than no padding. A simulation over
+name, word, email and phrase columns (#104) compared Padmé, multiples of 8, powers of two,
+×1.5 buckets, column-fitted buckets, a column maximum and a pseudorandom length per value.
+Powers of two with a 16-byte floor had the lowest exact-length guess rate of the
+data-independent rules (11% on emails against Padmé's 53%) at about 1.4× the blocks, and
+are easy to explain. Column-fitted buckets trade better but need per-column configuration
+and a larger header tag; a configurable growth ratio and explicit boundaries are possible
+later. The floor covers the short end; a fixed length hides the length entirely, at the
+cost of the longest value for every row. Strings are the scheme's only public plaintext:
+raw 6-bit symbol sequences cannot be padded with zero symbols (a trailing zero symbol is a
+real value there), so the raw entry points are test-only. The string leakage profile is
+therefore **the length bucket, plus order and common-prefix length**. Three threat tiers follow for the order
+and prefix leakage (the bucket leaks in all of them):
 
 - **Offline / at rest:** right ciphertexts are semantically secure, so right-only
   storage would make this tier clean: an attacker holding only rights recovers
@@ -621,7 +647,8 @@ PR 2's trait change, which should be called out in the changelog).
       never reachable from `Left`/`Right` types (PR 6).
 - [ ] GF(2^128) doubling constant-time, if Candidate C is chosen (PR 6).
 - [ ] String leakage profile documented and acknowledged at product level. Every
-      ciphertext reveals the exact plaintext length (padding tracked in #104). Stored
+      ciphertext reveals its length bucket (powers of two with a 16-byte floor by
+      default, #104), or the exact length if a column opts out of padding. Stored
       full ciphertexts compare offline, revealing order and common-prefix length, as
       legacy does, until right-only storage is supported (#99); see §5(b) (PR 6).
 - [ ] Legacy zero-run seed leakage (Context, "Known leakage of the legacy scheme")

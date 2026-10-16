@@ -304,7 +304,10 @@ use thiserror::Error;
 pub type PlainText<const N: usize> = [u8; N];
 
 /// Errors returned by [`OreCipher`] initialisation and encryption.
+///
+/// New schemes and policies add variants, so the enum is non-exhaustive.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum OreError {
     /// Cipher initialisation failed (e.g., key material rejected by an
     /// underlying primitive).
@@ -321,6 +324,17 @@ pub enum OreError {
     /// represent (the chained scheme encodes the block count as a `u16`).
     #[error("Too many blocks")]
     TooManyBlocks,
+    /// A string longer than the fixed length its padding policy pads to.
+    #[error("String longer than its padding")]
+    ExceedsPadding,
+    /// A string longer than the cipher's ceiling
+    /// (`scheme::chained::Options::max_bytes`).
+    #[error("String longer than the cipher's maximum")]
+    TooLong,
+    /// A string that ends in NUL, refused by a padding policy: padded with
+    /// NULs, it would encrypt the same as the string without them.
+    #[error("String ends in NUL")]
+    TrailingNul,
 }
 
 /// A BlockORE cipher: a key-bound object that can encrypt fixed-N plaintexts
