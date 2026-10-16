@@ -65,10 +65,10 @@ zeroize = { version = "1.5.7", features = ["zeroize_derive"] }
 thiserror = "1.0.38"
 # Trial run against the vitaminc branch that adds the trait; to be
 # replaced by the published 0.6 release when it lands.
-vitaminc-ore = { git = "https://github.com/cipherstash/vitaminc", branch = "main", optional = true }
-vitaminc-hmac = { git = "https://github.com/cipherstash/vitaminc", branch = "main", optional = true }
-vitaminc-prf = { git = "https://github.com/cipherstash/vitaminc", branch = "main", optional = true }
-vitaminc-protected = { git = "https://github.com/cipherstash/vitaminc", branch = "main", optional = true }
+vitaminc-ore = { git = "https://github.com/cipherstash/vitaminc", branch = "feat/ore-term-compare", optional = true }
+vitaminc-hmac = { git = "https://github.com/cipherstash/vitaminc", branch = "feat/ore-term-compare", optional = true }
+vitaminc-prf = { git = "https://github.com/cipherstash/vitaminc", branch = "feat/ore-term-compare", optional = true }
+vitaminc-protected = { git = "https://github.com/cipherstash/vitaminc", branch = "feat/ore-term-compare", optional = true }
 
 # `cfg(kani)` gates the Kani proof harnesses (compiled only by `cargo kani`).
 [lints.rust]
