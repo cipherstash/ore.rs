@@ -34,6 +34,7 @@
 //! # Examples
 //!
 //! ```
+//! use std::cmp::Ordering;
 //! use ore_rs::vitaminc::Bit6BlockOre;
 //! use vitaminc_ore::{Int, Logical, OrderEncrypt, OrderKeyInit, OrderTarget, Physical, Raw};
 //! use vitaminc_protected::Protected;
@@ -46,7 +47,8 @@
 //! // arrives at. The caller never sees the encoding.
 //! let quantity = scheme.column(OrderTarget::I32, ("orders", "quantity"));
 //! let term = quantity.encrypt(42i64)?;
-//! assert!(quantity.encrypt(41i8)? < term);
+//! // The column compares its terms; a term alone has no order.
+//! assert_eq!(quantity.compare(&quantity.encrypt(41i8)?, &term), Some(Ordering::Less));
 //! let stored: &[u8] = term.as_ref();
 //!
 //! // A typed scalar goes into a column of its type.
@@ -109,8 +111,9 @@ pub struct BlockOre {
     prf: HmacSha256Prf,
 }
 
-/// A [`BlockOre`] term: the serialised ciphertext, compared by the
-/// scheme's comparator rather than byte by byte.
+/// A [`BlockOre`] term: the serialised ciphertext. Compared by the
+/// scheme's comparator, [`OrderScheme::compare`], rather than byte by
+/// byte, and only with terms of its own column.
 #[derive(Debug, Clone)]
 pub struct BlockOreTerm(Vec<u8>);
 
@@ -119,35 +122,6 @@ impl AsRef<[u8]> for BlockOreTerm {
         &self.0
     }
 }
-
-impl Ord for BlockOreTerm {
-    /// The scheme's comparison. A column has one target, so its terms have
-    /// one width; two terms of different widths come from different
-    /// columns and have no order between them, so they are ordered by
-    /// width, then bytes, to keep the order total.
-    fn cmp(&self, other: &Self) -> Ordering {
-        OreAes128ChaCha20::compare_raw_slices(&self.0, &other.0).unwrap_or_else(|| {
-            self.0
-                .len()
-                .cmp(&other.0.len())
-                .then_with(|| self.0.cmp(&other.0))
-        })
-    }
-}
-
-impl PartialOrd for BlockOreTerm {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl PartialEq for BlockOreTerm {
-    fn eq(&self, other: &Self) -> bool {
-        self.cmp(other) == Ordering::Equal
-    }
-}
-
-impl Eq for BlockOreTerm {}
 
 impl BlockOre {
     /// The scheme keyed for one term.
@@ -206,6 +180,14 @@ impl OrderScheme for BlockOre {
         };
         Ok(BlockOreTerm(term))
     }
+
+    /// The scheme's comparison. `None` for a term that is not a
+    /// well-formed `OreAes128ChaCha20` ciphertext. Two well-formed
+    /// terms of different columns compare as noise, which the scheme
+    /// cannot tell; a caller keeps a column's terms together.
+    fn compare(a: &BlockOreTerm, b: &BlockOreTerm) -> Option<Ordering> {
+        OreAes128ChaCha20::compare_raw_slices(&a.0, &b.0)
+    }
 }
 
 impl OrderKeyInit for BlockOre {
@@ -236,8 +218,9 @@ pub struct Bit6BlockOre {
     prf: HmacSha256Prf,
 }
 
-/// A [`Bit6BlockOre`] term: the serialised ciphertext, compared by the
-/// scheme's comparator rather than byte by byte.
+/// A [`Bit6BlockOre`] term: the serialised ciphertext. Compared by the
+/// scheme's comparator, [`OrderScheme::compare`], rather than byte by
+/// byte, and only with terms of its own column.
 #[derive(Debug, Clone)]
 pub struct Bit6BlockOreTerm(Vec<u8>);
 
@@ -246,35 +229,6 @@ impl AsRef<[u8]> for Bit6BlockOreTerm {
         &self.0
     }
 }
-
-impl Ord for Bit6BlockOreTerm {
-    /// The scheme's comparison. A column has one target, so its terms have
-    /// one width; two terms of different widths come from different
-    /// columns and have no order between them, so they are ordered by
-    /// width, then bytes, to keep the order total.
-    fn cmp(&self, other: &Self) -> Ordering {
-        OreAes128Bit6ChaCha20::compare_raw_slices(&self.0, &other.0).unwrap_or_else(|| {
-            self.0
-                .len()
-                .cmp(&other.0.len())
-                .then_with(|| self.0.cmp(&other.0))
-        })
-    }
-}
-
-impl PartialOrd for Bit6BlockOreTerm {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl PartialEq for Bit6BlockOreTerm {
-    fn eq(&self, other: &Self) -> bool {
-        self.cmp(other) == Ordering::Equal
-    }
-}
-
-impl Eq for Bit6BlockOreTerm {}
 
 impl OrderScheme for Bit6BlockOre {
     const NAME: &'static str = "block-ore-bit6";
@@ -298,6 +252,14 @@ impl OrderScheme for Bit6BlockOre {
             .encrypt_bytes(plaintext.bytes().risky_ref())
             .map(Bit6BlockOreTerm)
             .map_err(OrderError::Backend)
+    }
+
+    /// The scheme's comparison. `None` for a term that is not a
+    /// well-formed `OreAes128Bit6ChaCha20` ciphertext. Two well-formed
+    /// terms of different columns compare as noise, which the scheme
+    /// cannot tell; a caller keeps a column's terms together.
+    fn compare(a: &Bit6BlockOreTerm, b: &Bit6BlockOreTerm) -> Option<Ordering> {
+        OreAes128Bit6ChaCha20::compare_raw_slices(&a.0, &b.0)
     }
 }
 
@@ -333,8 +295,9 @@ pub struct ChainedBlockOre {
     prf: HmacSha256Prf,
 }
 
-/// A [`ChainedBlockOre`] term: the serialised ciphertext, compared by the
-/// scheme's comparator.
+/// A [`ChainedBlockOre`] term: the serialised ciphertext. Compared by the
+/// scheme's comparator, [`OrderScheme::compare`], and only with terms
+/// of its own column.
 #[derive(Debug, Clone)]
 pub struct ChainedBlockOreTerm(Vec<u8>);
 
@@ -343,29 +306,6 @@ impl AsRef<[u8]> for ChainedBlockOreTerm {
         &self.0
     }
 }
-
-impl Ord for ChainedBlockOreTerm {
-    /// The scheme's comparison, which handles terms of any two lengths. A
-    /// malformed term has no order; bytes order it so the order is total.
-    fn cmp(&self, other: &Self) -> Ordering {
-        OreAes128Bit6ChainedChaCha20::compare_raw_slices(&self.0, &other.0)
-            .unwrap_or_else(|| self.0.cmp(&other.0))
-    }
-}
-
-impl PartialOrd for ChainedBlockOreTerm {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl PartialEq for ChainedBlockOreTerm {
-    fn eq(&self, other: &Self) -> bool {
-        self.cmp(other) == Ordering::Equal
-    }
-}
-
-impl Eq for ChainedBlockOreTerm {}
 
 impl OrderScheme for ChainedBlockOre {
     const NAME: &'static str = "chained-block-ore";
@@ -393,6 +333,16 @@ impl OrderScheme for ChainedBlockOre {
             .encrypt_bytes(plaintext.bytes().risky_ref())
             .map_err(OrderError::Backend)?;
         Ok(ChainedBlockOreTerm(term.to_bytes()))
+    }
+
+    /// The scheme's comparison. `None` for a term that is not a
+    /// well-formed `OreAes128Bit6ChainedChaCha20` ciphertext,
+    /// or for two terms padded under different policies (text against
+    /// bytes). Two well-formed
+    /// terms of different columns compare as noise, which the scheme
+    /// cannot tell; a caller keeps a column's terms together.
+    fn compare(a: &ChainedBlockOreTerm, b: &ChainedBlockOreTerm) -> Option<Ordering> {
+        OreAes128Bit6ChainedChaCha20::compare_raw_slices(&a.0, &b.0)
     }
 }
 
@@ -441,11 +391,21 @@ mod tests {
             column.encrypt_term(&x).unwrap(),
             column.encrypt_term(&y).unwrap(),
         );
-        assert_eq!(left.cmp(&right), Ordering::Less, "{}", x.domain());
-        assert_eq!(right.cmp(&left), Ordering::Greater, "{}", x.domain());
         assert_eq!(
-            left.cmp(&column.encrypt_term(&x).unwrap()),
-            Ordering::Equal,
+            column.compare(&left, &right),
+            Some(Ordering::Less),
+            "{}",
+            x.domain()
+        );
+        assert_eq!(
+            column.compare(&right, &left),
+            Some(Ordering::Greater),
+            "{}",
+            x.domain()
+        );
+        assert_eq!(
+            column.compare(&left, &column.encrypt_term(&x).unwrap()),
+            Some(Ordering::Equal),
             "{}",
             x.domain()
         );
@@ -596,8 +556,11 @@ mod tests {
         // Text that folds together is one term.
         let names = chained.column(T::Text, ());
         assert_eq!(
-            names.encrypt("Straße").unwrap(),
-            names.encrypt("strasse").unwrap()
+            names.compare(
+                &names.encrypt("Straße").unwrap(),
+                &names.encrypt("strasse").unwrap()
+            ),
+            Some(Ordering::Equal)
         );
     }
 
@@ -619,12 +582,19 @@ mod tests {
                 .encrypt(Raw(None, Physical::Int(Int::I16(300))))
                 .unwrap(),
         );
-        assert!(hundred < two_hundred && two_hundred < three_hundred);
+        assert_eq!(column.compare(&hundred, &two_hundred), Some(Ordering::Less));
         assert_eq!(
-            hundred,
-            column
-                .encrypt(Raw(None, Physical::Int(Int::U64(100))))
-                .unwrap()
+            column.compare(&two_hundred, &three_hundred),
+            Some(Ordering::Less)
+        );
+        assert_eq!(
+            column.compare(
+                &hundred,
+                &column
+                    .encrypt(Raw(None, Physical::Int(Int::U64(100))))
+                    .unwrap()
+            ),
+            Some(Ordering::Equal)
         );
         // A value the column cannot hold is refused before the scheme.
         assert!(matches!(
@@ -637,14 +607,17 @@ mod tests {
     fn terms_compare_only_within_one_scheme_key_target_and_context() {
         let tenant = |n: u64| ("tenant", n);
         let block = BlockOre::new(key());
+        // Two columns' terms have no order between them, so this compares
+        // their bytes: another context, key or target gives other bytes.
         let under = |n: u64| block.column(T::I8, tenant(n)).encrypt(0i8).unwrap();
-        assert_ne!(under(1), under(2));
+        assert_ne!(under(1).as_ref(), under(2).as_ref());
         assert_ne!(
-            under(1),
+            under(1).as_ref(),
             BlockOre::new(Protected::new([8; 32]))
                 .column(T::I8, tenant(1))
                 .encrypt(0i8)
                 .unwrap()
+                .as_ref()
         );
         // The same bytes under another target: a different key, so not equal.
         let as_u8 = block.column(T::U8, ()).encrypt(0x80i16).unwrap();
@@ -659,11 +632,19 @@ mod tests {
                 .bytes()
                 .risky_ref()
         );
-        assert_ne!(as_u8, as_i8);
+        assert_ne!(as_u8.as_ref(), as_i8.as_ref());
         let chained = ChainedBlockOre::new(key());
         assert_ne!(
-            chained.column(T::I8, tenant(1)).encrypt(0i8).unwrap(),
-            chained.column(T::I8, tenant(2)).encrypt(0i8).unwrap()
+            chained
+                .column(T::I8, tenant(1))
+                .encrypt(0i8)
+                .unwrap()
+                .as_ref(),
+            chained
+                .column(T::I8, tenant(2))
+                .encrypt(0i8)
+                .unwrap()
+                .as_ref()
         );
     }
 
@@ -671,7 +652,10 @@ mod tests {
     fn a_scheme_is_keyed_like_a_prf() {
         let from_bytes = BlockOre::try_from_bytes(Protected::new(vec![7; 32])).unwrap();
         let term = |s: &BlockOre| s.column(T::I8, ()).encrypt(1i8).unwrap();
-        assert_eq!(term(&from_bytes), term(&BlockOre::new(key())));
+        assert_eq!(
+            BlockOre::compare(&term(&from_bytes), &term(&BlockOre::new(key()))),
+            Some(Ordering::Equal)
+        );
         assert!(BlockOre::try_from_bytes(Protected::new(vec![7; 8])).is_err());
         assert!(ChainedBlockOre::try_from_bytes(Protected::new(vec![7; 8])).is_err());
     }
@@ -690,12 +674,30 @@ mod tests {
     }
 
     #[test]
-    fn terms_of_two_widths_still_order_totally() {
+    fn terms_of_two_widths_have_no_order() {
         let block = BlockOre::new(key());
         let one = block.column(T::I8, ()).encrypt(1i8).unwrap();
         let four = block.column(T::I32, ()).encrypt(1i8).unwrap();
-        assert_eq!(one.cmp(&four), Ordering::Less);
-        assert_eq!(four.cmp(&one), Ordering::Greater);
+        assert_eq!(BlockOre::compare(&one, &four), None);
+        assert_eq!(BlockOre::compare(&four, &one), None);
+        let bit6 = Bit6BlockOre::new(key());
+        let one = bit6.column(T::I8, ()).encrypt(1i8).unwrap();
+        let four = bit6.column(T::I32, ()).encrypt(1i8).unwrap();
+        assert_eq!(Bit6BlockOre::compare(&one, &four), None);
+    }
+
+    #[test]
+    fn chained_text_and_bytes_terms_have_no_order() {
+        // Text is padded and bytes are not, so the comparator refuses the
+        // pair rather than ordering their headers.
+        let chained = ChainedBlockOre::new(key());
+        let text = chained.column(T::Text, "col").encrypt("z").unwrap();
+        let bytes = chained
+            .column(T::Bytes, "col")
+            .encrypt(Raw(None, Physical::Bytes(&[1; 20])))
+            .unwrap();
+        assert_eq!(ChainedBlockOre::compare(&text, &bytes), None);
+        assert_eq!(ChainedBlockOre::compare(&bytes, &text), None);
     }
 
     #[test]
@@ -762,12 +764,18 @@ mod tests {
         assert_eq!(domain::INT32, T::I32.domain());
         // Bound to key, context and target like the other schemes.
         assert_ne!(
-            bit6.column(T::I8, ("tenant", 1u64)).encrypt(0i8).unwrap(),
-            bit6.column(T::I8, ("tenant", 2u64)).encrypt(0i8).unwrap()
+            bit6.column(T::I8, ("tenant", 1u64))
+                .encrypt(0i8)
+                .unwrap()
+                .as_ref(),
+            bit6.column(T::I8, ("tenant", 2u64))
+                .encrypt(0i8)
+                .unwrap()
+                .as_ref()
         );
         assert_ne!(
-            bit6.column(T::I8, ()).encrypt(0i8).unwrap(),
-            bit6.column(T::U8, ()).encrypt(0x80i16).unwrap()
+            bit6.column(T::I8, ()).encrypt(0i8).unwrap().as_ref(),
+            bit6.column(T::U8, ()).encrypt(0x80i16).unwrap().as_ref()
         );
         assert!(Bit6BlockOre::try_from_bytes(Protected::new(vec![7; 8])).is_err());
     }
@@ -800,8 +808,8 @@ mod tests {
             "bytes are not padded"
         );
         assert_eq!(
-            under(&[1]).cmp(&under(&[1, 0])),
-            Ordering::Less,
+            bytes.compare(&under(&[1]), &under(&[1, 0])),
+            Some(Ordering::Less),
             "a trailing zero byte is kept"
         );
     }
@@ -810,7 +818,7 @@ mod tests {
         fn bit6_order_is_integer_order(a: i64, b: i32) -> bool {
             let bit6 = Bit6BlockOre::new(key());
             let column = bit6.column(T::I64, "col");
-            column.encrypt(a).unwrap().cmp(&column.encrypt(b).unwrap()) == a.cmp(&i64::from(b))
+            column.compare(&column.encrypt(a).unwrap(), &column.encrypt(b).unwrap()) == Some(a.cmp(&i64::from(b)))
         }
     }
 
@@ -818,14 +826,14 @@ mod tests {
         fn block_order_is_integer_order(a: i64, b: i64) -> bool {
             let block = BlockOre::new(key());
             let column = block.column(T::I64, "col");
-            column.encrypt(a).unwrap().cmp(&column.encrypt(b).unwrap()) == a.cmp(&b)
+            column.compare(&column.encrypt(a).unwrap(), &column.encrypt(b).unwrap()) == Some(a.cmp(&b))
         }
 
         fn chained_order_is_byte_order(a: Vec<u8>, b: Vec<u8>) -> bool {
             let chained = ChainedBlockOre::new(key());
             let column = chained.column(T::Bytes, "col");
             let under = |v: &[u8]| column.encrypt(Raw(None, Physical::Bytes(v))).unwrap();
-            under(&a).cmp(&under(&b)) == a.cmp(&b)
+            column.compare(&under(&a), &under(&b)) == Some(a.cmp(&b))
         }
     }
 }
