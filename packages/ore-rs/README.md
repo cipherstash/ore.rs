@@ -26,6 +26,10 @@ Reference documentation is on [docs.rs/ore-rs](https://docs.rs/ore-rs).
 - `chrono` — ORE support for `chrono::NaiveDate` and `chrono::DateTime<Utc>`
 - `decimal` — ORE support for `rust_decimal::Decimal`
 
+## Keys
+
+The v2 schemes (`OreAes128Bit6`, `OreAes128Bit6Chained`) take **one 16-byte key** and an optional **salt**: `init(key)` or `init_with_salt(key, salt)`; on the chained scheme the salt is also an `Options` field (`Options::with_salt`), beside the padding policy and the ceiling, for `init_with(key, options)`. The salt is any byte string naming what the key is for, such as a column or a tenant. Ciphertexts under different salts share no key material and never compare `Equal`, but nothing on the wire records the salt, so a comparison across salts returns a confident, meaningless order; keep the salt with the data's identity, as you keep the key. Use one key or salt per column: under one key and salt, values of different types whose order-preserving encodings coincide (`0u64` and `i64::MIN`, say) encrypt to the same bytes. The legacy `OreAes128` keeps its frozen two-key `init(k1, k2)`.
+
 ## Need help?
 
 Please [open an issue](https://github.com/cipherstash/ore.rs/issues) and we'll get back to you.

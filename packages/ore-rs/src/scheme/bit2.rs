@@ -139,14 +139,12 @@ impl<R: Rng + SeedableRng> OreAes128<R> {
     }
 }
 
-impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
-    type LeftBlockType = LeftBlock16;
-    type RightBlockType = RightBlock32;
-
-    fn init(k1: &[u8; 16], k2: &[u8; 16]) -> Result<Self, OreError> {
-        // TODO: k1 and k2 should be Key types and we should have a set of traits to abstract the
-        // behaviour ro parsing/loading etc
-
+impl<R: Rng + SeedableRng> OreAes128<R> {
+    /// Initialise the cipher from two 16-byte keys: `k1` keys PRF₁ (the
+    /// per-block tags) and `k2` keys PRF₂ (the per-block PRP seeds),
+    /// directly. The wire format is frozen, so this stays two-key and
+    /// unsalted; the v2 schemes take one key and a salt.
+    pub fn init(k1: &[u8; 16], k2: &[u8; 16]) -> Result<Self, OreError> {
         let rng: R = SeedableRng::from_entropy();
 
         Ok(OreAes128 {
@@ -155,6 +153,11 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
             rng: RefCell::new(rng),
         })
     }
+}
+
+impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
+    type LeftBlockType = LeftBlock16;
+    type RightBlockType = RightBlock32;
 
     fn encrypt_left<const N: usize>(&self, x: &PlainText<N>) -> EncryptLeftResult<R, N> {
         if N > MAX_BLOCKS {
@@ -415,7 +418,7 @@ mod tests {
         rng.fill(&mut k1);
         rng.fill(&mut k2);
 
-        OreCipher::init(&k1, &k2).unwrap()
+        OreAes128ChaCha20::init(&k1, &k2).unwrap()
     }
 
     /// The legacy wire has no header, so the comparator infers the block
@@ -678,8 +681,8 @@ mod tests {
             49, 50, 51, 52, 53, 54, 55, 56, 57, 48, 97, 98, 99, 100, 101, 102,
         ];
 
-        let ore1: OreAes128ChaCha20 = OreCipher::init(&k1, &k2).unwrap();
-        let ore2: OreAes128ChaCha20 = OreCipher::init(&k3, &k2).unwrap();
+        let ore1: OreAes128ChaCha20 = OreAes128ChaCha20::init(&k1, &k2).unwrap();
+        let ore2: OreAes128ChaCha20 = OreAes128ChaCha20::init(&k3, &k2).unwrap();
 
         let a = 1000u32.encrypt(&ore1).unwrap().to_bytes();
         let b = 1000u32.encrypt(&ore2).unwrap().to_bytes();
@@ -699,8 +702,8 @@ mod tests {
             49, 50, 51, 52, 53, 54, 55, 56, 57, 48, 97, 98, 99, 100, 101, 102,
         ];
 
-        let ore1: OreAes128ChaCha20 = OreCipher::init(&k1, &k2).unwrap();
-        let ore2: OreAes128ChaCha20 = OreCipher::init(&k1, &k3).unwrap();
+        let ore1: OreAes128ChaCha20 = OreAes128ChaCha20::init(&k1, &k2).unwrap();
+        let ore2: OreAes128ChaCha20 = OreAes128ChaCha20::init(&k1, &k3).unwrap();
 
         let a = 1000u32.encrypt(&ore1).unwrap().to_bytes();
         let b = 1000u32.encrypt(&ore2).unwrap().to_bytes();

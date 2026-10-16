@@ -23,10 +23,10 @@
 //! `u128` and `i128` are too wide for the fixed-width schemes and are encrypted with the
 //! chained scheme instead: see [`scheme::chained`].
 //!
-//! To initialize the Cipher, you must decide on the scheme you want to use. There is only one ORE
-//! Scheme right now so that's easy but in the future more schemes will become available.
-//!
-//! An `OreCipher` also requires 2 keys (16-bytes each) and an 8-byte seed.
+//! To initialize the Cipher, you must decide on the scheme you want to use. Each scheme has its
+//! own constructor. The v2 schemes ([`scheme::bit2_w6`], [`scheme::chained`]) take one 16-byte
+//! key and an optional salt that names what the key is for (a column, say); the legacy scheme
+//! ([`scheme::bit2`]) keeps its frozen two-key `init(k1, k2)`.
 //!
 //! ```rust
 //! use ore_rs::{
@@ -39,7 +39,7 @@
 //! // Initalize an ORE Cipher with the OreAes128ChaCha20 scheme
 //! let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-//! let ore: OreAes128ChaCha20 = OreCipher::init(&k1, &k2).unwrap();
+//! let ore = OreAes128ChaCha20::init(&k1, &k2).unwrap();
 //!
 //! // Encryption takes a reference to the cipher and returns a `Result`
 //! let a = 456u64.encrypt(&ore).unwrap();
@@ -64,7 +64,7 @@
 //! # use hex_literal::hex;
 //! # let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-//! # let ore: OreAes128ChaCha20 = OreCipher::init(&k1, &k2).unwrap();
+//! # let ore = OreAes128ChaCha20::init(&k1, &k2).unwrap();
 //! let a = 456u64.encrypt(&ore).unwrap();
 //! let b = 1024u64.encrypt(&ore).unwrap();
 //!
@@ -82,7 +82,7 @@
 //! # use hex_literal::hex;
 //! # let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-//! # let ore: OreAes128ChaCha20 = OreCipher::init(&k1, &k2).unwrap();
+//! # let ore = OreAes128ChaCha20::init(&k1, &k2).unwrap();
 //! // This isn't
 //! let a = 456u64.encrypt(&ore).unwrap();
 //! let b = 1024u32.encrypt(&ore).unwrap(); // note the u32
@@ -108,7 +108,7 @@
 //! # use hex_literal::hex;
 //! # let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-//! # let ore: OreAes128ChaCha20 = OreCipher::init(&k1, &k2).unwrap();
+//! # let ore = OreAes128ChaCha20::init(&k1, &k2).unwrap();
 //! let a = 456u64.encrypt(&ore).unwrap();
 //! let bytes: Vec<u8> = a.to_bytes();
 //! ```
@@ -127,7 +127,7 @@
 //! # use hex_literal::hex;
 //! # let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
 //! # let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-//! # let ore: OreAes128ChaCha20 = OreCipher::init(&k1, &k2).unwrap();
+//! # let ore = OreAes128ChaCha20::init(&k1, &k2).unwrap();
 //! # let a = 456u64.encrypt(&ore).unwrap();
 //! # let bytes: Vec<u8> = a.to_bytes();
 //!
@@ -360,7 +360,7 @@ pub enum OreError {
 ///
 /// Implementations associate concrete block types for the Left and Right
 /// halves of a ciphertext (see [`Left`], [`Right`], [`CipherText`]) and
-/// expose [`init`](Self::init) for key setup, [`encrypt_left`](Self::encrypt_left)
+/// expose [`encrypt_left`](Self::encrypt_left)
 /// for query-side ciphertexts, [`encrypt`](Self::encrypt) for indexable
 /// ciphertexts, and [`compare_raw_slices`](Self::compare_raw_slices) for
 /// comparing serialised ciphertext bytes without round-tripping through
@@ -383,10 +383,6 @@ pub trait OreCipher: Sized {
     /// reject a ciphertext whose `xt` holds a symbol outside `0..SYMBOL_DOMAIN`,
     /// since the comparator indexes the right block by it.
     const SYMBOL_DOMAIN: usize = 256;
-
-    /// Initialise the cipher from two 16-byte keys: `k1` for the
-    /// per-block-tag PRF and `k2` for the per-block PRP seed PRF.
-    fn init(k1: &[u8; 16], k2: &[u8; 16]) -> Result<Self, OreError>;
 
     /// Encrypt `input` and return only the Left half of the ciphertext.
     /// Useful for query plaintexts compared against stored ciphertexts —

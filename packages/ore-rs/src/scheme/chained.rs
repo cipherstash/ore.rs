@@ -114,9 +114,6 @@ use rand_chacha::ChaCha20Rng;
 use subtle_ng::{Choice, ConditionallySelectable, ConstantTimeEq};
 use zeroize::{Zeroize, Zeroizing};
 
-use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
-use aes::Aes128Enc;
-
 use orderable_bytes::FixedOrderableBytes;
 
 use crate::ciphertext::{parse_header, OreOutput, ParseError, WireHeader, WIRE_HEADER_LEN};
@@ -125,6 +122,7 @@ use crate::primitives::hash::FixedPiZ2Hash;
 use crate::primitives::prp::LemireFyPrp;
 use crate::primitives::{stack, AesBlock, Hash, HashKey, Prp};
 use crate::scheme::decompose::{num_blocks_6bit, Blocks6};
+use crate::scheme::keys;
 use crate::scheme::width::FirstDiff;
 use crate::{OreEncrypt, OreError};
 
@@ -146,7 +144,11 @@ const PADDING_LEN: usize = 3;
 const HEADER_LEN: usize = WIRE_HEADER_LEN + PADDING_LEN;
 const NONCE_LEN: usize = 16;
 
-/// Domain-separation label for deriving the accumulator key (spec §3).
+/// The only input the caller's key is evaluated on (spec §3): ends in
+/// `'t'` (`0x74`), outside every legacy PRF input's byte 15. See
+/// `scheme::keys`.
+const ROOT_LABEL: [u8; 16] = *b"ORE.v2.chainroot";
+/// Label for the accumulator key under the salted key (spec §3).
 const ACC_KEY_LABEL: [u8; 16] = *b"ORE.v2.chain.acc";
 
 /// Serialised length of a full ciphertext with `count` blocks.
@@ -314,31 +316,35 @@ impl Padding {
 /// padding.
 pub const DEFAULT_MAX_STR_BYTES: usize = 1024;
 
-/// Per-cipher settings for the string encryptors, passed to
-/// [`OreAes128Bit6Chained::init_with`]. Like the key, they belong to the
-/// values that are compared together: stored values and the queries that
-/// compare with them use the same ones.
+/// Per-cipher settings, passed to [`OreAes128Bit6Chained::init_with`]:
+/// the salt the key is derived under, and the string encryptors' padding
+/// policy and ceiling. Like the key, they belong to the values that are
+/// compared together: stored values and the queries that compare with them
+/// use the same ones.
 ///
 /// ```rust
 /// use ore_rs::scheme::chained::{OreAes128Bit6ChainedChaCha20, Options, Padding};
 ///
 /// let options = Options::default()
+///     .with_salt(b"users.email")
 ///     .with_padding(Padding::PowerOfTwo { min_bytes: 32 })
 ///     .with_max_bytes(256);
 /// let ore = OreAes128Bit6ChainedChaCha20::init_with(&[0u8; 16], options).unwrap();
 /// assert!(ore.encrypt_str(&"a".repeat(256)).is_ok());
 /// assert!(ore.encrypt_str(&"a".repeat(257)).is_err());
 /// ```
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Options {
+    salt: Vec<u8>,
     padding: Padding,
     max_bytes: usize,
 }
 
 impl Default for Options {
-    /// [`Padding::default`] and [`DEFAULT_MAX_STR_BYTES`].
+    /// An empty salt, [`Padding::default`] and [`DEFAULT_MAX_STR_BYTES`].
     fn default() -> Self {
         Self {
+            salt: Vec::new(),
             padding: Padding::default(),
             max_bytes: DEFAULT_MAX_STR_BYTES,
         }
@@ -349,6 +355,19 @@ impl Options {
     /// The defaults; see [`Default`].
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The salt the key is derived under: a name for what the key is for
+    /// (a column, a tenant, a plaintext type). Ciphertexts under different
+    /// salts share no key material and never compare `Equal`; nothing on
+    /// the wire records the salt, so a mismatched pair compares to a
+    /// confident, meaningless order. The default is empty. See
+    /// [`OreAes128Bit6Chained::init_with`].
+    pub fn with_salt(self, salt: &[u8]) -> Self {
+        Self {
+            salt: salt.to_vec(),
+            ..self
+        }
     }
 
     /// The padding policy the string encryptors apply.
@@ -364,6 +383,11 @@ impl Options {
     /// ceiling of 0 or one that pads past [`MAX_STR_BYTES`].
     pub fn with_max_bytes(self, max_bytes: usize) -> Self {
         Self { max_bytes, ..self }
+    }
+
+    /// The salt; see [`Self::with_salt`].
+    pub fn salt(&self) -> &[u8] {
+        &self.salt
     }
 
     /// The padding policy.
@@ -551,7 +575,8 @@ fn parse_pair(a: &[u8], b: &[u8]) -> Option<(usize, usize)> {
 pub struct OreAes128Bit6Chained<R: Rng + SeedableRng> {
     /// Dedicated CMAC accumulator key (subsumes the fixed-N `prf1`/`prf2`).
     k_acc: [u8; 16],
-    /// Applied by the string encryptors.
+    /// The salt the key was derived under, and the string encryptors'
+    /// padding policy and ceiling.
     options: Options,
     rng: RefCell<R>,
 }
@@ -560,27 +585,40 @@ pub struct OreAes128Bit6Chained<R: Rng + SeedableRng> {
 pub type OreAes128Bit6ChainedChaCha20 = OreAes128Bit6Chained<ChaCha20Rng>;
 
 impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
-    /// Initialise from a single 16-byte key. Unlike the fixed-N schemes (which
-    /// key two PRFs), the chained scheme is **single-key by design**: the CMAC
-    /// accumulator derives every per-block secret from one key via branch tags
-    /// (spec §3), so there is no second key. The accumulator key is `k1` run
-    /// through a labelled AES call for domain separation.
-    ///
-    /// Strings are padded with the default policy, powers of two with a
-    /// 16-byte floor, and may be at most [`DEFAULT_MAX_STR_BYTES`] long
-    /// ([`Options::default`]).
-    pub fn init(k1: &[u8; 16]) -> Result<Self, OreError> {
-        Self::init_with(k1, Options::default())
+    /// Initialise from one 16-byte key with the default [`Options`]: an
+    /// empty salt, strings padded with powers of two from a 16-byte floor,
+    /// and at most [`DEFAULT_MAX_STR_BYTES`] long.
+    pub fn init(key: &[u8; 16]) -> Result<Self, OreError> {
+        Self::init_with(key, Options::default())
     }
 
-    /// [`Self::init`] with the given [`Options`]. Returns
-    /// [`OreError::InitFailed`] for a ceiling of 0, or a policy that would
-    /// pad the empty string or the longest string past [`MAX_STR_BYTES`].
-    pub fn init_with(k1: &[u8; 16], options: Options) -> Result<Self, OreError> {
+    /// Initialise from one 16-byte key and a salt, with the other options
+    /// at their defaults: `init_with(key, Options::default().with_salt(salt))`.
+    /// The same constructor as [`OreAes128Bit6::init_with_salt`](crate::scheme::bit2_w6::OreAes128Bit6::init_with_salt).
+    pub fn init_with_salt(key: &[u8; 16], salt: &[u8]) -> Result<Self, OreError> {
+        Self::init_with(key, Options::default().with_salt(salt))
+    }
+
+    /// Initialise from one 16-byte key and the given [`Options`]: the salt
+    /// naming what the key is for, the string padding policy and the
+    /// string ceiling. Returns [`OreError::InitFailed`] for a ceiling of
+    /// 0, or a policy that would pad the empty string or the longest
+    /// string past [`MAX_STR_BYTES`].
+    ///
+    /// The CMAC accumulator derives every per-block secret from one key
+    /// via branch tags (spec §3), keyed by `AES_{k_salt}(ACC_KEY_LABEL)`
+    /// with `k_salt = CMAC_{AES_key(ROOT_LABEL)}(salt)`; see the
+    /// crate-private `scheme::keys` for the stages and their argument.
+    ///
+    /// Ciphertexts under different salts share no key material and never
+    /// compare `Equal`, but nothing on the wire records the salt, so the
+    /// comparators cannot refuse a mismatched pair: they return a
+    /// confident, meaningless order. Keep the salt with the identity of
+    /// the stored data, as you keep the key.
+    pub fn init_with(key: &[u8; 16], options: Options) -> Result<Self, OreError> {
         options.check()?;
-        let cipher = Aes128Enc::new(GenericArray::from_slice(k1));
-        let mut k_acc = ACC_KEY_LABEL;
-        cipher.encrypt_block(GenericArray::from_mut_slice(&mut k_acc));
+        let k_salt = keys::salted(&keys::root(key, &ROOT_LABEL), options.salt());
+        let k_acc = *keys::subkey(&k_salt, &ACC_KEY_LABEL);
         Ok(Self {
             k_acc,
             options,
@@ -589,8 +627,8 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     }
 
     /// The options this cipher was initialised with.
-    pub fn options(&self) -> Options {
-        self.options
+    pub fn options(&self) -> &Options {
+        &self.options
     }
 
     /// The padding policy the string encryptors apply.
@@ -1422,6 +1460,41 @@ mod tests {
                 .unwrap()
                 .to_bytes(),
             unpadded.encrypt_left_str("alice").unwrap().to_bytes()
+        );
+    }
+
+    /// `init` is the empty salt; another salt gives unrelated ciphertexts
+    /// that never compare `Equal`, and the same salt reproduces them.
+    #[test]
+    fn salt_separates_keys() {
+        type C = OreAes128Bit6ChainedChaCha20;
+        let key = [0x42u8; 16];
+        let plain = C::init(&key).unwrap();
+        let empty = C::init_with_salt(&key, &[]).unwrap();
+        let col_a = C::init_with_salt(&key, b"users.email").unwrap();
+        let col_a2 = C::init_with_salt(&key, b"users.email").unwrap();
+        let col_b = C::init_with_salt(&key, b"users.name").unwrap();
+        let col_a_opts = C::init_with(&key, Options::default().with_salt(b"users.email")).unwrap();
+        assert_eq!(col_a.options().salt(), b"users.email");
+
+        let left = |c: &C| c.encrypt_left_str("alice").unwrap().to_bytes();
+        assert_eq!(left(&plain), left(&empty));
+        assert_eq!(left(&col_a), left(&col_a2));
+        assert_eq!(left(&col_a), left(&col_a_opts));
+        assert_ne!(left(&plain), left(&col_a));
+        assert_ne!(left(&col_a), left(&col_b));
+
+        let a = col_a.encrypt_str("alice").unwrap().to_bytes();
+        let b = col_b.encrypt_str("alice").unwrap().to_bytes();
+        assert_ne!(C::compare_raw_slices(&a, &b), Some(Ordering::Equal));
+        assert_eq!(
+            C::compare_raw_slices(&a, &col_a2.encrypt_str("alice").unwrap().to_bytes()),
+            Some(Ordering::Equal)
+        );
+        // Typed fixed-length values too.
+        assert_ne!(
+            7u128.encrypt_left(&col_a).unwrap().to_bytes(),
+            7u128.encrypt_left(&col_b).unwrap().to_bytes()
         );
     }
 

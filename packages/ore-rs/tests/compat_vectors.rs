@@ -9,7 +9,7 @@
 //!
 //! Left ciphertexts are deterministic given the keys. Full ciphertexts
 //! include a random nonce drawn from the cipher's internal RNG, which
-//! `OreCipher::init` seeds via `SeedableRng::from_entropy`; [`TestRng`]
+//! `OreAes128::init` seeds via `SeedableRng::from_entropy`; [`TestRng`]
 //! overrides `from_entropy` to a fixed seed so full-ciphertext bytes are
 //! reproducible. The comparison fixtures parse pinned bytes only, so they
 //! exercise the comparator without any RNG involvement.
@@ -36,7 +36,7 @@ const K2: [u8; 16] = [
     0xd0, 0xd1, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9, 0xda, 0xdb, 0xdc, 0xdd, 0xde, 0xdf,
 ];
 
-/// RNG whose `from_entropy` is deterministic, so that `OreCipher::init`
+/// RNG whose `from_entropy` is deterministic, so that `OreAes128::init`
 /// (which calls `from_entropy` internally) produces a cipher with a
 /// reproducible nonce stream.
 struct TestRng<const SEED: u8>(ChaCha20Rng);
@@ -71,15 +71,15 @@ type OreB = OreAes128<TestRng<0x77>>;
 type OreC = OreAes128<TestRng<0x5c>>;
 
 fn cipher_a() -> OreA {
-    OreCipher::init(&K1, &K2).unwrap()
+    OreAes128::init(&K1, &K2).unwrap()
 }
 
 fn cipher_b() -> OreB {
-    OreCipher::init(&K1, &K2).unwrap()
+    OreAes128::init(&K1, &K2).unwrap()
 }
 
 fn cipher_c() -> OreC {
-    OreCipher::init(&K1, &K2).unwrap()
+    OreAes128::init(&K1, &K2).unwrap()
 }
 
 /// Plaintexts for [`FULL_U64_ONE_CIPHER`], in ascending order. Blocks are the
@@ -94,7 +94,7 @@ const ONE_CIPHER_U64: [u64; 4] = [
 ];
 
 fn cipher_left() -> OreAes128ChaCha20 {
-    OreCipher::init(&K1, &K2).unwrap()
+    OreAes128::init(&K1, &K2).unwrap()
 }
 
 #[path = "compat_vectors/vectors.rs"]

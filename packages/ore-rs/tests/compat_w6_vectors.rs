@@ -31,11 +31,8 @@ use std::cmp::Ordering;
 const K1: [u8; 16] = [
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
 ];
-const K2: [u8; 16] = [
-    0xd0, 0xd1, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9, 0xda, 0xdb, 0xdc, 0xdd, 0xde, 0xdf,
-];
 
-/// RNG whose `from_entropy` is deterministic, so that `OreCipher::init`
+/// RNG whose `from_entropy` is deterministic, so that `init`
 /// (which calls `from_entropy` internally) produces a reproducible nonce stream.
 struct TestRng<const SEED: u8>(ChaCha20Rng);
 
@@ -69,15 +66,15 @@ type OreB = OreAes128Bit6<TestRng<0x77>>;
 type OreC = OreAes128Bit6<TestRng<0x5c>>;
 
 fn cipher_a() -> OreA {
-    OreCipher::init(&K1, &K2).unwrap()
+    OreAes128Bit6::init(&K1).unwrap()
 }
 
 fn cipher_b() -> OreB {
-    OreCipher::init(&K1, &K2).unwrap()
+    OreAes128Bit6::init(&K1).unwrap()
 }
 
 fn cipher_c() -> OreC {
-    OreCipher::init(&K1, &K2).unwrap()
+    OreAes128Bit6::init(&K1).unwrap()
 }
 
 /// Plaintexts for [`FULL_U64_ONE_CIPHER`], in ascending order. Blocks are the
@@ -92,7 +89,7 @@ const ONE_CIPHER_U64: [u64; 4] = [
 ];
 
 fn cipher_left() -> OreAes128Bit6ChaCha20 {
-    OreCipher::init(&K1, &K2).unwrap()
+    OreAes128Bit6::init(&K1).unwrap()
 }
 
 #[path = "compat_w6_vectors/vectors.rs"]
