@@ -294,6 +294,40 @@ pub mod ct_bench {
 }
 pub use crate::encrypt::OreEncrypt;
 use primitives::PrpError;
+
+/// Whether this build encrypts with hardware AES on the current CPU.
+///
+/// The `aes` crate (v0.8) uses AES-NI on x86_64 whenever the CPU has it. On
+/// aarch64 it uses the ARMv8 Cryptography Extensions only when the final
+/// binary is built with `--cfg aes_armv8`; without it, AES silently falls
+/// back to a constant-time software implementation that is far slower (see
+/// the README). A `RUSTFLAGS` environment variable replaces any `rustflags`
+/// in `.cargo/config.toml`, so the flag can go missing with no error.
+///
+/// Returns `false` on aarch64 if the flag is missing or the CPU lacks AES,
+/// on x86_64 if the CPU lacks AES-NI, and on every other architecture.
+/// Applications that need full speed can assert this at startup or in a
+/// test.
+///
+/// ```
+/// if !ore_rs::hardware_aes() {
+///     eprintln!("warning: ore-rs is using software AES");
+/// }
+/// ```
+pub fn hardware_aes() -> bool {
+    #[cfg(target_arch = "aarch64")]
+    {
+        cfg!(aes_armv8) && std::arch::is_aarch64_feature_detected!("aes")
+    }
+    #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+    {
+        std::arch::is_x86_feature_detected!("aes")
+    }
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64", target_arch = "x86")))]
+    {
+        false
+    }
+}
 use std::cmp::Ordering;
 use thiserror::Error;
 
