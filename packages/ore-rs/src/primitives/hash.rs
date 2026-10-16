@@ -196,7 +196,7 @@ mod tests {
 
             let mut out = [0u8; B];
             h.hash_all_into(&mut blocks, &mut out);
-            assert_eq!(out, expected, "scalar vs bulk mismatch for n={}", D);
+            assert_eq!(out, expected, "scalar vs bulk mismatch for n={D}");
         }
     }
 
