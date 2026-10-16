@@ -11,7 +11,8 @@ name: "Verify"
 #     fails if the taint never reaches a mode's output, and a canary mode
 #     that branches on a tainted byte must fail.
 #   * fuzz: the libFuzzer targets (packages/ore-rs/fuzz) for the ciphertext
-#     parsers and raw comparators, time-boxed per pull request.
+#     parsers, raw comparators and the padded string encryptors, time-boxed
+#     per pull request.
 #   * kani: the bounded model-checking harnesses (`#[cfg(kani)]`) for the pure
 #     building blocks. The two heaviest, behind the `kani-full` feature, are
 #     not run here: the exhaustive-length `ct_select_byte` harness (about 9
@@ -75,7 +76,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [chained_parse, chained_compare, bit6_parse, bit8_parse]
+        target: [chained_parse, chained_compare, chained_encrypt_str, bit6_parse, bit8_parse]
     steps:
       - uses: actions/checkout@v4
 

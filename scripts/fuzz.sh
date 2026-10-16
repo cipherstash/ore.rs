@@ -7,7 +7,8 @@
 #   scripts/fuzz.sh 60 bit6_parse   # one target
 #
 # The targets assert that the ciphertext parsers and raw comparators never
-# panic on arbitrary bytes and that accepted bytes re-encode to themselves.
+# panic on arbitrary bytes and that accepted bytes re-encode to themselves,
+# and that the padded string encryptors keep byte order for arbitrary pairs.
 # A crash leaves its input under packages/ore-rs/fuzz/artifacts/<target>/.
 #
 # Each target is built and run on its own, so a single-target run (one CI

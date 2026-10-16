@@ -35,6 +35,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "chained_encrypt_str"
+path = "fuzz_targets/chained_encrypt_str.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "bit6_parse"
 path = "fuzz_targets/bit6_parse.rs"
 test = false

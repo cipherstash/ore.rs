@@ -1,0 +1,108 @@
+#![no_main]
+
+use std::cmp::Ordering;
+
+use libfuzzer_sys::fuzz_target;
+use ore_rs::scheme::chained::{
+    OreAes128Bit6Chained, OreAes128Bit6ChainedChaCha20, VarCipherText, MAX_STR_BYTES,
+};
+use ore_rs::OreError;
+
+type C = OreAes128Bit6ChainedChaCha20;
+
+thread_local! {
+    static ORE: C = OreAes128Bit6Chained::init(&[0x42; 16]).expect("init");
+}
+
+/// The default policy's bucket for a string of `len` bytes, or `None` where
+/// the string would pad past the wire limit.
+fn bucket(len: usize) -> Option<usize> {
+    let bucket = if len <= 16 {
+        16
+    } else {
+        len.next_power_of_two()
+    };
+    (bucket <= MAX_STR_BYTES).then_some(bucket)
+}
+
+/// Encrypt `s` under the default padding policy and check everything a
+/// single string promises; `None` if the string is one the encryptors
+/// refuse, after checking that they do.
+fn encrypt(ore: &C, s: &str) -> Option<(Vec<u8>, Vec<u8>)> {
+    let full = ore.encrypt_str(s);
+    let left = ore.encrypt_left_str(s);
+    if s.ends_with('\0') {
+        assert!(matches!(full, Err(OreError::TrailingNul)), "{s:?}");
+        assert!(matches!(left, Err(OreError::TrailingNul)), "{s:?}");
+        return None;
+    }
+    let Some(bucket) = bucket(s.len()) else {
+        assert!(matches!(full, Err(OreError::TooManyBlocks)), "{s:?}");
+        assert!(matches!(left, Err(OreError::TooManyBlocks)), "{s:?}");
+        return None;
+    };
+    let full = full.expect("encrypt_str").to_bytes();
+    let left = left.expect("encrypt_left_str").to_bytes();
+
+    // The sizes reveal the bucket and nothing more.
+    let count = (bucket * 8).div_ceil(6);
+    assert_eq!(full.len(), 7 + 25 * count + 16, "{s:?}");
+    assert_eq!(left.len(), 7 + 17 * count, "{s:?}");
+    // The full ciphertext begins with the left one, and round-trips.
+    assert!(full.starts_with(&left), "{s:?}");
+    assert_eq!(
+        VarCipherText::from_slice(&full).expect("parse").to_bytes(),
+        full,
+        "{s:?}"
+    );
+    // Equal to a fresh encryption (new nonce) and to its own left.
+    let again = ore.encrypt_str(s).expect("encrypt_str").to_bytes();
+    assert_eq!(
+        C::compare_raw_slices(&full, &again),
+        Some(Ordering::Equal),
+        "{s:?}"
+    );
+    assert_eq!(
+        C::compare_left_to_full(&left, &full),
+        Some(Ordering::Equal),
+        "{s:?}"
+    );
+    Some((full, left))
+}
+
+// The string encryptors pad to a length bucket (the default policy: powers
+// of two with a 16-byte floor). For any string: one that ends in NUL or
+// would pad past the wire limit is refused, and every other one encrypts to
+// a ciphertext of its bucket's size that parses, round-trips, and compares
+// Equal to a second encryption and to its own left ciphertext. For any pair,
+// both comparators reproduce byte order, within a bucket and across them.
+fuzz_target!(|pair: (&str, &str)| {
+    let (a, b) = pair;
+    ORE.with(|ore| {
+        let (Some((full_a, left_a)), Some((full_b, left_b))) = (encrypt(ore, a), encrypt(ore, b))
+        else {
+            return;
+        };
+        let expected = Some(a.as_bytes().cmp(b.as_bytes()));
+        assert_eq!(
+            C::compare_raw_slices(&full_a, &full_b),
+            expected,
+            "{a:?} vs {b:?}"
+        );
+        assert_eq!(
+            C::compare_raw_slices(&full_b, &full_a),
+            expected.map(Ordering::reverse),
+            "{b:?} vs {a:?}"
+        );
+        assert_eq!(
+            C::compare_left_to_full(&left_a, &full_b),
+            expected,
+            "left {a:?} vs {b:?}"
+        );
+        assert_eq!(
+            C::compare_left_to_full(&left_b, &full_a),
+            expected.map(Ordering::reverse),
+            "left {b:?} vs {a:?}"
+        );
+    });
+});
