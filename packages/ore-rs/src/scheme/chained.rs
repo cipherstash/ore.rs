@@ -51,9 +51,12 @@
 //! `None` for two ciphertexts made under different policies: an unpadded
 //! `"abc"` and a padded `"abc"` have different blocks, and would compare
 //! unequal. A column's stored values and its queries must use one policy.
-//! Raw symbol sequences
-//! ([`encrypt_var`](crate::scheme::chained::OreAes128Bit6Chained::encrypt_var))
-//! are never padded, because a trailing zero symbol is a real value there.
+//!
+//! Strings are the only public plaintext. The scheme encrypts any sequence of
+//! 6-bit symbols, and the tests use that entry point directly (symbols a
+//! string never produces, unpadded), but raw symbols cannot be padded with
+//! zero symbols, since a trailing zero symbol is a real value there, so they
+//! are not offered as an API (#110).
 //!
 //! **Stored rows compare offline.** A full ciphertext carries its
 //! deterministic left half (`xt`, `f`), so anyone holding two stored full
@@ -444,14 +447,17 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         Ok(prp)
     }
 
-    /// Full Left+Right ciphertext for `x` (one 6-bit symbol per element). A
-    /// value `>= 64` returns [`OreError::PrpError`]. The symbols are not
-    /// padded, and the ciphertext is tagged [`Padding::None`].
-    pub fn encrypt_var(&self, x: &[u8]) -> Result<VarCipherText, OreError> {
+    /// Full Left+Right ciphertext for raw symbols `x` (one 6-bit symbol per
+    /// element), for the tests: symbols a string never produces, over the
+    /// whole domain. A value `>= 64` returns [`OreError::PrpError`]. The
+    /// symbols are not padded, and the ciphertext is tagged
+    /// [`Padding::None`]. Not public; see the module docs.
+    #[cfg(test)]
+    pub(crate) fn encrypt_var(&self, x: &[u8]) -> Result<VarCipherText, OreError> {
         stack::scrubbed(|| self.encrypt_blocks(&check_symbols(x)?, Padding::None))
     }
 
-    /// [`Self::encrypt_var`] over blocks already known to be in the 6-bit
+    /// Full ciphertext over blocks already known to be in the 6-bit
     /// domain, without the stack scrub. Every caller runs it inside
     /// [`stack::scrubbed`]: building a block's PRP and running the
     /// accumulator leave their secrets in dead stack (see
@@ -527,15 +533,15 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         })
     }
 
-    /// Left-only ciphertext (smaller; for query plaintexts). A value `>= 64`
-    /// returns [`OreError::PrpError`]. Not padded, like
+    /// Left-only ciphertext for raw symbols, for the tests; see
     /// [`Self::encrypt_var`].
-    pub fn encrypt_left_var(&self, x: &[u8]) -> Result<VarLeft, OreError> {
+    #[cfg(test)]
+    pub(crate) fn encrypt_left_var(&self, x: &[u8]) -> Result<VarLeft, OreError> {
         stack::scrubbed(|| self.encrypt_left_blocks(&check_symbols(x)?, Padding::None))
     }
 
-    /// [`Self::encrypt_left_var`] over blocks already known to be in the
-    /// 6-bit domain, without the stack scrub; see [`Self::encrypt_blocks`].
+    /// Left-only ciphertext over blocks already known to be in the 6-bit
+    /// domain, without the stack scrub; see [`Self::encrypt_blocks`].
     fn encrypt_left_blocks<B: AsRef<[u8]>>(
         &self,
         x: &Blocks6<B>,
@@ -608,7 +614,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     }
 
     /// Compare a left-only (query) ciphertext `left` — produced by
-    /// [`Self::encrypt_left_var`]/[`Self::encrypt_left_str`] — against a stored
+    /// [`Self::encrypt_left_str`] — against a stored
     /// full ciphertext `full`. This is the Lewi-Wu query path: a comparison
     /// needs only the query's left half (`xt`/`f`) and the stored ciphertext's
     /// right half, so the smaller left-only artifact suffices. This does not
@@ -691,9 +697,10 @@ pub const MAX_STR_BYTES: usize = u16::MAX as usize * 6 / 8;
 const _: () = assert!(num_blocks_6bit(MAX_STR_BYTES) <= u16::MAX as usize);
 const _: () = assert!(num_blocks_6bit(MAX_STR_BYTES + 1) > u16::MAX as usize);
 
-/// Check raw symbols for [`OreAes128Bit6Chained::encrypt_var`] and
-/// [`OreAes128Bit6Chained::encrypt_left_var`], refusing more blocks than the
-/// wire format can number *before* scanning them.
+/// Check raw symbols for the tests' `encrypt_var` and `encrypt_left_var`,
+/// refusing more blocks than the wire format can number *before* scanning
+/// them.
+#[cfg(test)]
 fn check_symbols(x: &[u8]) -> Result<Blocks6<&[u8]>, OreError> {
     if x.len() > u16::MAX as usize {
         return Err(OreError::TooManyBlocks);

@@ -7,9 +7,9 @@
 # `Symbol`, and `OreEncrypt` and the string encryptors get their symbols from
 # the 6-bit decomposition, which masks rather than checks.
 #
-# Two reports are accepted. The first is `Blocks6::check`, on the raw-block entry points
-# (`OreCipher::encrypt`/`encrypt_left` for Bit6, `encrypt_var`/
-# `encrypt_left_var` for the chained scheme). A caller of those passes symbols
+# Two reports are accepted. The first is `Blocks6::check`, on the raw-block
+# entry points (`OreCipher::encrypt`/`encrypt_left` for Bit6; the chained
+# scheme's are test-only and not exercised here). A caller of those passes symbols
 # that may be out of the 6-bit domain, and the function must refuse them. It
 # ORs every symbol's high bits together without branching and branches once
 # on the result, so the branch reveals only whether some symbol was out of

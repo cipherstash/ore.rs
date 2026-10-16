@@ -411,9 +411,10 @@ data-independent rules (11% on emails against Padmé's 53%) at about 1.4× the b
 are easy to explain. Column-fitted buckets trade better but need per-column configuration
 and a larger header tag; a configurable growth ratio and explicit boundaries are possible
 later. The floor covers the short end; a fixed length hides the length entirely, at the
-cost of the longest value for every row. Raw symbol sequences (`encrypt_var`) are not padded, since a trailing zero
-symbol is a real value there. The string leakage profile is therefore **the length
-bucket, plus order and common-prefix length**. Three threat tiers follow for the order
+cost of the longest value for every row. Strings are the scheme's only public plaintext:
+raw 6-bit symbol sequences cannot be padded with zero symbols (a trailing zero symbol is a
+real value there), so the raw entry points are test-only. The string leakage profile is
+therefore **the length bucket, plus order and common-prefix length**. Three threat tiers follow for the order
 and prefix leakage (the bucket leaks in all of them):
 
 - **Offline / at rest:** right ciphertexts are semantically secure, so right-only

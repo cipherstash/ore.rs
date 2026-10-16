@@ -10,8 +10,7 @@
 //! for the fixed-width Bit6 scheme.)
 //!
 //! Strings are pinned under three padding policies: the default (powers of
-//! two with a 16-byte floor), none, and a fixed length. Raw symbol sequences
-//! are never padded.
+//! two with a 16-byte floor), none, and a fixed length.
 //!
 //! Left ciphertexts are deterministic given the key. Full ciphertexts include
 //! a random nonce drawn from the cipher's internal RNG, which `init` seeds via
@@ -118,11 +117,6 @@ const STRINGS: &[&str] = &[
     "bob",
 ];
 
-/// Raw 6-bit symbol sequences pinned as full ciphertexts: the two domain
-/// edges, a repeated symbol (distinct permutations per position), and the
-/// longest value of one byte.
-const SYMBOLS: &[&[u8]] = &[&[0], &[63], &[0, 0, 0], &[63, 63], &[1, 2, 3, 4, 5]];
-
 #[path = "compat_chained_vectors/vectors.rs"]
 mod vectors;
 use vectors::*;
@@ -159,19 +153,6 @@ fn left_str_vectors_other_policies() {
     }
 }
 
-#[test]
-fn left_symbol_vectors() {
-    let ore = cipher_left();
-    for (syms, expected) in LEFT_SYMBOLS {
-        let left = ore.encrypt_left_var(syms).unwrap();
-        assert_eq!(
-            hex::encode(left.to_bytes()),
-            *expected,
-            "left ciphertext mismatch for symbols {syms:?}"
-        );
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Full ciphertexts (deterministic via TestRng nonce stream)
 // ---------------------------------------------------------------------------
@@ -199,18 +180,6 @@ fn full_str_vectors_other_policies() {
                 "full ciphertext mismatch for {s:?} under {padding:?}"
             );
         }
-    }
-}
-
-#[test]
-fn full_symbol_vectors() {
-    for (syms, expected) in FULL_SYMBOLS {
-        let ct = cipher_a().encrypt_var(syms).unwrap();
-        assert_eq!(
-            hex::encode(ct.to_bytes()),
-            *expected,
-            "full ciphertext mismatch for symbols {syms:?}"
-        );
     }
 }
 
@@ -305,9 +274,8 @@ fn comparators_refuse_mixed_policies() {
     }
 }
 
-/// Padding changes only the header and adds blocks: the unpadded string
-/// vectors are the raw-symbol encryptions of the string's decomposition,
-/// and each padded vector's blocks begin with the unpadded vector's.
+/// Padding changes only the header and adds blocks: each padded vector's
+/// blocks begin with the unpadded vector's.
 #[test]
 fn padding_extends_the_unpadded_blocks() {
     // `xt` follows the 7-byte header.
@@ -316,19 +284,6 @@ fn padding_extends_the_unpadded_blocks() {
         let (u, p) = (pinned(unpadded), pinned(padded));
         let count = u16::from_be_bytes([u[2], u[3]]) as usize;
         assert_eq!(u[H..H + count], p[H..H + count], "xt prefix for {s:?}");
-    }
-}
-
-#[test]
-fn compare_raw_slices_matches_symbol_order() {
-    for (xa, ha) in FULL_SYMBOLS {
-        for (xb, hb) in FULL_SYMBOLS {
-            assert_eq!(
-                OreAes128Bit6ChainedChaCha20::compare_raw_slices(&pinned(ha), &pinned(hb)),
-                Some(xa.cmp(xb)),
-                "compare_raw_slices({xa:?}, {xb:?})"
-            );
-        }
     }
 }
 
@@ -368,9 +323,9 @@ fn compare_raw_slices_equality_across_nonces() {
 
 #[test]
 fn pinned_bytes_round_trip_the_parser() {
-    let strs = FULL_STR.iter().map(|(_, h)| *h);
-    let syms = FULL_SYMBOLS.iter().map(|(_, h)| *h);
-    for h in strs.chain(syms) {
+    let sets = other_policies();
+    let others = sets.iter().flat_map(|(_, _, fulls)| fulls.iter());
+    for (_, h) in FULL_STR.iter().chain(others) {
         let bytes = pinned(h);
         let ct = VarCipherText::from_slice(&bytes).unwrap();
         assert_eq!(ct.to_bytes(), bytes);
@@ -501,26 +456,10 @@ fn generate() {
     println!("];");
     println!();
 
-    println!("pub const LEFT_SYMBOLS: &[(&[u8], &str)] = &[");
-    for syms in SYMBOLS {
-        let left = ore.encrypt_left_var(syms).unwrap();
-        println!("    (&{syms:?}, \"{}\"),", hex::encode(left.to_bytes()));
-    }
-    println!("];");
-    println!();
-
     println!("pub const FULL_STR: &[(&str, &str)] = &[");
     for s in STRINGS {
         let ct = cipher_a().encrypt_str(s).unwrap();
         println!("    ({s:?}, \"{}\"),", hex::encode(ct.to_bytes()));
-    }
-    println!("];");
-    println!();
-
-    println!("pub const FULL_SYMBOLS: &[(&[u8], &str)] = &[");
-    for syms in SYMBOLS {
-        let ct = cipher_a().encrypt_var(syms).unwrap();
-        println!("    (&{syms:?}, \"{}\"),", hex::encode(ct.to_bytes()));
     }
     println!("];");
     println!();

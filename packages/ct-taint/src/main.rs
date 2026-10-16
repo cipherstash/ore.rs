@@ -236,25 +236,6 @@ fn chained_left() -> Vec<u8> {
     out
 }
 
-fn chained_raw() -> Vec<u8> {
-    let ore = chained();
-    let x = tainted(RAW_BLOCKS);
-    let mut out = ore.encrypt_var(&x).expect("encrypt_var").to_bytes();
-    untaint_output(&mut out);
-    out
-}
-
-fn chained_raw_left() -> Vec<u8> {
-    let ore = chained();
-    let x = tainted(RAW_BLOCKS);
-    let mut out = ore
-        .encrypt_left_var(&x)
-        .expect("encrypt_left_var")
-        .to_bytes();
-    untaint_output(&mut out);
-    out
-}
-
 /// Positive control: branches on a tainted byte and indexes memory with it.
 /// Memcheck must report both, so `scripts/ct-taint.sh` requires this mode to
 /// fail. If it passes, the gate cannot see a secret-dependent branch.
@@ -279,8 +260,6 @@ const MODES: &[(&str, fn() -> Vec<u8>)] = &[
     ("bit6-encrypt-left-raw", bit6_raw_left),
     ("chained-encrypt", chained_full),
     ("chained-encrypt-left", chained_left),
-    ("chained-encrypt-raw", chained_raw),
-    ("chained-encrypt-left-raw", chained_raw_left),
     ("canary", canary),
 ];
 
