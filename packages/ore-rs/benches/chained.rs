@@ -32,7 +32,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| ore.encrypt_left_str(black_box(medium)).unwrap())
     });
 
-    // The default policy pads 5 bytes to 16 and 17 bytes to 18.
+    // The default policy pads 5 bytes to 16 and 17 bytes to 32.
     c.bench_function("chained-encrypt-str-5-padded", |b| {
         b.iter(|| padded.encrypt_str(black_box(short)).unwrap())
     });

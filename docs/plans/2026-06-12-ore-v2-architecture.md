@@ -385,8 +385,8 @@ strictly increasing in `n`, so the count gives `n` exactly. Short, low-entropy c
 length plus common-prefix length is a strong frequency-analysis signal.
 
 So the string encryptors pad by default. A string is extended with NUL bytes to a length
-bucket: Padmé (Nikitin et al., PETS 2019) with a 16-byte floor by default, a fixed length
-per column, or none. NUL bytes decompose to zero blocks, which is the decomposition's own
+bucket: powers of two with a 16-byte floor by default (16, 32, 64, … bytes), a fixed
+length per column, or none. NUL bytes decompose to zero blocks, which is the decomposition's own
 zero fill, so padding needs no 65th symbol and no change to the PRP domain or the
 comparator. It keeps order and equality for every string that does not end in NUL: where
 the shorter of two strings ends, the longer has a non-zero bit within its next block, and
@@ -398,10 +398,19 @@ bytes after the common header), and the comparators refuse ciphertexts made unde
 different policies, since an unpadded and a padded copy of one string compare unequal. A
 column's stored values and queries must therefore use one policy.
 
-Padmé leaves `O(log log L)` bits of the length and adds under 12.5%, but for short strings
-it hides little: 17 to 31 bytes round only to even lengths. The floor covers the short
-end; a fixed length hides the length entirely, at the cost of the longest value for
-every row. Raw symbol sequences (`encrypt_var`) are not padded, since a trailing zero
+Padmé (Nikitin et al., PETS 2019) was the first candidate and was set aside. It leaves
+`O(log log L)` bits of the length and adds under 12.5%, but it was designed for
+kilobyte-to-gigabyte messages; at database string lengths its buckets are narrow (below 9
+bytes it changes nothing, 9 to 31 bytes round only to an even length, 32 to 63 to a
+multiple of 4), so above a floor it is barely better than no padding. A simulation over
+name, word, email and phrase columns (#104) compared Padmé, multiples of 8, powers of two,
+×1.5 buckets, column-fitted buckets, a column maximum and a pseudorandom length per value.
+Powers of two with a 16-byte floor had the lowest exact-length guess rate of the
+data-independent rules (11% on emails against Padmé's 53%) at about 1.4× the blocks, and
+are easy to explain. Column-fitted buckets trade better but need per-column configuration
+and a larger header tag; a configurable growth ratio and explicit boundaries are possible
+later. The floor covers the short end; a fixed length hides the length entirely, at the
+cost of the longest value for every row. Raw symbol sequences (`encrypt_var`) are not padded, since a trailing zero
 symbol is a real value there. The string leakage profile is therefore **the length
 bucket, plus order and common-prefix length**. Three threat tiers follow for the order
 and prefix leakage (the bucket leaks in all of them):
@@ -636,8 +645,8 @@ PR 2's trait change, which should be called out in the changelog).
       never reachable from `Left`/`Right` types (PR 6).
 - [ ] GF(2^128) doubling constant-time, if Candidate C is chosen (PR 6).
 - [ ] String leakage profile documented and acknowledged at product level. Every
-      ciphertext reveals its length bucket (Padmé with a 16-byte floor by default,
-      #104), or the exact length if a column opts out of padding. Stored
+      ciphertext reveals its length bucket (powers of two with a 16-byte floor by
+      default, #104), or the exact length if a column opts out of padding. Stored
       full ciphertexts compare offline, revealing order and common-prefix length, as
       legacy does, until right-only storage is supported (#99); see §5(b) (PR 6).
 - [ ] Legacy zero-run seed leakage (Context, "Known leakage of the legacy scheme")

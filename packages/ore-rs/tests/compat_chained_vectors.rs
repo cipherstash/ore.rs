@@ -9,9 +9,9 @@
 //! and must fail here. (Mirror of `compat_w6_vectors.rs`, which does the same
 //! for the fixed-width Bit6 scheme.)
 //!
-//! Strings are pinned under three padding policies: the default (Padmé with
-//! a 16-byte floor), none, and a fixed length. Raw symbol sequences are never
-//! padded.
+//! Strings are pinned under three padding policies: the default (powers of
+//! two with a 16-byte floor), none, and a fixed length. Raw symbol sequences
+//! are never padded.
 //!
 //! Left ciphertexts are deterministic given the key. Full ciphertexts include
 //! a random nonce drawn from the cipher's internal RNG, which `init` seeds via

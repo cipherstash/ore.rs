@@ -26,7 +26,12 @@
 //! string encryptors therefore pad by default
 //! ([`Padding`](crate::scheme::chained::Padding)): the string is extended
 //! with NUL bytes to a length bucket, and a ciphertext reveals only the
-//! bucket. The default is Padmé with a 16-byte floor.
+//! bucket. The default is powers of two with a 16-byte floor: 16, 32, 64
+//! bytes and so on
+//! ([`Padding::PowerOfTwo`](crate::scheme::chained::Padding::PowerOfTwo)).
+//! Padmé (Nikitin et al., PETS 2019) was considered and set aside: at
+//! database string lengths it hides little (see the variant docs and
+//! <https://github.com/cipherstash/ore.rs/issues/104>).
 //!
 //! Padding with NUL bytes keeps order and equality for strings that do not
 //! end in NUL. NUL bytes decompose to zero blocks, the same zero bits the
@@ -138,13 +143,25 @@ fn right_at(s: &[u8], count: usize, i: usize) -> &[u8] {
 pub enum Padding {
     /// No padding: the ciphertext reveals the exact length.
     None,
-    /// Pad to the Padmé length (Nikitin et al., PETS 2019) of the string's
-    /// length or `min_bytes`, whichever is larger. A length of `L` bytes
-    /// becomes a multiple of `2^(⌊log₂ L⌋ − ⌊log₂ ⌊log₂ L⌋⌋ − 1)`, which adds
-    /// at most about 12% and leaves `O(log log L)` bits of the length. Every
-    /// string shorter than `min_bytes` pads to the same length, which matters
-    /// for short columns, where Padmé alone hides little.
-    Padme {
+    /// Pad to `min_bytes` if the string fits, and otherwise to the smallest
+    /// power of two that holds it. With the default 16-byte floor the
+    /// buckets are 16, 32, 64, 128 bytes and so on: a ciphertext reveals
+    /// about `log₂ L` of a length `L`, every string up to `min_bytes` long
+    /// pads to the same length, and padding at most doubles a length. A
+    /// string that would pad past [`MAX_STR_BYTES`] is refused
+    /// ([`OreError::TooManyBlocks`]), so with the default floor the longest
+    /// string accepted is 32768 bytes.
+    ///
+    /// Chosen over Padmé (Nikitin et al., PETS 2019). Padmé leaves only
+    /// `O(log log L)` bits of the length and adds under 12.5%, but it was
+    /// designed for kilobyte-to-gigabyte messages. At database string
+    /// lengths its buckets are narrow: below 9 bytes it changes nothing,
+    /// from 9 to 31 bytes it rounds only to an even length, and from 32 to
+    /// 63 to a multiple of 4. Powers of two cost more blocks and leak more
+    /// in theory, but their buckets are far wider where strings actually
+    /// are. The simulation behind the choice is in
+    /// <https://github.com/cipherstash/ore.rs/issues/104>.
+    PowerOfTwo {
         /// Floor below which every string pads to one bucket.
         min_bytes: u16,
     },
@@ -158,9 +175,9 @@ pub enum Padding {
 }
 
 impl Default for Padding {
-    /// Padmé with a 16-byte floor.
+    /// Powers of two with a 16-byte floor.
     fn default() -> Self {
-        Padding::Padme { min_bytes: 16 }
+        Padding::PowerOfTwo { min_bytes: 16 }
     }
 }
 
@@ -171,7 +188,10 @@ impl Padding {
     fn padded_len(self, len: usize) -> Result<usize, OreError> {
         let padded = match self {
             Padding::None => len,
-            Padding::Padme { min_bytes } => padme(len.max(min_bytes.into())),
+            Padding::PowerOfTwo { min_bytes } if len <= min_bytes.into() => min_bytes.into(),
+            Padding::PowerOfTwo { .. } => len
+                .checked_next_power_of_two()
+                .ok_or(OreError::TooManyBlocks)?,
             Padding::Fixed { max_bytes } if len <= max_bytes.into() => max_bytes.into(),
             Padding::Fixed { .. } => return Err(OreError::ExceedsPadding),
         };
@@ -185,7 +205,7 @@ impl Padding {
     fn to_wire(self) -> [u8; PADDING_LEN] {
         let (kind, n) = match self {
             Padding::None => (0, 0),
-            Padding::Padme { min_bytes } => (1, min_bytes),
+            Padding::PowerOfTwo { min_bytes } => (1, min_bytes),
             Padding::Fixed { max_bytes } => (2, max_bytes),
         };
         let [hi, lo] = n.to_be_bytes();
@@ -198,26 +218,12 @@ impl Padding {
         let n = u16::from_be_bytes([*tag.get(1)?, *tag.get(2)?]);
         let padding = match *tag.first()? {
             0 if n == 0 => Padding::None,
-            1 => Padding::Padme { min_bytes: n },
+            1 => Padding::PowerOfTwo { min_bytes: n },
             2 => Padding::Fixed { max_bytes: n },
             _ => return None,
         };
         padding.padded_len(0).ok().map(|_| padding)
     }
-}
-
-/// The Padmé length of `len` (Nikitin et al., "Reducing Metadata Leakage
-/// from Encrypted Files and Communication with PURBs", PETS 2019, Algorithm
-/// 1): round `len` up so that only its top `⌊log₂ ⌊log₂ len⌋⌋ + 1` bits after
-/// the leading one may be set.
-const fn padme(len: usize) -> usize {
-    if len < 2 {
-        return len;
-    }
-    let e = len.ilog2();
-    let s = e.ilog2() + 1;
-    let mask = (1usize << (e - s)) - 1;
-    (len + mask) & !mask
 }
 
 /// Left half of a chained ciphertext: per-block permuted symbol + tag.
@@ -352,8 +358,8 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     /// (spec §3), so there is no second key. The accumulator key is `k1` run
     /// through a labelled AES call for domain separation.
     ///
-    /// Strings are padded with the default policy, Padmé with a 16-byte
-    /// floor ([`Padding::default`]).
+    /// Strings are padded with the default policy, powers of two with a
+    /// 16-byte floor ([`Padding::default`]).
     pub fn init(k1: &[u8; 16]) -> Result<Self, OreError> {
         Self::init_with_padding(k1, Padding::default())
     }
@@ -713,8 +719,8 @@ mod tests {
     /// tests' strings cross.
     const POLICIES: [Padding; 4] = [
         Padding::None,
-        Padding::Padme { min_bytes: 16 },
-        Padding::Padme { min_bytes: 0 },
+        Padding::PowerOfTwo { min_bytes: 16 },
+        Padding::PowerOfTwo { min_bytes: 0 },
         Padding::Fixed { max_bytes: 48 },
     ];
 
@@ -805,8 +811,8 @@ mod tests {
     #[test]
     fn string_total_order_matches_lexicographic() {
         // Includes shared prefixes of different lengths, beyond 14 blocks,
-        // across Padmé buckets (16 and 17 bytes, 43 and 44), and interior
-        // NULs, which padding allows.
+        // across power-of-two buckets (16 and 17 bytes, 32 and 33), within
+        // one (43 and 44), and interior NULs, which padding allows.
         let words = [
             "",
             "a",
@@ -820,6 +826,8 @@ mod tests {
             "bananas",
             "sixteen bytes ok",
             "sixteen bytes ok!",
+            "thirty-two bytes, on the nose!!!",
+            "thirty-two bytes, on the nose!!!!",
             "the quick brown fox jumps over the lazy dog",
             "the quick brown fox jumps over the lazy dog.",
             "zzz",
@@ -839,20 +847,35 @@ mod tests {
     }
 
     #[test]
-    fn padme_lengths() {
-        // Below 9 bytes Padmé changes nothing; then each range rounds to a
-        // coarser multiple.
-        for len in 0..=8 {
-            assert_eq!(padme(len), len);
+    fn power_of_two_lengths() {
+        let p = |min_bytes, len| Padding::PowerOfTwo { min_bytes }.padded_len(len).unwrap();
+        // Everything up to the floor is one bucket; above it, each bucket
+        // doubles.
+        for len in 0..=16 {
+            assert_eq!(p(16, len), 16);
         }
-        assert_eq!(padme(9), 10);
-        assert_eq!(padme(16), 16);
-        assert_eq!(padme(17), 18);
-        assert_eq!(padme(33), 36);
-        assert_eq!(padme(100), 104);
-        assert_eq!(padme(129), 144);
-        assert_eq!(padme(1000), 1024);
-        assert_eq!(padme(1025), 1088);
+        assert_eq!(p(16, 17), 32);
+        assert_eq!(p(16, 32), 32);
+        assert_eq!(p(16, 33), 64);
+        assert_eq!(p(16, 1000), 1024);
+        assert_eq!(p(16, 1025), 2048);
+        // Without a floor the empty string stays empty, and a floor need
+        // not be a power of two: it is one bucket below the powers of two.
+        assert_eq!(p(0, 0), 0);
+        assert_eq!(p(0, 1), 1);
+        assert_eq!(p(0, 3), 4);
+        assert_eq!(p(24, 20), 24);
+        assert_eq!(p(24, 24), 24);
+        assert_eq!(p(24, 25), 32);
+        // The last bucket within the wire limit is 32768 bytes; longer
+        // strings would pad past it.
+        assert_eq!(p(16, 32768), 32768);
+        for len in [32769, MAX_STR_BYTES] {
+            assert!(matches!(
+                Padding::PowerOfTwo { min_bytes: 16 }.padded_len(len),
+                Err(OreError::TooManyBlocks)
+            ));
+        }
     }
 
     #[test]
@@ -865,9 +888,16 @@ mod tests {
             assert_eq!(size(s), total_len(num_blocks_6bit(16)), "{s:?}");
             assert_eq!(left_size(s), left_len(num_blocks_6bit(16)), "{s:?}");
         }
-        // 17 and 18 bytes share Padmé's next bucket.
-        assert_eq!(size("seventeen bytes!!"), total_len(num_blocks_6bit(18)));
-        assert_eq!(size("eighteen bytes ok!"), total_len(num_blocks_6bit(18)));
+        // 17 and 32 bytes share the next bucket; 33 starts another.
+        assert_eq!(size("seventeen bytes!!"), total_len(num_blocks_6bit(32)));
+        assert_eq!(
+            size("thirty-two bytes, on the nose!!!"),
+            total_len(num_blocks_6bit(32))
+        );
+        assert_eq!(
+            size("thirty-two bytes, on the nose!!!!"),
+            total_len(num_blocks_6bit(64))
+        );
 
         let fixed = ore_with(Padding::Fixed { max_bytes: 48 });
         for s in ["", "abc", &"x".repeat(48)] {
@@ -920,17 +950,21 @@ mod tests {
             C::init_with_padding(&k, Padding::Fixed { max_bytes: max + 1 }),
             Err(OreError::InitFailed)
         ));
-        // Padmé rounds the floor itself up past the limit.
+        // A floor at the limit is allowed, one past it is not.
+        assert!(C::init_with_padding(&k, Padding::PowerOfTwo { min_bytes: max }).is_ok());
         assert!(matches!(
-            C::init_with_padding(&k, Padding::Padme { min_bytes: max }),
+            C::init_with_padding(&k, Padding::PowerOfTwo { min_bytes: max + 1 }),
             Err(OreError::InitFailed)
         ));
-        // Strings near the limit can pad past it.
+        // Under the default, a string past the last power of two within the
+        // limit would pad past it, and is refused before any work is done.
         let c = ore();
-        assert!(matches!(
-            c.encrypt_str(&"a".repeat(MAX_STR_BYTES)),
-            Err(OreError::TooManyBlocks)
-        ));
+        for len in [32769, MAX_STR_BYTES] {
+            assert!(matches!(
+                c.encrypt_str(&"a".repeat(len)),
+                Err(OreError::TooManyBlocks)
+            ));
+        }
     }
 
     /// Ciphertexts under different policies do not compare: an unpadded and
@@ -973,7 +1007,7 @@ mod tests {
         for bad in [
             tampered(tag, 3),        // unknown kind
             tampered(tag, 0),        // Padding::None with a non-zero length
-            tampered(tag + 1, 0xff), // Padmé floor past the wire limit
+            tampered(tag + 1, 0xff), // a floor past the wire limit
         ] {
             assert!(VarCipherText::from_slice(&bad).is_err());
             assert_eq!(C::compare_raw_slices(&bad, &bad), None);
@@ -1143,15 +1177,14 @@ mod tests {
             })
         }
 
-        /// Padmé never shrinks a length, adds less than 12.5%, is monotone,
-        /// and maps a bucket length to itself.
-        fn prop_padme_buckets(a: u16, b: u16) -> bool {
-            let (a, b) = (usize::from(a), usize::from(b));
-            let pa = padme(a);
-            pa >= a
-                && (pa - a) * 8 < a.max(1)
-                && (a > b || pa <= padme(b))
-                && padme(pa) == pa
+        /// A power-of-two bucket never shrinks a length, less than doubles
+        /// it, is monotone, and maps a bucket length to itself.
+        fn prop_power_of_two_buckets(a: u16, b: u16) -> bool {
+            // Halved, so that every length is within the wire limit.
+            let (a, b) = (usize::from(a) / 2, usize::from(b) / 2);
+            let p = |n| Padding::PowerOfTwo { min_bytes: 0 }.padded_len(n).unwrap();
+            let pa = p(a);
+            pa >= a && pa < 2 * a.max(1) && (a > b || pa <= p(b)) && p(pa) == pa
         }
 
         /// Two encryptions of one plaintext (fresh nonces each) compare Equal,
