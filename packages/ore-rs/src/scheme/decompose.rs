@@ -171,8 +171,6 @@ mod tests {
             out.iter().all(|&b| b < 64)
         }
 
-        /// Decomposition is injective: it can be inverted by re-concatenating
-        /// the 6-bit values and truncating to the original bit length.
         /// Padding the decomposition is the same as decomposing the bytes
         /// padded with NULs.
         fn decompose_padded_matches_nul_padding(bytes: Vec<u8>, pad: u8) -> bool {
@@ -184,6 +182,8 @@ mod tests {
             a.as_bytes() == b.as_bytes()
         }
 
+        /// Decomposition is injective: it can be inverted by re-concatenating
+        /// the 6-bit values and truncating to the original bit length.
         fn roundtrip(bytes: Vec<u8>) -> bool {
             let mut out = vec![0u8; num_blocks_6bit(bytes.len())];
             decompose_6bit(&bytes, &mut out);

@@ -150,6 +150,9 @@ fn right_at(s: &[u8], count: usize, i: usize) -> &[u8] {
 /// re-encrypting the column. The comparators refuse to compare ciphertexts
 /// made under different policies.
 ///
+/// Padding hides the exact length in the ciphertext only: the time the
+/// encryptor takes still depends on the exact length of the string.
+///
 /// More policies may follow (a growth ratio between buckets, boundaries
 /// fitted to a column), so the enum is non-exhaustive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
