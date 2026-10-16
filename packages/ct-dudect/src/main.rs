@@ -81,7 +81,7 @@ fn data_independent_timing() {
 
 fn bit6() -> OreAes128Bit6ChaCha20 {
     data_independent_timing();
-    OreCipher::init(&K1, &K2).unwrap()
+    OreAes128Bit6ChaCha20::init(&K1).unwrap()
 }
 
 /// The chained cipher under `padding`. A harness that places the differing

@@ -135,10 +135,9 @@ fn tainted<T: Copy>(mut x: T) -> T {
 }
 
 fn bit6() -> OreAes128Bit6ChaCha20 {
-    let (mut k1, mut k2) = keys();
+    let (mut k1, _) = keys();
     taint(&mut k1);
-    taint(&mut k2);
-    OreCipher::init(&k1, &k2).expect("init")
+    OreAes128Bit6ChaCha20::init(&k1).expect("init")
 }
 
 /// Full Bit6 encryption of a tainted `x` through `OreEncrypt`, which runs the

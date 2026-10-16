@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   size and encryption time grow with the padded length and the string is caller-supplied,
   so a ceiling bounds what one input can cost; it also bounds the number of length buckets
   a column can show. `init_with_padding` is replaced by `init_with`.
+- The v2 schemes (`OreAes128Bit6`, `OreAes128Bit6Chained`) are keyed from **one 16-byte key**
+  and an optional **salt**: `init(key)` and `init_with_salt(key, salt)`; on the chained scheme
+  the salt is also an `Options` field (`Options::with_salt`), beside the padding policy and
+  ceiling, for `init_with(key, options)`. Derivation is
+  `k_root = AES_key(root label)`, `k_salt = CMAC_{k_root}(salt)`, then one `AES_{k_salt}(label)`
+  per PRF; the caller's key is evaluated on nothing but the root label. Ciphertexts under
+  different salts share no key material. Closes #89.
 - `u128` and `i128` can be encrypted, on the chained scheme (`scheme::chained`): `OreEncrypt`
   impls producing `ChainedCipherText<22>` / `ChainedLeft<22>`, whose typed parsers and
   comparators accept only that block count, plus `encrypt_fixed` / `encrypt_left_fixed` for
@@ -23,6 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** `OreCipher::init(k1, k2)` is gone from the trait. Each scheme has its own
+  constructor: `OreAes128::init(k1, k2)` (unchanged signature, inherent), and
+  `OreAes128Bit6::init(key)` / `OreAes128Bit6Chained::init(key)` plus `init_with_salt`.
+  Replace `let ore: OreAes128ChaCha20 = OreCipher::init(&k1, &k2)` with
+  `OreAes128ChaCha20::init(&k1, &k2)`, and Bit6's two keys with one.
+- **v2 wire (not frozen, breaking for rc.1 ciphertexts):** every Bit6 and chained ciphertext
+  is re-keyed by the new derivation. The Bit6 and chained vectors are re-pinned; the legacy
+  vectors are unchanged. The wire format itself (header, layout) is unchanged.
 - `OreEncrypt<T>` no longer requires `T: OreCipher`, so the chained scheme (which is not an
   `OreCipher`) can implement it. Existing impls and callers are unaffected.
 - Every `OreEncrypt` impl macro now emits a round-trip and ordering test for the type it

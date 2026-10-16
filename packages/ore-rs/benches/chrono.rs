@@ -50,7 +50,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     let k1 = hex!("00010203 04050607 08090a0b 0c0d0e0f");
     let k2 = hex!("d0d007a5 3f9a6848 83bc1f21 0f6595a3");
 
-    let mut ore: OreAes128ChaCha20 = OreCipher::init(&k1, &k2).unwrap();
+    let mut ore = OreAes128ChaCha20::init(&k1, &k2).unwrap();
 
     // --- NaiveDate (4-byte plaintext) ---
 

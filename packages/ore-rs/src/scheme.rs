@@ -18,5 +18,7 @@ pub mod bit2_w6;
 /// `docs/plans/2026-06-15-ore-v2-cmac-accumulator-spec.md`.
 pub mod chained;
 
+pub(crate) mod keys;
+
 pub(crate) mod decompose;
 pub(crate) mod width;

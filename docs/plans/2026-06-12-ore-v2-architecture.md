@@ -270,6 +270,12 @@ bytes 4..   : left ‖ right   (existing layout per block width)
   the labels end in a byte no legacy PRF input can have (byte 15 is `0..=14` for
   PRF₁ and `0` for PRF₂), so legacy never evaluates them. Bit6 seeds also bind the
   block index in byte 14, so zero-padded prefixes no longer collide across positions.
+  **Revised 2026-10-16 (#89, #114):** both v2 schemes take one key and an optional salt.
+  `k_root = AES_key(root label)` is the only evaluation of the caller's key (root labels
+  end in `'t'`, outside the legacy range), `k_salt = CMAC_{k_root}(salt)`, and each PRF
+  key is `AES_{k_salt}(label)`. The salt names a column or tenant; vitaminc-ore passes its
+  `PAE("vitaminc/ore/v1", scheme, domain, context)` salt here. See `scheme/keys.rs` and
+  the CMAC spec §3.
 
 ### 5. Variable block counts / string encryption (goal 4)
 
