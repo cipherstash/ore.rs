@@ -18,8 +18,10 @@
 //! ## Example: Encrypt a number with ORE.
 //!
 //! To encrypt a number you need to initialize an [`OreCipher`] as well as `use` the [`OreEncrypt`] trait,
-//! which comes with implementations for `bool`, all integer widths (`u8`–`u128`, `i8`–`i128`), `char`,
+//! which comes with implementations for `bool`, integers up to 64 bits (`u8`–`u64`, `i8`–`i64`), `char`,
 //! `f32` and `f64` (plus `chrono` and `rust_decimal` types behind the `chrono`/`decimal` features).
+//! `u128` and `i128` are too wide for the fixed-width schemes and are encrypted with the
+//! chained scheme instead: see [`scheme::chained`].
 //!
 //! To initialize the Cipher, you must decide on the scheme you want to use. There is only one ORE
 //! Scheme right now so that's easy but in the future more schemes will become available.

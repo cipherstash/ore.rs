@@ -24,8 +24,10 @@
 //! ```
 
 use ore_rs::scheme::chained::{
-    Options, OreAes128Bit6Chained, OreAes128Bit6ChainedChaCha20, Padding, VarCipherText,
+    ChainedCipherText, ChainedLeft, Options, OreAes128Bit6Chained, OreAes128Bit6ChainedChaCha20,
+    Padding, VarCipherText, I128_BLOCKS, U128_BLOCKS,
 };
+use ore_rs::{OreEncrypt, OreOutput};
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use std::cmp::Ordering;
@@ -117,6 +119,11 @@ const STRINGS: &[&str] = &[
     "bob",
 ];
 
+/// Fixed-length integers pinned through the `OreEncrypt` impls (22 blocks
+/// each): the domain edges, zero, and a value with every byte distinct.
+const U128S: &[u128] = &[0, 1, 0x0123_4567_89ab_cdef_fedc_ba98_7654_3210, u128::MAX];
+const I128S: &[i128] = &[i128::MIN, -1, 0, 1, i128::MAX];
+
 #[path = "compat_chained_vectors/vectors.rs"]
 mod vectors;
 use vectors::*;
@@ -181,6 +188,127 @@ fn full_str_vectors_other_policies() {
             );
         }
     }
+}
+
+#[test]
+fn left_u128_vectors() {
+    let ore = cipher_left();
+    for (x, expected) in LEFT_U128 {
+        let left = x.encrypt_left(&ore).unwrap();
+        assert_eq!(
+            hex::encode(left.to_bytes()),
+            *expected,
+            "left mismatch for {x}"
+        );
+        assert_eq!(left.to_bytes().len(), ChainedLeft::<U128_BLOCKS>::size());
+    }
+    for (x, expected) in LEFT_I128 {
+        let left = x.encrypt_left(&ore).unwrap();
+        assert_eq!(
+            hex::encode(left.to_bytes()),
+            *expected,
+            "left mismatch for {x}"
+        );
+        assert_eq!(left.to_bytes().len(), ChainedLeft::<I128_BLOCKS>::size());
+    }
+}
+
+#[test]
+fn full_u128_vectors() {
+    for (x, expected) in FULL_U128 {
+        let ct = x.encrypt(&cipher_a()).unwrap();
+        assert_eq!(
+            hex::encode(ct.to_bytes()),
+            *expected,
+            "full mismatch for {x}"
+        );
+        assert_eq!(
+            ct.to_bytes().len(),
+            ChainedCipherText::<U128_BLOCKS>::size()
+        );
+    }
+    for (x, expected) in FULL_I128 {
+        let ct = x.encrypt(&cipher_a()).unwrap();
+        assert_eq!(
+            hex::encode(ct.to_bytes()),
+            *expected,
+            "full mismatch for {x}"
+        );
+        assert_eq!(
+            ct.to_bytes().len(),
+            ChainedCipherText::<I128_BLOCKS>::size()
+        );
+    }
+}
+
+/// Pinned integer ciphertexts order as the integers under the typed
+/// comparators, and parse back through the typed parsers.
+#[test]
+fn compare_u128_vectors_matches_integer_order() {
+    for (xa, ha) in FULL_U128 {
+        for (xb, hb) in FULL_U128 {
+            assert_eq!(
+                ChainedCipherText::<U128_BLOCKS>::compare_raw_slices(&pinned(ha), &pinned(hb)),
+                Some(xa.cmp(xb)),
+                "u128 {xa} vs {xb}"
+            );
+        }
+        for (xl, hl) in LEFT_U128 {
+            assert_eq!(
+                ChainedCipherText::<U128_BLOCKS>::compare_left_to_full(&pinned(hl), &pinned(ha)),
+                Some(xl.cmp(xa)),
+                "u128 left {xl} vs {xa}"
+            );
+        }
+        let ct = ChainedCipherText::<U128_BLOCKS>::from_slice(&pinned(ha)).unwrap();
+        assert_eq!(ct.to_bytes(), pinned(ha));
+    }
+    for (xa, ha) in FULL_I128 {
+        for (xb, hb) in FULL_I128 {
+            assert_eq!(
+                ChainedCipherText::<I128_BLOCKS>::compare_raw_slices(&pinned(ha), &pinned(hb)),
+                Some(xa.cmp(xb)),
+                "i128 {xa} vs {xb}"
+            );
+        }
+        for (xl, hl) in LEFT_I128 {
+            assert_eq!(
+                ChainedCipherText::<I128_BLOCKS>::compare_left_to_full(&pinned(hl), &pinned(ha)),
+                Some(xl.cmp(xa)),
+                "i128 left {xl} vs {xa}"
+            );
+        }
+    }
+}
+
+/// The typed comparator refuses a string ciphertext of another block count;
+/// the untyped one orders an unpadded one lexicographically. A padded
+/// string carries another policy tag, which both refuse.
+#[test]
+fn typed_comparator_rejects_other_block_counts() {
+    let n = pinned(FULL_U128[0].1);
+    let (alice, unpadded) = FULL_STR_UNPADDED
+        .iter()
+        .find(|(s, _)| *s == "alice")
+        .map(|(s, h)| (*s, pinned(h)))
+        .unwrap();
+    assert_eq!(alice, "alice");
+    assert_eq!(
+        ChainedCipherText::<U128_BLOCKS>::compare_raw_slices(&n, &unpadded),
+        None
+    );
+    assert!(OreAes128Bit6ChainedChaCha20::compare_raw_slices(&n, &unpadded).is_some());
+    assert!(ChainedCipherText::<U128_BLOCKS>::from_slice(&unpadded).is_err());
+
+    let padded = pinned(full_alice());
+    assert_eq!(
+        ChainedCipherText::<U128_BLOCKS>::compare_raw_slices(&n, &padded),
+        None
+    );
+    assert_eq!(
+        OreAes128Bit6ChainedChaCha20::compare_raw_slices(&n, &padded),
+        None
+    );
 }
 
 #[test]
@@ -487,4 +615,36 @@ fn generate() {
         }
         println!("];");
     }
+    println!();
+
+    println!("pub const LEFT_U128: &[(u128, &str)] = &[");
+    for x in U128S {
+        let left = x.encrypt_left(&ore).unwrap();
+        println!("    ({x}, \"{}\"),", hex::encode(left.to_bytes()));
+    }
+    println!("];");
+    println!();
+
+    println!("pub const LEFT_I128: &[(i128, &str)] = &[");
+    for x in I128S {
+        let left = x.encrypt_left(&ore).unwrap();
+        println!("    ({x}, \"{}\"),", hex::encode(left.to_bytes()));
+    }
+    println!("];");
+    println!();
+
+    println!("pub const FULL_U128: &[(u128, &str)] = &[");
+    for x in U128S {
+        let ct = x.encrypt(&cipher_a()).unwrap();
+        println!("    ({x}, \"{}\"),", hex::encode(ct.to_bytes()));
+    }
+    println!("];");
+    println!();
+
+    println!("pub const FULL_I128: &[(i128, &str)] = &[");
+    for x in I128S {
+        let ct = x.encrypt(&cipher_a()).unwrap();
+        println!("    ({x}, \"{}\"),", hex::encode(ct.to_bytes()));
+    }
+    println!("];");
 }

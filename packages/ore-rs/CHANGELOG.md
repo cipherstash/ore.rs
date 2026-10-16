@@ -14,6 +14,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   size and encryption time grow with the padded length and the string is caller-supplied,
   so a ceiling bounds what one input can cost; it also bounds the number of length buckets
   a column can show. `init_with_padding` is replaced by `init_with`.
+- `u128` and `i128` can be encrypted, on the chained scheme (`scheme::chained`): `OreEncrypt`
+  impls producing `ChainedCipherText<22>` / `ChainedLeft<22>`, whose typed parsers and
+  comparators accept only that block count, plus `encrypt_fixed` / `encrypt_left_fixed` for
+  any `FixedOrderableBytes` type and `VarLeft::from_slice`. Wire vectors are pinned in
+  `tests/compat_chained_vectors.rs` (#105).
+- `scheme::bit2::MAX_BLOCKS` (15): the most bytes the legacy scheme takes.
+
+### Changed
+
+- `OreEncrypt<T>` no longer requires `T: OreCipher`, so the chained scheme (which is not an
+  `OreCipher`) can implement it. Existing impls and callers are unaffected.
+- Every `OreEncrypt` impl macro now emits a round-trip and ordering test for the type it
+  implements, so a type can't be declared supported without being exercised (#105).
+
+### Fixed
+
+- `OreAes128` panicked with an index out of bounds on any 16-byte plaintext, which is what
+  the `u128`/`i128` impls on that scheme had always done (#105). Those impls are removed: the
+  legacy scheme cannot take 16 bytes, and the impl macro now rejects such a type at compile
+  time. Encrypting a `PlainText<N>` with `N > 15` directly returns `OreError::TooManyBlocks`
+  instead of panicking.
 
 ## [0.9.0-rc.1] - 2026-10-12
 
