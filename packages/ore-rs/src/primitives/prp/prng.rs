@@ -35,14 +35,8 @@ impl Drop for Aes128Prng {
 impl ZeroizeOnDrop for Aes128Prng {}
 
 // The drop-time wipe of `cipher` (the AES key schedule) relies entirely on
-// `aes::Aes128Enc: ZeroizeOnDrop`, which is gated behind the `aes` crate's
-// `zeroize` feature. Assert it at compile time so the build fails fast if that
-// feature is ever lost — otherwise the key-schedule wipe would silently vanish
-// while this type still (falsely) claims `ZeroizeOnDrop`.
-const _: fn() = || {
-    fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
-    assert_zeroize_on_drop::<Aes128Enc>();
-};
+// `aes::Aes128Enc: ZeroizeOnDrop`, asserted at compile time in
+// `primitives.rs` for every type in the crate that keys one.
 
 /*
  * Buffers 256 AES-CTR keystream bytes at a time and regenerates a fresh batch
