@@ -389,8 +389,9 @@ bucket: powers of two with a 16-byte floor by default (16, 32, 64, … bytes), a
 length per column, or none. NUL bytes decompose to zero blocks, which is the decomposition's own
 zero fill, so padding needs no 65th symbol and no change to the PRP domain or the
 comparator. It keeps order and equality for every string that does not end in NUL: where
-the shorter of two strings ends, the longer has a non-zero bit within its next block, and
-equal strings pad to the same bucket. A string that ends in NUL would encrypt the same as
+the shorter of two strings ends, the longer has a non-zero bit somewhere in its remaining
+bytes (its last byte is not NUL) and the shorter has only zeros there, and equal strings
+pad to the same bucket. A string that ends in NUL would encrypt the same as
 the string without it, so the padded encryptors refuse it; Postgres `text` and `jsonb`
 cannot hold NUL. Pad blocks look like any other blocks, because each block's PRP is keyed
 by its position and prefix. The header carries the padding policy (kind and length, 3

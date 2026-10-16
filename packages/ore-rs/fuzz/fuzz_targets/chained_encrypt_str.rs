@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 
 use libfuzzer_sys::fuzz_target;
 use ore_rs::scheme::chained::{
-    OreAes128Bit6Chained, OreAes128Bit6ChainedChaCha20, VarCipherText, MAX_STR_BYTES,
+    OreAes128Bit6Chained, OreAes128Bit6ChainedChaCha20, Padding, VarCipherText,
 };
 use ore_rs::OreError;
 
@@ -14,33 +14,23 @@ thread_local! {
     static ORE: C = OreAes128Bit6Chained::init(&[0x42; 16]).expect("init");
 }
 
-/// The default policy's bucket for a string of `len` bytes, or `None` where
-/// the string would pad past the wire limit.
-fn bucket(len: usize) -> Option<usize> {
-    let bucket = if len <= 16 {
-        16
-    } else {
-        len.next_power_of_two()
-    };
-    (bucket <= MAX_STR_BYTES).then_some(bucket)
-}
-
 /// Encrypt `s` under the default padding policy and check everything a
 /// single string promises; `None` if the string is one the encryptors
-/// refuse, after checking that they do.
+/// refuse, after checking that they do. The length is checked before the
+/// trailing NUL, as the encryptors check it.
 fn encrypt(ore: &C, s: &str) -> Option<(Vec<u8>, Vec<u8>)> {
     let full = ore.encrypt_str(s);
     let left = ore.encrypt_left_str(s);
+    let Ok(bucket) = Padding::default().padded_len(s.len()) else {
+        assert!(matches!(full, Err(OreError::TooManyBlocks)), "{s:?}");
+        assert!(matches!(left, Err(OreError::TooManyBlocks)), "{s:?}");
+        return None;
+    };
     if s.ends_with('\0') {
         assert!(matches!(full, Err(OreError::TrailingNul)), "{s:?}");
         assert!(matches!(left, Err(OreError::TrailingNul)), "{s:?}");
         return None;
     }
-    let Some(bucket) = bucket(s.len()) else {
-        assert!(matches!(full, Err(OreError::TooManyBlocks)), "{s:?}");
-        assert!(matches!(left, Err(OreError::TooManyBlocks)), "{s:?}");
-        return None;
-    };
     let full = full.expect("encrypt_str").to_bytes();
     let left = left.expect("encrypt_left_str").to_bytes();
 

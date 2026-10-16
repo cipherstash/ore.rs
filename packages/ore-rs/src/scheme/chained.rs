@@ -36,9 +36,10 @@
 //! Padding with NUL bytes keeps order and equality for strings that do not
 //! end in NUL. NUL bytes decompose to zero blocks, the same zero bits the
 //! decomposition already fills a final partial block with. Where the shorter
-//! of two strings ends, the longer one has a non-zero bit within its next
-//! block (its next byte is not NUL), so the shorter string's padding sorts
-//! below it, as "shorter sorts first" requires. Equal strings have equal
+//! of two strings ends, the longer one has a non-zero bit somewhere in its
+//! remaining bytes (its last byte is not NUL, though bytes before it may
+//! be), and the shorter string has only zeros there, so the shorter sorts
+//! first, as "shorter sorts first" requires. Equal strings have equal
 //! lengths, so they pad to the same bucket. A string that ends in NUL would
 //! pad to the same blocks as the string without it, so the padded encryptors
 //! refuse it ([`OreError::TrailingNul`](crate::OreError::TrailingNul)).
@@ -63,6 +64,7 @@
 
 use std::cell::RefCell;
 use std::cmp::Ordering;
+use std::convert::TryFrom;
 
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -72,7 +74,7 @@ use zeroize::{Zeroize, Zeroizing};
 use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
 use aes::Aes128Enc;
 
-use crate::ciphertext::{parse_header, ParseError, WIRE_HEADER_LEN};
+use crate::ciphertext::{parse_header, ParseError, WireHeader, WIRE_HEADER_LEN};
 use crate::primitives::cmac::{final_block, prefix_block, Branch, CmacAccumulator, WIDTH_BIT6};
 use crate::primitives::hash::FixedPiZ2Hash;
 use crate::primitives::prp::LemireFyPrp;
@@ -83,6 +85,11 @@ use crate::OreError;
 
 const VERSION: u8 = 0x02;
 const SCHEME_ID: u8 = 0x03;
+/// The common wire header of this scheme.
+const WIRE: WireHeader = WireHeader {
+    version: VERSION,
+    scheme_id: SCHEME_ID,
+};
 const DOMAIN: usize = 64;
 /// CMAC tags per block for the PRP keystream: ⌈(DOMAIN−1)·8 / 16⌉ = 32.
 const STREAM_BLOCKS: usize = 32;
@@ -147,7 +154,8 @@ pub enum Padding {
     /// power of two that holds it. With the default 16-byte floor the
     /// buckets are 16, 32, 64, 128 bytes and so on: a ciphertext reveals
     /// about `log₂ L` of a length `L`, every string up to `min_bytes` long
-    /// pads to the same length, and padding at most doubles a length. A
+    /// pads to the same length, and above the floor padding less than
+    /// doubles a length. A
     /// string that would pad past [`MAX_STR_BYTES`] is refused
     /// ([`OreError::TooManyBlocks`]), so with the default floor the longest
     /// string accepted is 32768 bytes.
@@ -182,10 +190,12 @@ impl Default for Padding {
 }
 
 impl Padding {
-    /// The length a string of `len` bytes pads to. Errors if `len` exceeds
-    /// a fixed length, or if the padded string has more blocks than the wire
-    /// format can number.
-    fn padded_len(self, len: usize) -> Result<usize, OreError> {
+    /// The length in bytes a string of `len` bytes pads to, which is what a
+    /// ciphertext reveals of it. Errors as the string encryptors do:
+    /// [`OreError::ExceedsPadding`] if `len` exceeds a fixed length, and
+    /// [`OreError::TooManyBlocks`] if the padded string has more blocks than
+    /// the wire format can number.
+    pub fn padded_len(self, len: usize) -> Result<usize, OreError> {
         let padded = match self {
             Padding::None => len,
             Padding::PowerOfTwo { min_bytes } if len <= min_bytes.into() => min_bytes.into(),
@@ -214,15 +224,35 @@ impl Padding {
 
     /// Parse a policy written by [`Self::to_wire`]. A policy no cipher
     /// could have been initialised with is refused, as is an unknown kind.
-    fn from_wire(tag: &[u8]) -> Option<Self> {
-        let n = u16::from_be_bytes([*tag.get(1)?, *tag.get(2)?]);
-        let padding = match *tag.first()? {
+    fn from_wire(tag: [u8; PADDING_LEN]) -> Option<Self> {
+        let [kind, hi, lo] = tag;
+        let n = u16::from_be_bytes([hi, lo]);
+        let padding = match kind {
             0 if n == 0 => Padding::None,
             1 => Padding::PowerOfTwo { min_bytes: n },
             2 => Padding::Fixed { max_bytes: n },
             _ => return None,
         };
         padding.padded_len(0).ok().map(|_| padding)
+    }
+
+    /// Whether a ciphertext of `count` blocks can have been made under this
+    /// policy: the block count of some length the policy pads to. The
+    /// parsers and comparators refuse a header whose count and policy no
+    /// cipher could have produced together.
+    fn admits_count(self, count: usize) -> bool {
+        match self {
+            Padding::None => true,
+            Padding::Fixed { max_bytes } => count == num_blocks_6bit(max_bytes.into()),
+            Padding::PowerOfTwo { min_bytes } => {
+                let min_bytes = usize::from(min_bytes);
+                count == num_blocks_6bit(min_bytes)
+                    || (0..=MAX_STR_BYTES.ilog2()).any(|k| {
+                        let bucket = 1usize << k;
+                        bucket > min_bytes && count == num_blocks_6bit(bucket)
+                    })
+            }
+        }
     }
 }
 
@@ -324,19 +354,29 @@ impl VarCipherText {
 
 /// Write the wire header: version, scheme id, block count, padding policy.
 fn write_header(count: usize, padding: Padding, out: &mut Vec<u8>) {
-    out.extend_from_slice(&[VERSION, SCHEME_ID]);
-    out.extend_from_slice(&(count as u16).to_be_bytes());
+    WIRE.write(count, out);
     out.extend_from_slice(&padding.to_wire());
 }
 
 /// The block count and padding policy of a serialised view, if its header
-/// is this scheme's.
+/// is this scheme's and the count is one the policy can produce.
 fn parse_chained_header(view: &[u8]) -> Option<(usize, Padding)> {
     let ((ver, sid, count), body) = parse_header(view).ok()?;
     if ver != VERSION || sid != SCHEME_ID {
         return None;
     }
-    Some((count, Padding::from_wire(body.get(..PADDING_LEN)?)?))
+    let tag = <[u8; PADDING_LEN]>::try_from(body.get(..PADDING_LEN)?).ok()?;
+    let padding = Padding::from_wire(tag)?;
+    padding.admits_count(count).then_some((count, padding))
+}
+
+/// The block counts of two serialised views, if both headers are this
+/// scheme's and they share a padding policy. The comparators refuse
+/// ciphertexts made under different policies (see the module docs).
+fn parse_pair(a: &[u8], b: &[u8]) -> Option<(usize, usize)> {
+    let (ca, pa) = parse_chained_header(a)?;
+    let (cb, pb) = parse_chained_header(b)?;
+    (pa == pb).then_some((ca, cb))
 }
 
 /// Variable-length / chained-prefix ORE cipher (6-bit blocks).
@@ -551,11 +591,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     /// sorts first). `None` if either is not a well-formed ciphertext of this
     /// scheme, or if they were padded under different policies.
     pub fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering> {
-        let (ca, pa) = parse_chained_header(a)?;
-        let (cb, pb) = parse_chained_header(b)?;
-        if pa != pb {
-            return None;
-        }
+        let (ca, cb) = parse_pair(a, b)?;
         if a.len() != total_len(ca) || b.len() != total_len(cb) {
             return None;
         }
@@ -578,11 +614,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     /// `None` if either input is malformed, or if they were padded under
     /// different policies.
     pub fn compare_left_to_full(left: &[u8], full: &[u8]) -> Option<Ordering> {
-        let (cl, pl) = parse_chained_header(left)?;
-        let (cf, pf) = parse_chained_header(full)?;
-        if pl != pf {
-            return None;
-        }
+        let (cl, cf) = parse_pair(left, full)?;
         // `left` is `header ‖ xt ‖ f` (no nonce/right); `full` is complete.
         if left.len() != left_len(cl) || full.len() != total_len(cf) {
             return None;
@@ -844,7 +876,7 @@ mod tests {
         let q = c.encrypt_left_str("apple").unwrap().to_bytes();
         assert!(OreAes128Bit6Chained::<ChaCha20Rng>::compare_raw_slices(&a, &b).is_some());
 
-        // First `xt` byte follows the 4-byte header.
+        // First `xt` byte follows the header.
         let mut bad = a.clone();
         bad[HEADER_LEN] = DOMAIN as u8;
         let mut bad_q = q.clone();
@@ -1213,8 +1245,11 @@ mod tests {
     }
 
     /// The longest fixed length the wire format allows, 65535 blocks,
-    /// encrypts, round trips and compares.
+    /// encrypts, round trips and compares. About ten seconds unoptimised,
+    /// so it runs only on request:
+    /// `cargo test -p ore-rs fixed_padding_at_the_wire_limit -- --ignored`.
     #[test]
+    #[ignore = "65535-block ciphertexts: about ten seconds unoptimised"]
     fn fixed_padding_at_the_wire_limit() {
         type C = OreAes128Bit6ChainedChaCha20;
         let c = ore_with(Padding::Fixed {
@@ -1228,6 +1263,76 @@ mod tests {
         assert_eq!(
             C::compare_left_to_full(&left, &full),
             Some(Ordering::Greater)
+        );
+    }
+
+    /// A header's block count must be one its policy can produce.
+    #[test]
+    fn policies_admit_only_their_own_block_counts() {
+        let blocks = num_blocks_6bit;
+        let pow16 = Padding::PowerOfTwo { min_bytes: 16 };
+        for count in [blocks(16), blocks(32), blocks(64), blocks(32768)] {
+            assert!(pow16.admits_count(count), "{}", count);
+        }
+        for count in [0, blocks(8), blocks(16) + 1, blocks(48), blocks(65536)] {
+            assert!(!pow16.admits_count(count), "{}", count);
+        }
+        // A floor that is not a power of two is a bucket of its own.
+        let pow24 = Padding::PowerOfTwo { min_bytes: 24 };
+        assert!(pow24.admits_count(blocks(24)));
+        assert!(pow24.admits_count(blocks(32)));
+        assert!(!pow24.admits_count(blocks(16)));
+        // Without a floor: 0, 1, 2, 4, 8, ... bytes.
+        let pow0 = Padding::PowerOfTwo { min_bytes: 0 };
+        for len in [0, 1, 2, 4, 8, 1024] {
+            assert!(pow0.admits_count(blocks(len)), "{}", len);
+        }
+        assert!(!pow0.admits_count(blocks(3)));
+        let fixed = Padding::Fixed { max_bytes: 48 };
+        assert!(fixed.admits_count(blocks(48)));
+        assert!(!fixed.admits_count(blocks(48) - 1));
+        for count in [0, 1, 1000, u16::MAX as usize] {
+            assert!(Padding::None.admits_count(count));
+        }
+    }
+
+    /// A ciphertext whose tag names a policy that cannot produce its block
+    /// count was made by no cipher, and is refused: rewriting an unpadded
+    /// ciphertext's tag does not smuggle it into a padded column.
+    #[test]
+    fn parsers_reject_counts_the_policy_cannot_produce() {
+        type C = OreAes128Bit6ChainedChaCha20;
+        let retag = |bytes: &[u8], padding: Padding| {
+            let mut t = bytes.to_vec();
+            t[WIRE_HEADER_LEN..HEADER_LEN].copy_from_slice(&padding.to_wire());
+            t
+        };
+        // 4 blocks, claimed to be padded to 16 bytes (22 blocks).
+        let unpadded = ore_with(Padding::None)
+            .encrypt_str("abc")
+            .unwrap()
+            .to_bytes();
+        let forged = retag(&unpadded, Padding::default());
+        assert!(VarCipherText::from_slice(&forged).is_err());
+        let genuine = ore().encrypt_str("abc").unwrap().to_bytes();
+        assert_eq!(C::compare_raw_slices(&forged, &genuine), None);
+        assert_eq!(C::compare_raw_slices(&forged, &forged), None);
+        let left = retag(
+            &ore_with(Padding::None)
+                .encrypt_left_str("abc")
+                .unwrap()
+                .to_bytes(),
+            Padding::default(),
+        );
+        assert_eq!(C::compare_left_to_full(&left, &genuine), None);
+
+        // 22 blocks claimed as a fixed 48 bytes (64 blocks): refused. As a
+        // fixed 16 bytes (22 blocks): a count that policy produces, accepted.
+        assert!(
+            VarCipherText::from_slice(&retag(&genuine, Padding::Fixed { max_bytes: 48 })).is_err()
+        );
+        assert!(
+            VarCipherText::from_slice(&retag(&genuine, Padding::Fixed { max_bytes: 16 })).is_ok()
         );
     }
 
