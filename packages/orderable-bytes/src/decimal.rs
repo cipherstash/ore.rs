@@ -140,8 +140,7 @@ impl_fixed_orderable_bytes! {
         let leading_exp = digits as i32 - 1 + trailing - scale;
         debug_assert!(
             (-29..=28).contains(&leading_exp),
-            "leading_exp {} out of bounds — mantissa or scale corrupted",
-            leading_exp,
+            "leading_exp {leading_exp} out of bounds — mantissa or scale corrupted",
         );
         let biased_exp = (leading_exp + EXP_BIAS) as u8;
         debug_assert!(biased_exp <= EXP_MASK, "biased_exp overflowed 7 bits");

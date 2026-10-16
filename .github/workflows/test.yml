@@ -42,8 +42,8 @@ jobs:
             target/
           key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: setup rust 1.78
-        uses: dtolnay/rust-toolchain@1.78.0
+      - name: setup rust 1.88
+        uses: dtolnay/rust-toolchain@1.88.0
         with:
           components: clippy, rustfmt
 
@@ -84,8 +84,8 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: setup rust 1.78
-        uses: dtolnay/rust-toolchain@1.78.0
+      - name: setup rust 1.88
+        uses: dtolnay/rust-toolchain@1.88.0
 
       - name: "Benchmark"
         run: cargo bench
