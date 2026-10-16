@@ -703,6 +703,61 @@ fn refuse_trailing_nul(bytes: &[u8]) -> Result<(), OreError> {
     Ok(())
 }
 
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// For every floor and every length the wire format can hold, the
+    /// power-of-two rule never shrinks a string, stays within the wire
+    /// limit, and maps a padded length to itself. Order and equality under
+    /// padding need exactly the first of these (the module docs).
+    #[kani::proof]
+    fn power_of_two_never_shrinks_and_is_idempotent() {
+        let min_bytes: u16 = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len <= MAX_STR_BYTES);
+        let padding = Padding::PowerOfTwo { min_bytes };
+        if let Ok(padded) = padding.padded_len(len) {
+            assert!(padded >= len);
+            assert!(padded <= MAX_STR_BYTES);
+            assert!(padded.is_power_of_two() || padded == usize::from(min_bytes));
+            assert!(matches!(padding.padded_len(padded), Ok(again) if again == padded));
+        }
+    }
+
+    /// The power-of-two rule is monotone: a longer string never pads to a
+    /// shorter length, so bucket sizes order like lengths.
+    #[kani::proof]
+    fn power_of_two_is_monotone() {
+        let min_bytes: u16 = kani::any();
+        let a: usize = kani::any();
+        let b: usize = kani::any();
+        kani::assume(a <= b && b <= MAX_STR_BYTES);
+        let padding = Padding::PowerOfTwo { min_bytes };
+        if let (Ok(pa), Ok(pb)) = (padding.padded_len(a), padding.padded_len(b)) {
+            assert!(pa <= pb);
+        }
+    }
+
+    /// A fixed length accepts exactly the strings that fit, and pads them
+    /// all to that length.
+    #[kani::proof]
+    fn fixed_pads_everything_that_fits() {
+        let max_bytes: u16 = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len <= MAX_STR_BYTES);
+        let padding = Padding::Fixed { max_bytes };
+        match padding.padded_len(len) {
+            Ok(padded) => {
+                assert!(len <= usize::from(max_bytes) && padded == usize::from(max_bytes))
+            }
+            Err(OreError::ExceedsPadding) => assert!(len > usize::from(max_bytes)),
+            Err(OreError::TooManyBlocks) => assert!(usize::from(max_bytes) > MAX_STR_BYTES),
+            Err(_) => assert!(false),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1014,6 +1069,168 @@ mod tests {
         }
     }
 
+    /// Every string over {NUL, 'a', 'b'} of up to four bytes that a padding
+    /// policy accepts (no trailing NUL), plus strings at the 16- and 32-byte
+    /// bucket edges, each also with a two-byte character straddling the edge.
+    fn small_alphabet_strings() -> Vec<String> {
+        let mut out = vec![String::new()];
+        let mut layer = vec![String::new()];
+        for _ in 0..4 {
+            layer = layer
+                .iter()
+                .flat_map(|s| ["\0", "a", "b"].iter().map(move |c| format!("{s}{c}")))
+                .collect();
+            out.extend(layer.iter().cloned());
+        }
+        out.retain(|s| !s.ends_with('\0'));
+        for n in [15, 16, 17, 31, 32, 33] {
+            out.push("a".repeat(n));
+            // `n - 1` ASCII bytes and a two-byte character: `n + 1` bytes.
+            out.push(format!("{}é", "a".repeat(n - 1)));
+        }
+        out
+    }
+
+    /// Both comparators reproduce byte order over every pair of the small
+    /// alphabet's strings, under every policy: interior NULs, prefixes that
+    /// end at every block position, and both sides of each bucket edge.
+    #[test]
+    fn small_alphabet_total_order_under_every_policy() {
+        type C = OreAes128Bit6ChainedChaCha20;
+        let strings = small_alphabet_strings();
+        for padding in POLICIES {
+            let c = ore_with(padding);
+            let fulls: Vec<Vec<u8>> = strings
+                .iter()
+                .map(|s| c.encrypt_str(s).unwrap().to_bytes())
+                .collect();
+            let lefts: Vec<Vec<u8>> = strings
+                .iter()
+                .map(|s| c.encrypt_left_str(s).unwrap().to_bytes())
+                .collect();
+            for (i, a) in strings.iter().enumerate() {
+                for (j, b) in strings.iter().enumerate() {
+                    let expected = Some(a.as_bytes().cmp(b.as_bytes()));
+                    assert_eq!(
+                        C::compare_raw_slices(&fulls[i], &fulls[j]),
+                        expected,
+                        "full {a:?} vs {b:?} under {padding:?}"
+                    );
+                    assert_eq!(
+                        C::compare_left_to_full(&lefts[i], &fulls[j]),
+                        expected,
+                        "left {a:?} vs {b:?} under {padding:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Under the default policy, every length from 0 to 70 bytes lands in
+    /// its bucket, and each string sorts below the next longer one and
+    /// below itself with one more byte, across every bucket edge.
+    #[test]
+    fn default_buckets_at_every_length() {
+        type C = OreAes128Bit6ChainedChaCha20;
+        let c = ore();
+        let bucket = |n: usize| if n <= 16 { 16 } else { n.next_power_of_two() };
+        let mut prev: Option<Vec<u8>> = None;
+        for n in 0..=70 {
+            let s = "a".repeat(n);
+            let full = c.encrypt_str(&s).unwrap().to_bytes();
+            let left = c.encrypt_left_str(&s).unwrap().to_bytes();
+            assert_eq!(
+                full.len(),
+                total_len(num_blocks_6bit(bucket(n))),
+                "{n} bytes"
+            );
+            assert_eq!(
+                left.len(),
+                left_len(num_blocks_6bit(bucket(n))),
+                "{n} bytes"
+            );
+            let longer = c.encrypt_str(&format!("{s}b")).unwrap().to_bytes();
+            assert_eq!(
+                C::compare_raw_slices(&full, &longer),
+                Some(Ordering::Less),
+                "{n} bytes"
+            );
+            assert_eq!(
+                C::compare_left_to_full(&left, &longer),
+                Some(Ordering::Less),
+                "{n} bytes"
+            );
+            if let Some(prev) = &prev {
+                assert_eq!(
+                    C::compare_raw_slices(prev, &full),
+                    Some(Ordering::Less),
+                    "{n} bytes"
+                );
+            }
+            prev = Some(full);
+        }
+    }
+
+    /// Two policies that pad a string to the same length produce the same
+    /// blocks, since padding is only NUL extension, and the tag alone keeps
+    /// their ciphertexts from comparing.
+    #[test]
+    fn same_blocks_under_different_policies_do_not_compare() {
+        type C = OreAes128Bit6ChainedChaCha20;
+        let cases = [
+            (
+                Padding::PowerOfTwo { min_bytes: 16 },
+                Padding::Fixed { max_bytes: 16 },
+                "sixteen bytes ok",
+            ),
+            (
+                Padding::PowerOfTwo { min_bytes: 16 },
+                Padding::PowerOfTwo { min_bytes: 8 },
+                "seventeen bytes!!",
+            ),
+            (
+                Padding::Fixed { max_bytes: 4 },
+                Padding::PowerOfTwo { min_bytes: 0 },
+                "abc",
+            ),
+        ];
+        for (pa, pb, s) in cases {
+            let (a, b) = (ore_with(pa), ore_with(pb));
+            let left_a = a.encrypt_left_str(s).unwrap().to_bytes();
+            let left_b = b.encrypt_left_str(s).unwrap().to_bytes();
+            assert_eq!(
+                left_a[..WIRE_HEADER_LEN],
+                left_b[..WIRE_HEADER_LEN],
+                "{s:?}"
+            );
+            assert_ne!(left_a[..HEADER_LEN], left_b[..HEADER_LEN], "{s:?}");
+            assert_eq!(left_a[HEADER_LEN..], left_b[HEADER_LEN..], "{s:?}");
+            let full_b = b.encrypt_str(s).unwrap().to_bytes();
+            assert_eq!(C::compare_left_to_full(&left_a, &full_b), None, "{s:?}");
+            let full_a = a.encrypt_str(s).unwrap().to_bytes();
+            assert_eq!(C::compare_raw_slices(&full_a, &full_b), None, "{s:?}");
+        }
+    }
+
+    /// The longest fixed length the wire format allows, 65535 blocks,
+    /// encrypts, round trips and compares.
+    #[test]
+    fn fixed_padding_at_the_wire_limit() {
+        type C = OreAes128Bit6ChainedChaCha20;
+        let c = ore_with(Padding::Fixed {
+            max_bytes: MAX_STR_BYTES as u16,
+        });
+        let full = c.encrypt_str("alice").unwrap().to_bytes();
+        assert_eq!(full.len(), total_len(u16::MAX as usize));
+        assert_eq!(VarCipherText::from_slice(&full).unwrap().to_bytes(), full);
+        let left = c.encrypt_left_str("alicf").unwrap().to_bytes();
+        assert_eq!(left.len(), left_len(u16::MAX as usize));
+        assert_eq!(
+            C::compare_left_to_full(&left, &full),
+            Some(Ordering::Greater)
+        );
+    }
+
     #[test]
     fn equality_same_plaintext_across_nonces() {
         let c = ore();
@@ -1185,6 +1402,89 @@ mod tests {
             let p = |n| Padding::PowerOfTwo { min_bytes: 0 }.padded_len(n).unwrap();
             let pa = p(a);
             pa >= a && pa < 2 * a.max(1) && (a > b || pa <= p(b)) && p(pa) == pa
+        }
+
+        /// A padded string encrypts to the blocks of the string extended with
+        /// NULs to its bucket under no padding: only the header tag differs.
+        /// Padding is NUL extension and nothing more. A string too long for a
+        /// fixed length is refused.
+        fn prop_padding_is_nul_extension(s: String) -> bool {
+            let s: String = s.chars().take(40).collect();
+            let s = s.trim_end_matches('\0');
+            let unpadded = ore_with(Padding::None);
+            POLICIES.iter().all(|&padding| {
+                let c = ore_with(padding);
+                let Ok(padded) = padding.padded_len(s.len()) else {
+                    return matches!(padding, Padding::Fixed { .. })
+                        && matches!(c.encrypt_left_str(s), Err(OreError::ExceedsPadding))
+                        && matches!(c.encrypt_str(s), Err(OreError::ExceedsPadding));
+                };
+                let mut extended = s.to_owned();
+                extended.extend(std::iter::repeat('\0').take(padded - s.len()));
+                let left = c.encrypt_left_str(s).unwrap();
+                let a = left.to_bytes();
+                let b = unpadded.encrypt_left_str(&extended).unwrap().to_bytes();
+                left.padding() == padding
+                    && a[..WIRE_HEADER_LEN] == b[..WIRE_HEADER_LEN]
+                    && a[HEADER_LEN..] == b[HEADER_LEN..]
+            })
+        }
+
+        /// Under every policy, two encryptions of a string compare Equal to
+        /// each other and to its left ciphertext, and the full ciphertext
+        /// round trips with its policy.
+        fn prop_string_equality_under_every_policy(s: String) -> bool {
+            type C = OreAes128Bit6ChainedChaCha20;
+            let s: String = s.chars().take(12).collect();
+            let s = s.trim_end_matches('\0');
+            POLICIES.iter().all(|&padding| {
+                let c = ore_with(padding);
+                let a = c.encrypt_str(s).unwrap().to_bytes();
+                let b = c.encrypt_str(s).unwrap().to_bytes();
+                let l = c.encrypt_left_str(s).unwrap().to_bytes();
+                C::compare_raw_slices(&a, &b) == Some(Ordering::Equal)
+                    && C::compare_left_to_full(&l, &b) == Some(Ordering::Equal)
+                    && VarCipherText::from_slice(&a)
+                        .map(|ct| ct.to_bytes() == a && ct.padding() == padding)
+                        .unwrap_or(false)
+            })
+        }
+
+        /// A padding policy refuses exactly the strings that end in NUL; no
+        /// padding accepts them all.
+        fn prop_padding_refuses_exactly_trailing_nul(s: String, nul: bool) -> bool {
+            let mut s: String = s.chars().take(11).collect();
+            if nul {
+                s.push('\0');
+            }
+            let ends_in_nul = s.ends_with('\0');
+            POLICIES.iter().all(|&padding| {
+                let c = ore_with(padding);
+                let (full, left) = (c.encrypt_str(&s), c.encrypt_left_str(&s));
+                if padding != Padding::None && ends_in_nul {
+                    matches!(full, Err(OreError::TrailingNul))
+                        && matches!(left, Err(OreError::TrailingNul))
+                } else {
+                    full.is_ok() && left.is_ok()
+                }
+            })
+        }
+
+        /// Arbitrary bytes, and a valid ciphertext with one byte changed, are
+        /// parsed and compared without panicking.
+        fn prop_parsers_never_panic(bytes: Vec<u8>, at: usize, value: u8) -> bool {
+            type C = OreAes128Bit6ChainedChaCha20;
+            let good = ore().encrypt_str("alice").unwrap().to_bytes();
+            let mut changed = good.clone();
+            changed[at % good.len()] = value;
+            for x in [&bytes, &changed] {
+                let _ = VarCipherText::from_slice(x);
+                let _ = C::compare_raw_slices(x, x);
+                let _ = C::compare_raw_slices(x, &good);
+                let _ = C::compare_left_to_full(x, &good);
+                let _ = C::compare_left_to_full(&good, x);
+            }
+            true
         }
 
         /// Two encryptions of one plaintext (fresh nonces each) compare Equal,

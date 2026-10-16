@@ -79,7 +79,7 @@ fn cipher_left() -> OreAes128Bit6ChainedChaCha20 {
     OreAes128Bit6Chained::init(&K1).unwrap()
 }
 
-const FIXED: Padding = Padding::Fixed { max_bytes: 24 };
+const FIXED: Padding = Padding::Fixed { max_bytes: 40 };
 
 fn cipher_a_with(padding: Padding) -> OreA {
     OreAes128Bit6Chained::init_with_padding(&K1, padding).unwrap()
@@ -104,8 +104,19 @@ fn other_policies() -> [(Padding, Pinned, Pinned); 2] {
 /// Strings pinned as full ciphertexts. Ordered so that adjacent pairs exercise
 /// each comparator path: equal prefix then shorter-first (`""` < `"a"`,
 /// `"alice"` < `"alice@example.com"`), a difference in the last, padded
-/// block (`"alice"` vs `"alicf"`), and a difference in the first block.
-const STRINGS: &[&str] = &["", "a", "alice", "alice@example.com", "alicf", "bob"];
+/// block (`"alice"` vs `"alicf"`), and a difference in the first block. The
+/// default policy pads the first three to 16 bytes, the 17- and 32-byte
+/// strings to 32, and the 33-byte string to 64.
+const STRINGS: &[&str] = &[
+    "",
+    "a",
+    "alice",
+    "alice@example.com",
+    "alice@example.com/0123456789abcd",
+    "alice@example.com/0123456789abcde",
+    "alicf",
+    "bob",
+];
 
 /// Raw 6-bit symbol sequences pinned as full ciphertexts: the two domain
 /// edges, a repeated symbol (distinct permutations per position), and the
