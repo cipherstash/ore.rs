@@ -146,7 +146,11 @@ fn right_at(s: &[u8], count: usize, i: usize) -> &[u8] {
 /// values and its queries must use the same one, and changing it means
 /// re-encrypting the column. The comparators refuse to compare ciphertexts
 /// made under different policies.
+///
+/// More policies may follow (a growth ratio between buckets, boundaries
+/// fitted to a column), so the enum is non-exhaustive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Padding {
     /// No padding: the ciphertext reveals the exact length.
     None,

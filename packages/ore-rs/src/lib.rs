@@ -304,7 +304,10 @@ use thiserror::Error;
 pub type PlainText<const N: usize> = [u8; N];
 
 /// Errors returned by [`OreCipher`] initialisation and encryption.
+///
+/// New schemes and policies add variants, so the enum is non-exhaustive.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum OreError {
     /// Cipher initialisation failed (e.g., key material rejected by an
     /// underlying primitive).
