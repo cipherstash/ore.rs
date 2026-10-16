@@ -13,11 +13,11 @@
 //!
 //! - [`Bit6BlockOre`], the ORE v2 fixed-width scheme
 //!   ([`OreAes128Bit6ChaCha20`]), the one to prefer for new data: every
-//!   fixed-width kind up to ten bytes, so the integers to 64 bits, both
-//!   floats and dates. Timestamps and decimals are too wide for it.
+//!   fixed-width target up to ten bytes, so the integers to 64 bits,
+//!   `f64` and dates. Timestamps and decimals are too wide for it.
 //! - [`BlockOre`], the frozen fixed-width scheme ([`OreAes128ChaCha20`]),
-//!   for every fixed-width kind up to 15 bytes: the integers to 64 bits,
-//!   both floats, dates, timestamps and decimals. It refuses text and
+//!   for every fixed-width target up to 15 bytes: the integers to 64 bits,
+//!   `f64`, dates, timestamps and decimals. It refuses text and
 //!   bytes, whose length varies, and the 16-byte kinds (`i128`, `u128`,
 //!   uuid), which are beyond its block cap.
 //! - [`ChainedBlockOre`], the variable-length scheme
@@ -26,34 +26,33 @@
 //!   status and what a ciphertext reveals.
 //!
 //! None of the schemes takes a salt, so each derives its keys for every
-//! term from its own key with HMAC-SHA256 under the salt vitaminc derives,
-//! `PAE("vitaminc/ore/v1", scheme, domain, context)`. Two columns, two
-//! kinds or two contexts therefore never share a key, and a term compares
-//! only within its own column.
+//! term from its own key with HMAC-SHA256 under the salt the column hands
+//! it, `PAE("vitaminc/ore/v1", scheme, domain, context)`. Two columns, two
+//! targets or two contexts therefore never share a key, and a term
+//! compares only within its own column.
 //!
 //! # Examples
 //!
 //! ```
 //! use ore_rs::vitaminc::Bit6BlockOre;
-//! use vitaminc_ore::{Int, Logical, OrderKeyInit, OrderScheme, Physical, Raw};
+//! use vitaminc_ore::{Int, Logical, OrderEncrypt, OrderKeyInit, OrderTarget, Physical, Raw};
 //! use vitaminc_protected::Protected;
 //! # let key_bytes = [7u8; 32];
 //!
 //! // Key the scheme; `try_from_bytes` takes material of runtime length.
 //! let scheme = Bit6BlockOre::new(Protected::new(key_bytes));
 //!
-//! // Encrypt a value. Its kind decides the domain and the width: a u32 is
-//! // four bytes, six blocks. The caller never sees the encoding.
-//! let term = scheme.encrypt(42u32)?;
-//! assert!(scheme.encrypt(41u32)? < term);
+//! // A column of `i32`s: four bytes, six blocks, whatever width a value
+//! // arrives at. The caller never sees the encoding.
+//! let quantity = scheme.column(OrderTarget::I32, ("orders", "quantity"));
+//! let term = quantity.encrypt(42i64)?;
+//! assert!(quantity.encrypt(41i8)? < term);
+//! let stored: &[u8] = term.as_ref();
 //!
-//! // Under a context, so the term compares only within its column.
-//! let quantity = scheme.encrypt_with_context(42u32, ("orders", "quantity"))?;
-//! let stored: &[u8] = quantity.as_ref();
-//!
-//! // A typed scalar goes in as `Raw`.
+//! // A typed scalar goes into a column of its type.
+//! let birthdays = scheme.column(OrderTarget::Date, "birthdays");
 //! let day = Raw(Some(Logical::Date), Physical::Int(Int::I32(19_000)));
-//! let birthday = scheme.encrypt_with_context(day, "birthdays")?;
+//! let birthday = birthdays.encrypt(day)?;
 //! # let _ = (stored, birthday);
 //! # Ok::<(), vitaminc_ore::OrderError<ore_rs::OreError>>(())
 //! ```
@@ -86,8 +85,9 @@ const CHAINED_KEYS: PrfEncoding = PrfEncoding::new("vitaminc/ore/chained-block-o
 fn derive(
     prf: &HmacSha256Prf,
     encoding: PrfEncoding,
-    salt: Context<'static>,
+    salt: &Context<'_>,
 ) -> Result<Zeroizing<[u8; 32]>, OrderError<OreError>> {
+    let salt = salt.clone().into_owned();
     prf.prf_bytes_vec(Protected::new(Vec::new()), encoding, salt, BlockVisitor)
         .into_result()
         .map(Zeroizing::new)
@@ -97,8 +97,8 @@ fn derive(
 
 /// The frozen fixed-width block ORE scheme as a vitaminc order scheme.
 ///
-/// Takes every fixed-width plaintext of at most 15 bytes, at its own
-/// width: an `i32` is four blocks, a decimal fourteen. Refuses text,
+/// Takes every fixed-width target of at most 15 bytes, at its width: an
+/// `i32` column is four blocks, a decimal fourteen. Refuses text,
 /// bytes and the 16-byte kinds as [`OrderError::Unsupported`].
 ///
 /// The term keeps the whole serialised ciphertext, left and right halves,
@@ -121,9 +121,10 @@ impl AsRef<[u8]> for BlockOreTerm {
 }
 
 impl Ord for BlockOreTerm {
-    /// The scheme's comparison. Two terms of different widths come from
-    /// different columns and have no order between them; they are ordered
-    /// by width, then bytes, so the order is still total.
+    /// The scheme's comparison. A column has one target, so its terms have
+    /// one width; two terms of different widths come from different
+    /// columns and have no order between them, so they are ordered by
+    /// width, then bytes, to keep the order total.
     fn cmp(&self, other: &Self) -> Ordering {
         OreAes128ChaCha20::compare_raw_slices(&self.0, &other.0).unwrap_or_else(|| {
             self.0
@@ -150,12 +151,8 @@ impl Eq for BlockOreTerm {}
 
 impl BlockOre {
     /// The scheme keyed for one term.
-    fn cipher(
-        &self,
-        plaintext: &OrderPlaintext,
-        context: &Context<'_>,
-    ) -> Result<OreAes128ChaCha20, OrderError<OreError>> {
-        let material = derive(&self.prf, BLOCK_ORE_KEYS, self.salt(plaintext, context))?;
+    fn cipher(&self, salt: &Context<'_>) -> Result<OreAes128ChaCha20, OrderError<OreError>> {
+        let material = derive(&self.prf, BLOCK_ORE_KEYS, salt)?;
         let mut k1 = Zeroizing::new([0u8; 16]);
         let mut k2 = Zeroizing::new([0u8; 16]);
         k1.copy_from_slice(&material[..16]);
@@ -188,16 +185,16 @@ impl OrderScheme for BlockOre {
     fn encrypt_plaintext(
         &self,
         plaintext: &OrderPlaintext,
-        context: &Context<'_>,
+        salt: &Context<'_>,
     ) -> Result<BlockOreTerm, OrderError<OreError>> {
-        // The widths vitaminc's kinds have. Stable Rust cannot pick `N`
+        // The widths vitaminc's targets have. Stable Rust cannot pick `N`
         // from a runtime value, so each is named; one above the block cap
         // (16) is refused with the variable-length kinds.
         let width = match plaintext.width() {
             Some(w @ (1 | 2 | 4 | 8 | 12 | 14)) => w,
             _ => return Err(OrderError::unsupported::<Self>(plaintext)),
         };
-        let cipher = self.cipher(plaintext, context)?;
+        let cipher = self.cipher(salt)?;
         let bytes = plaintext.bytes().risky_ref().as_slice();
         let term = match width {
             1 => fixed::<1>(&cipher, bytes)?,
@@ -231,8 +228,8 @@ impl OrderKeyInit for BlockOre {
 /// The ORE v2 six-bit block ORE scheme as a vitaminc order scheme, the
 /// one to prefer for new fixed-width data.
 ///
-/// Takes every fixed-width plaintext of at most ten bytes (its fourteen
-/// six-bit blocks), so the integers to 64 bits, both floats and dates.
+/// Takes every fixed-width target of at most ten bytes (its fourteen
+/// six-bit blocks), so the integers to 64 bits, `f64` and dates.
 /// Refuses timestamps (12 bytes), decimals (14), the 16-byte kinds, text
 /// and bytes as [`OrderError::Unsupported`].
 pub struct Bit6BlockOre {
@@ -251,9 +248,10 @@ impl AsRef<[u8]> for Bit6BlockOreTerm {
 }
 
 impl Ord for Bit6BlockOreTerm {
-    /// The scheme's comparison. Two terms of different widths come from
-    /// different columns and have no order between them; they are ordered
-    /// by width, then bytes, so the order is still total.
+    /// The scheme's comparison. A column has one target, so its terms have
+    /// one width; two terms of different widths come from different
+    /// columns and have no order between them, so they are ordered by
+    /// width, then bytes, to keep the order total.
     fn cmp(&self, other: &Self) -> Ordering {
         OreAes128Bit6ChaCha20::compare_raw_slices(&self.0, &other.0).unwrap_or_else(|| {
             self.0
@@ -286,13 +284,13 @@ impl OrderScheme for Bit6BlockOre {
     fn encrypt_plaintext(
         &self,
         plaintext: &OrderPlaintext,
-        context: &Context<'_>,
+        salt: &Context<'_>,
     ) -> Result<Bit6BlockOreTerm, OrderError<OreError>> {
         match plaintext.width() {
             Some(1..=10) => {}
             _ => return Err(OrderError::unsupported::<Self>(plaintext)),
         }
-        let material = derive(&self.prf, BIT6_KEYS, self.salt(plaintext, context))?;
+        let material = derive(&self.prf, BIT6_KEYS, salt)?;
         let mut k1 = Zeroizing::new([0u8; 16]);
         k1.copy_from_slice(&material[..16]);
         let cipher = OreAes128Bit6ChaCha20::init(&k1).map_err(OrderError::Backend)?;
@@ -321,7 +319,7 @@ impl OrderKeyInit for Bit6BlockOre {
 }
 
 /// The chained, variable-length block ORE scheme as a vitaminc order
-/// scheme: every kind, text and bytes included, at six bits per block.
+/// scheme: every target, text and bytes included, at six bits per block.
 ///
 /// Not yet frozen. A ciphertext reveals its plaintext's exact length, and
 /// a comparison reveals the common-prefix length; see
@@ -372,9 +370,9 @@ impl OrderScheme for ChainedBlockOre {
     fn encrypt_plaintext(
         &self,
         plaintext: &OrderPlaintext,
-        context: &Context<'_>,
+        salt: &Context<'_>,
     ) -> Result<ChainedBlockOreTerm, OrderError<OreError>> {
-        let material = derive(&self.prf, CHAINED_KEYS, self.salt(plaintext, context))?;
+        let material = derive(&self.prf, CHAINED_KEYS, salt)?;
         let mut k1 = Zeroizing::new([0u8; 16]);
         k1.copy_from_slice(&material[..16]);
         let cipher = OreAes128Bit6ChainedChaCha20::init(&k1).map_err(OrderError::Backend)?;
@@ -406,75 +404,122 @@ impl OrderKeyInit for ChainedBlockOre {
 mod tests {
     use super::*;
     use vitaminc_ore::{
-        domain, order, Float, Int, IntoContext, Logical, NormalizeError, Physical, Raw, TimeUnit,
+        domain, order, Float, Int, Logical, NormalizeError, OrderEncrypt, OrderTarget, Physical,
+        Raw, TimeUnit,
     };
+
+    use OrderTarget as T;
 
     fn key() -> Protected<[u8; 32]> {
         Protected::new([7; 32])
     }
 
-    fn no_context() -> Context<'static> {
-        ().into_context().encode()
-    }
-
-    /// `a` below `b` under the scheme, and `a` twice compares equal.
-    fn ordered<S: OrderScheme>(scheme: &S, ty: Option<Logical>, a: Physical<'_>, b: Physical<'_>) {
-        let context = no_context();
-        let (x, y) = (order(ty, a).unwrap(), order(ty, b).unwrap());
+    /// `a` below `b` in a `target` column, and `a` twice compares equal.
+    fn ordered<S: OrderScheme>(
+        scheme: &S,
+        target: OrderTarget,
+        ty: Option<Logical>,
+        a: Physical<'_>,
+        b: Physical<'_>,
+    ) {
+        let column = scheme.column(target, ());
+        let (x, y) = (order(target, ty, a).unwrap(), order(target, ty, b).unwrap());
         let (left, right) = (
-            scheme.encrypt_plaintext(&x, &context).unwrap(),
-            scheme.encrypt_plaintext(&y, &context).unwrap(),
+            column.encrypt_term(&x).unwrap(),
+            column.encrypt_term(&y).unwrap(),
         );
         assert_eq!(left.cmp(&right), Ordering::Less, "{}", x.domain());
         assert_eq!(right.cmp(&left), Ordering::Greater, "{}", x.domain());
         assert_eq!(
-            left.cmp(&scheme.encrypt_plaintext(&x, &context).unwrap()),
+            left.cmp(&column.encrypt_term(&x).unwrap()),
             Ordering::Equal,
             "{}",
             x.domain()
         );
     }
 
+    /// `target` refused by `scheme` by its domain.
+    fn refused<S: OrderScheme>(scheme: &S, target: OrderTarget, value: Raw<'_>) {
+        let name = S::NAME;
+        assert!(
+            matches!(
+                scheme.column(target, ()).encrypt(value),
+                Err(OrderError::Unsupported { scheme, domain: d }) if scheme == name && d == target.domain()
+            ),
+            "{} {:?}",
+            name,
+            target
+        );
+    }
+
     #[test]
-    fn block_ore_orders_every_fixed_width_kind_at_its_width() {
+    fn block_ore_orders_every_fixed_width_target_at_its_width() {
         use Physical::{Float as F, Int as I};
         let block = BlockOre::new(key());
-        ordered(&block, None, I(Int::I8(-1)), I(Int::I8(1)));
-        ordered(&block, None, I(Int::U8(0)), I(Int::U8(255)));
-        ordered(&block, None, I(Int::I16(i16::MIN)), I(Int::I16(i16::MAX)));
-        ordered(&block, None, I(Int::U16(0)), I(Int::U16(u16::MAX)));
-        ordered(&block, None, I(Int::I32(i32::MIN)), I(Int::I32(i32::MAX)));
-        ordered(&block, None, I(Int::U32(0)), I(Int::U32(u32::MAX)));
-        ordered(&block, None, I(Int::I64(i64::MIN)), I(Int::I64(i64::MAX)));
-        ordered(&block, None, I(Int::U64(0)), I(Int::U64(u64::MAX)));
-        ordered(&block, None, F(Float::F32(-1.5)), F(Float::F32(f32::NAN)));
+        ordered(&block, T::I8, None, I(Int::I8(-1)), I(Int::I8(1)));
+        ordered(&block, T::U8, None, I(Int::U8(0)), I(Int::U8(255)));
         ordered(
             &block,
+            T::I16,
+            None,
+            I(Int::I16(i16::MIN)),
+            I(Int::I16(i16::MAX)),
+        );
+        ordered(&block, T::U16, None, I(Int::U16(0)), I(Int::U16(u16::MAX)));
+        ordered(
+            &block,
+            T::I32,
+            None,
+            I(Int::I32(i32::MIN)),
+            I(Int::I32(i32::MAX)),
+        );
+        ordered(&block, T::U32, None, I(Int::U32(0)), I(Int::U32(u32::MAX)));
+        ordered(
+            &block,
+            T::I64,
+            None,
+            I(Int::I64(i64::MIN)),
+            I(Int::I64(i64::MAX)),
+        );
+        ordered(&block, T::U64, None, I(Int::U64(0)), I(Int::U64(u64::MAX)));
+        ordered(
+            &block,
+            T::F64,
+            None,
+            F(Float::F32(-1.5)),
+            F(Float::F32(f32::NAN)),
+        );
+        ordered(
+            &block,
+            T::F64,
             None,
             F(Float::F64(f64::NEG_INFINITY)),
             F(Float::F64(0.0)),
         );
         ordered(
             &block,
+            T::Date,
             Some(Logical::Date),
             I(Int::I32(-1)),
             I(Int::I32(19_000)),
         );
         ordered(
             &block,
+            T::Timestamp,
             Some(Logical::Timestamp(TimeUnit::Nanos)),
             I(Int::I64(-1)),
             I(Int::I64(0)),
         );
         ordered(
             &block,
+            T::Decimal,
             Some(Logical::Decimal { scale: 2 }),
             I(Int::I64(-150)),
             I(Int::I64(150)),
         );
-        // One block per byte: the term is exactly the fixed-N ciphertext.
-        let four = order(None, Physical::Int(Int::I32(1))).unwrap();
-        let term = block.encrypt_plaintext(&four, &no_context()).unwrap();
+        // One block per byte of the target: an `i32` column's term is the
+        // fixed-4 ciphertext, even for a value that arrived as an `i8`.
+        let term = block.column(T::I32, ()).encrypt(1i8).unwrap();
         assert_eq!(
             term.as_ref().len(),
             <crate::CipherText<OreAes128ChaCha20, 4> as OreOutput>::size()
@@ -482,91 +527,121 @@ mod tests {
     }
 
     #[test]
-    fn block_ore_refuses_variable_length_and_sixteen_byte_kinds_by_name() {
+    fn block_ore_refuses_variable_length_and_sixteen_byte_targets_by_name() {
         let block = BlockOre::new(key());
-        let context = no_context();
-        for (ty, v, domain) in [
-            (None, Physical::Text("abcd"), domain::TEXT),
-            (None, Physical::Bytes(&[1, 2, 3, 4][..]), domain::BYTES),
-            (None, Physical::Int(Int::I128(1)), domain::INT128),
-            (None, Physical::Int(Int::U128(1)), domain::UINT128),
-            (
-                Some(Logical::Uuid),
-                Physical::Bytes(&[0; 16][..]),
-                domain::UUID,
-            ),
-        ] {
-            let plaintext = order(ty, v).unwrap();
-            assert!(
-                matches!(
-                    block.encrypt_plaintext(&plaintext, &context),
-                    Err(OrderError::Unsupported { scheme: "block-ore", domain: d }) if d == domain
-                ),
-                "{}",
-                domain
-            );
-        }
+        refused(&block, T::Text, Raw(None, Physical::Text("abcd")));
+        refused(
+            &block,
+            T::Bytes,
+            Raw(None, Physical::Bytes(&[1, 2, 3, 4][..])),
+        );
+        refused(&block, T::I128, Raw(None, Physical::Int(Int::I8(1))));
+        refused(&block, T::U128, Raw(None, Physical::Int(Int::U8(1))));
+        refused(
+            &block,
+            T::Uuid,
+            Raw(Some(Logical::Uuid), Physical::Bytes(&[0; 16][..])),
+        );
     }
 
     #[test]
-    fn chained_orders_every_kind_including_text_and_bytes() {
+    fn chained_orders_every_target_including_text_and_bytes() {
         use Physical::{Bytes, Int as I, Text};
         let chained = ChainedBlockOre::new(key());
-        ordered(&chained, None, I(Int::I32(-7)), I(Int::I32(7)));
+        ordered(&chained, T::I32, None, I(Int::I32(-7)), I(Int::I32(7)));
         ordered(
             &chained,
+            T::I128,
             None,
             I(Int::I128(i128::MIN)),
             I(Int::I128(i128::MAX)),
         );
-        ordered(&chained, None, I(Int::U128(0)), I(Int::U128(u128::MAX)));
         ordered(
             &chained,
+            T::U128,
+            None,
+            I(Int::U128(0)),
+            I(Int::U128(u128::MAX)),
+        );
+        ordered(
+            &chained,
+            T::Uuid,
             Some(Logical::Uuid),
             Bytes(&[0; 16][..]),
             Bytes(&[1; 16][..]),
         );
-        ordered(&chained, None, Text("apple"), Text("Banana"));
-        ordered(&chained, None, Text("École"), Text("ecolf"));
-        ordered(&chained, None, Bytes(&[][..]), Bytes(&[0][..]));
-        ordered(&chained, None, Bytes(&[1][..]), Bytes(&[1, 0][..]));
-        // Text that folds together is one term.
-        let context = no_context();
-        let (a, b) = (
-            order(None, Text("Straße")).unwrap(),
-            order(None, Text("strasse")).unwrap(),
+        ordered(&chained, T::Text, None, Text("apple"), Text("Banana"));
+        ordered(&chained, T::Text, None, Text("École"), Text("ecolf"));
+        ordered(&chained, T::Bytes, None, Bytes(&[][..]), Bytes(&[0][..]));
+        ordered(
+            &chained,
+            T::Bytes,
+            None,
+            Bytes(&[1][..]),
+            Bytes(&[1, 0][..]),
         );
+        // Text that folds together is one term.
+        let names = chained.column(T::Text, ());
         assert_eq!(
-            chained.encrypt_plaintext(&a, &context).unwrap(),
-            chained.encrypt_plaintext(&b, &context).unwrap()
+            names.encrypt("Straße").unwrap(),
+            names.encrypt("strasse").unwrap()
         );
     }
 
+    /// The JavaScript host hands each BigInt over at the narrowest width
+    /// that holds it. In one column they all become the column's width, so
+    /// fixed-width block ORE compares them.
     #[test]
-    fn terms_compare_only_within_one_scheme_key_domain_and_context() {
-        let zero = Physical::Int(Int::I8(0));
+    fn narrowest_width_integers_compare_in_one_fixed_width_column() {
+        let bit6 = Bit6BlockOre::new(key());
+        let column = bit6.column(T::I32, ("orders", "total"));
+        let (hundred, two_hundred, three_hundred) = (
+            column
+                .encrypt(Raw(None, Physical::Int(Int::I8(100))))
+                .unwrap(),
+            column
+                .encrypt(Raw(None, Physical::Int(Int::U8(200))))
+                .unwrap(),
+            column
+                .encrypt(Raw(None, Physical::Int(Int::I16(300))))
+                .unwrap(),
+        );
+        assert!(hundred < two_hundred && two_hundred < three_hundred);
+        assert_eq!(
+            hundred,
+            column
+                .encrypt(Raw(None, Physical::Int(Int::U64(100))))
+                .unwrap()
+        );
+        // A value the column cannot hold is refused before the scheme.
+        assert!(matches!(
+            column.encrypt(1i64 << 40),
+            Err(OrderError::Term(NormalizeError::OutOfRange))
+        ));
+    }
+
+    #[test]
+    fn terms_compare_only_within_one_scheme_key_target_and_context() {
         let tenant = |n: u64| ("tenant", n);
         let block = BlockOre::new(key());
-        let under = |n: u64| {
-            block
-                .encrypt_with_context(Raw(None, zero), tenant(n))
-                .unwrap()
-        };
+        let under = |n: u64| block.column(T::I8, tenant(n)).encrypt(0i8).unwrap();
         assert_ne!(under(1), under(2));
         assert_ne!(
             under(1),
             BlockOre::new(Protected::new([8; 32]))
-                .encrypt_with_context(Raw(None, zero), tenant(1))
+                .column(T::I8, tenant(1))
+                .encrypt(0i8)
                 .unwrap()
         );
-        // The same bytes under another domain: a different key, so not equal.
-        let as_u8 = block
-            .encrypt(Raw(None, Physical::Int(Int::U8(0x80))))
-            .unwrap();
-        let as_i8 = block.encrypt(Raw(None, zero)).unwrap();
+        // The same bytes under another target: a different key, so not equal.
+        let as_u8 = block.column(T::U8, ()).encrypt(0x80i16).unwrap();
+        let as_i8 = block.column(T::I8, ()).encrypt(0i8).unwrap();
         assert_eq!(
-            order(None, zero).unwrap().bytes().risky_ref(),
-            order(None, Physical::Int(Int::U8(0x80)))
+            order(T::I8, None, Physical::Int(Int::I8(0)))
+                .unwrap()
+                .bytes()
+                .risky_ref(),
+            order(T::U8, None, Physical::Int(Int::U8(0x80)))
                 .unwrap()
                 .bytes()
                 .risky_ref()
@@ -574,126 +649,135 @@ mod tests {
         assert_ne!(as_u8, as_i8);
         let chained = ChainedBlockOre::new(key());
         assert_ne!(
-            chained
-                .encrypt_with_context(Raw(None, zero), tenant(1))
-                .unwrap(),
-            chained
-                .encrypt_with_context(Raw(None, zero), tenant(2))
-                .unwrap()
+            chained.column(T::I8, tenant(1)).encrypt(0i8).unwrap(),
+            chained.column(T::I8, tenant(2)).encrypt(0i8).unwrap()
         );
     }
 
     #[test]
     fn a_scheme_is_keyed_like_a_prf() {
         let from_bytes = BlockOre::try_from_bytes(Protected::new(vec![7; 32])).unwrap();
-        let term = |s: &BlockOre| s.encrypt(Raw(None, Physical::Int(Int::I8(1)))).unwrap();
+        let term = |s: &BlockOre| s.column(T::I8, ()).encrypt(1i8).unwrap();
         assert_eq!(term(&from_bytes), term(&BlockOre::new(key())));
         assert!(BlockOre::try_from_bytes(Protected::new(vec![7; 8])).is_err());
         assert!(ChainedBlockOre::try_from_bytes(Protected::new(vec![7; 8])).is_err());
     }
 
     #[test]
-    fn the_scalar_path_refuses_what_has_no_term() {
+    fn the_column_refuses_what_has_no_term() {
         let block = BlockOre::new(key());
         assert!(matches!(
-            block.encrypt(Raw(None, Physical::Bool(true))),
+            block.column(T::I8, ()).encrypt(true),
             Err(OrderError::Term(NormalizeError::NoDomain))
+        ));
+        assert!(matches!(
+            block.column(T::I32, ()).encrypt("42"),
+            Err(OrderError::Term(NormalizeError::Mismatch))
         ));
     }
 
     #[test]
-    fn a_term_of_another_width_still_orders_totally() {
+    fn terms_of_two_widths_still_order_totally() {
         let block = BlockOre::new(key());
-        let one = block.encrypt(Raw(None, Physical::Int(Int::I8(1)))).unwrap();
-        let four = block
-            .encrypt(Raw(None, Physical::Int(Int::I32(1))))
-            .unwrap();
+        let one = block.column(T::I8, ()).encrypt(1i8).unwrap();
+        let four = block.column(T::I32, ()).encrypt(1i8).unwrap();
         assert_eq!(one.cmp(&four), Ordering::Less);
         assert_eq!(four.cmp(&one), Ordering::Greater);
     }
 
     #[test]
-    fn bit6_orders_every_kind_up_to_ten_bytes_and_refuses_the_rest_by_name() {
+    fn bit6_orders_every_target_up_to_ten_bytes_and_refuses_the_rest_by_name() {
         use Physical::{Float as F, Int as I};
         let bit6 = Bit6BlockOre::new(key());
-        ordered(&bit6, None, I(Int::I8(-1)), I(Int::I8(1)));
-        ordered(&bit6, None, I(Int::U16(0)), I(Int::U16(u16::MAX)));
-        ordered(&bit6, None, I(Int::I32(i32::MIN)), I(Int::I32(i32::MAX)));
-        ordered(&bit6, None, I(Int::I64(i64::MIN)), I(Int::I64(i64::MAX)));
-        ordered(&bit6, None, I(Int::U64(0)), I(Int::U64(u64::MAX)));
-        ordered(&bit6, None, F(Float::F32(-1.5)), F(Float::F32(f32::NAN)));
+        ordered(&bit6, T::I8, None, I(Int::I8(-1)), I(Int::I8(1)));
+        ordered(&bit6, T::U16, None, I(Int::U16(0)), I(Int::U16(u16::MAX)));
         ordered(
             &bit6,
+            T::I32,
+            None,
+            I(Int::I32(i32::MIN)),
+            I(Int::I32(i32::MAX)),
+        );
+        ordered(
+            &bit6,
+            T::I64,
+            None,
+            I(Int::I64(i64::MIN)),
+            I(Int::I64(i64::MAX)),
+        );
+        ordered(&bit6, T::U64, None, I(Int::U64(0)), I(Int::U64(u64::MAX)));
+        ordered(
+            &bit6,
+            T::F64,
+            None,
+            F(Float::F32(-1.5)),
+            F(Float::F32(f32::NAN)),
+        );
+        ordered(
+            &bit6,
+            T::F64,
             None,
             F(Float::F64(f64::NEG_INFINITY)),
             F(Float::F64(0.0)),
         );
         ordered(
             &bit6,
+            T::Date,
             Some(Logical::Date),
             I(Int::I32(-1)),
             I(Int::I32(19_000)),
         );
-        let context = no_context();
-        for (ty, v, domain) in [
-            (
+        refused(
+            &bit6,
+            T::Timestamp,
+            Raw(
                 Some(Logical::Timestamp(TimeUnit::Nanos)),
                 Physical::Int(Int::I64(0)),
-                domain::TIMESTAMP,
             ),
-            (
+        );
+        refused(
+            &bit6,
+            T::Decimal,
+            Raw(
                 Some(Logical::Decimal { scale: 2 }),
                 Physical::Int(Int::I64(150)),
-                domain::DECIMAL,
             ),
-            (None, Physical::Int(Int::I128(1)), domain::INT128),
-            (None, Physical::Text("abcd"), domain::TEXT),
-            (None, Physical::Bytes(&[1, 2][..]), domain::BYTES),
-        ] {
-            let plaintext = order(ty, v).unwrap();
-            assert!(
-                matches!(
-                    bit6.encrypt_plaintext(&plaintext, &context),
-                    Err(OrderError::Unsupported { scheme: "block-ore-bit6", domain: d }) if d == domain
-                ),
-                "{}",
-                domain
-            );
-        }
-        // Bound to key, context and domain like the other schemes.
-        let zero = Physical::Int(Int::I8(0));
+        );
+        refused(&bit6, T::I128, Raw(None, Physical::Int(Int::I128(1))));
+        refused(&bit6, T::Text, Raw(None, Physical::Text("abcd")));
+        refused(&bit6, T::Bytes, Raw(None, Physical::Bytes(&[1, 2][..])));
+        assert_eq!(domain::INT32, T::I32.domain());
+        // Bound to key, context and target like the other schemes.
         assert_ne!(
-            bit6.encrypt_with_context(Raw(None, zero), ("tenant", 1u64))
-                .unwrap(),
-            bit6.encrypt_with_context(Raw(None, zero), ("tenant", 2u64))
-                .unwrap()
+            bit6.column(T::I8, ("tenant", 1u64)).encrypt(0i8).unwrap(),
+            bit6.column(T::I8, ("tenant", 2u64)).encrypt(0i8).unwrap()
         );
         assert_ne!(
-            bit6.encrypt(Raw(None, zero)).unwrap(),
-            bit6.encrypt(Raw(None, Physical::Int(Int::U8(0x80))))
-                .unwrap()
+            bit6.column(T::I8, ()).encrypt(0i8).unwrap(),
+            bit6.column(T::U8, ()).encrypt(0x80i16).unwrap()
         );
         assert!(Bit6BlockOre::try_from_bytes(Protected::new(vec![7; 8])).is_err());
     }
 
     quickcheck! {
-        fn bit6_order_is_integer_order(a: i64, b: i64) -> bool {
+        fn bit6_order_is_integer_order(a: i64, b: i32) -> bool {
             let bit6 = Bit6BlockOre::new(key());
-            let under = |v: i64| bit6.encrypt_with_context(Raw(None, Physical::Int(Int::I64(v))), "col").unwrap();
-            under(a).cmp(&under(b)) == a.cmp(&b)
+            let column = bit6.column(T::I64, "col");
+            column.encrypt(a).unwrap().cmp(&column.encrypt(b).unwrap()) == a.cmp(&i64::from(b))
         }
     }
 
     quickcheck! {
         fn block_order_is_integer_order(a: i64, b: i64) -> bool {
             let block = BlockOre::new(key());
-            let under = |v: i64| block.encrypt_with_context(Raw(None, Physical::Int(Int::I64(v))), "col").unwrap();
-            under(a).cmp(&under(b)) == a.cmp(&b)
+            let column = block.column(T::I64, "col");
+            column.encrypt(a).unwrap().cmp(&column.encrypt(b).unwrap()) == a.cmp(&b)
         }
 
         fn chained_order_is_byte_order(a: Vec<u8>, b: Vec<u8>) -> bool {
             let chained = ChainedBlockOre::new(key());
-            let under = |v: &[u8]| chained.encrypt_with_context(Raw(None, Physical::Bytes(v)), "col").unwrap();
+            let column = chained.column(T::Bytes, "col");
+            let under = |v: &[u8]| column.encrypt(Raw(None, Physical::Bytes(v))).unwrap();
             under(&a).cmp(&under(&b)) == a.cmp(&b)
         }
     }
