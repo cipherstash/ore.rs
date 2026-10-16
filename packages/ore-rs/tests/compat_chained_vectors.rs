@@ -24,7 +24,7 @@
 //! ```
 
 use ore_rs::scheme::chained::{
-    OreAes128Bit6Chained, OreAes128Bit6ChainedChaCha20, Padding, VarCipherText,
+    Options, OreAes128Bit6Chained, OreAes128Bit6ChainedChaCha20, Padding, VarCipherText,
 };
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -81,11 +81,11 @@ fn cipher_left() -> OreAes128Bit6ChainedChaCha20 {
 const FIXED: Padding = Padding::Fixed { max_bytes: 40 };
 
 fn cipher_a_with(padding: Padding) -> OreA {
-    OreAes128Bit6Chained::init_with_padding(&K1, padding).unwrap()
+    OreAes128Bit6Chained::init_with(&K1, Options::default().with_padding(padding)).unwrap()
 }
 
 fn cipher_left_with(padding: Padding) -> OreAes128Bit6ChainedChaCha20 {
-    OreAes128Bit6Chained::init_with_padding(&K1, padding).unwrap()
+    OreAes128Bit6Chained::init_with(&K1, Options::default().with_padding(padding)).unwrap()
 }
 
 /// Pinned `(string, hex)` pairs.

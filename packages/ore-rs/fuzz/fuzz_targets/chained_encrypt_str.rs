@@ -5,6 +5,7 @@ use std::cmp::Ordering;
 use libfuzzer_sys::fuzz_target;
 use ore_rs::scheme::chained::{
     OreAes128Bit6Chained, OreAes128Bit6ChainedChaCha20, Padding, VarCipherText,
+    DEFAULT_MAX_STR_BYTES,
 };
 use ore_rs::OreError;
 
@@ -14,10 +15,10 @@ thread_local! {
     static ORE: C = OreAes128Bit6Chained::init(&[0x42; 16]).expect("init");
 }
 
-/// Encrypt `s` under the default padding policy and check everything a
-/// single string promises; `None` if the string is one the encryptors
-/// refuse, after checking that they do. The length is checked before the
-/// trailing NUL, as the encryptors check it.
+/// Encrypt `s` under the default options and check everything a single
+/// string promises; `None` if the string is one the encryptors refuse,
+/// after checking that they do. The bucket, then the ceiling, then the
+/// trailing NUL, in the encryptors' order.
 fn encrypt(ore: &C, s: &str) -> Option<(Vec<u8>, Vec<u8>)> {
     let full = ore.encrypt_str(s);
     let left = ore.encrypt_left_str(s);
@@ -26,6 +27,11 @@ fn encrypt(ore: &C, s: &str) -> Option<(Vec<u8>, Vec<u8>)> {
         assert!(matches!(left, Err(OreError::TooManyBlocks)), "{s:?}");
         return None;
     };
+    if s.len() > DEFAULT_MAX_STR_BYTES {
+        assert!(matches!(full, Err(OreError::TooLong)), "{s:?}");
+        assert!(matches!(left, Err(OreError::TooLong)), "{s:?}");
+        return None;
+    }
     if s.ends_with('\0') {
         assert!(matches!(full, Err(OreError::TrailingNul)), "{s:?}");
         assert!(matches!(left, Err(OreError::TrailingNul)), "{s:?}");
@@ -61,8 +67,8 @@ fn encrypt(ore: &C, s: &str) -> Option<(Vec<u8>, Vec<u8>)> {
 }
 
 // The string encryptors pad to a length bucket (the default policy: powers
-// of two with a 16-byte floor). For any string: one that ends in NUL or
-// would pad past the wire limit is refused, and every other one encrypts to
+// of two with a 16-byte floor). For any string: one that ends in NUL, would
+// pad past the wire limit, or is over the default ceiling is refused, and every other one encrypts to
 // a ciphertext of its bucket's size that parses, round-trips, and compares
 // Equal to a second encryption and to its own left ciphertext. For any pair,
 // both comparators reproduce byte order, within a bucket and across them.

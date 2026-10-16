@@ -18,7 +18,7 @@ use dudect_bencher::rand::RngExt;
 use dudect_bencher::{ctbench_main, BenchRng, Class, CtRunner};
 use ore_rs::ct_bench::{self, Line};
 use ore_rs::scheme::bit2_w6::OreAes128Bit6ChaCha20;
-use ore_rs::scheme::chained::{OreAes128Bit6Chained, OreAes128Bit6ChainedChaCha20, Padding};
+use ore_rs::scheme::chained::{OreAes128Bit6Chained, OreAes128Bit6ChainedChaCha20, Padding, Options};
 use ore_rs::{OreCipher, OreEncrypt, OreOutput};
 use std::hint::black_box;
 
@@ -89,7 +89,7 @@ fn bit6() -> OreAes128Bit6ChaCha20 {
 /// string becomes 32 bytes, and its last byte is no longer the last block.
 fn chained(padding: Padding) -> OreAes128Bit6ChainedChaCha20 {
     data_independent_timing();
-    OreAes128Bit6Chained::init_with_padding(&K1, padding).unwrap()
+    OreAes128Bit6Chained::init_with(&K1, Options::default().with_padding(padding)).unwrap()
 }
 
 /// Random class assignment, so the two classes interleave.

@@ -1,13 +1,15 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hex_literal::hex;
-use ore_rs::scheme::chained::{OreAes128Bit6Chained, OreAes128Bit6ChainedChaCha20, Padding};
+use ore_rs::scheme::chained::{
+    Options, OreAes128Bit6Chained, OreAes128Bit6ChainedChaCha20, Padding,
+};
 
 /// Unpadded, so that each bench's name gives the length it encrypts and the
 /// results compare with earlier runs. The padded benches below use the
 /// default policy.
 fn init_ore(padding: Padding) -> OreAes128Bit6ChainedChaCha20 {
     let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-    OreAes128Bit6Chained::init_with_padding(&k1, padding).unwrap()
+    OreAes128Bit6Chained::init_with(&k1, Options::default().with_padding(padding)).unwrap()
 }
 
 fn criterion_benchmark(c: &mut Criterion) {

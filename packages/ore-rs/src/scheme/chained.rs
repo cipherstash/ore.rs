@@ -52,6 +52,16 @@
 //! `"abc"` and a padded `"abc"` have different blocks, and would compare
 //! unequal. A column's stored values and its queries must use one policy.
 //!
+//! A cipher also has a longest string it encrypts
+//! ([`Options::with_max_bytes`](crate::scheme::chained::Options::with_max_bytes),
+//! default [`DEFAULT_MAX_STR_BYTES`](crate::scheme::chained::DEFAULT_MAX_STR_BYTES)
+//! = 1024 bytes); a longer one is refused
+//! ([`OreError::TooLong`](crate::OreError::TooLong)). Ciphertext size and
+//! encryption time grow with the padded length, and the string comes from
+//! the caller, so without a ceiling one 1025-byte string costs a 2048-byte
+//! bucket, 2731 blocks and a 68 KB ciphertext. The ceiling is not on the
+//! wire: the comparators accept any block count the policy admits.
+//!
 //! Strings are the only public plaintext. The scheme encrypts any sequence of
 //! 6-bit symbols, and the tests use that entry point directly (symbols a
 //! string never produces, unpadded), but raw symbols cannot be padded with
@@ -168,7 +178,8 @@ pub enum Padding {
     /// doubles a length. A
     /// string that would pad past [`MAX_STR_BYTES`] is refused
     /// ([`OreError::TooManyBlocks`]), so with the default floor the longest
-    /// string accepted is 32768 bytes.
+    /// bucket is 32768 bytes; the cipher's own ceiling
+    /// ([`Options::with_max_bytes`]) is usually far lower.
     ///
     /// Chosen over Padmé (Nikitin et al., PETS 2019). Padmé leaves only
     /// `O(log log L)` bits of the length and adds under 12.5%, but it was
@@ -263,6 +274,96 @@ impl Padding {
                     })
             }
         }
+    }
+}
+
+/// The longest string a cipher encrypts unless [`Options::with_max_bytes`]
+/// says otherwise: 1024 UTF-8 bytes, a 1024-byte bucket under the default
+/// padding.
+pub const DEFAULT_MAX_STR_BYTES: usize = 1024;
+
+/// Per-cipher settings for the string encryptors, passed to
+/// [`OreAes128Bit6Chained::init_with`]. They belong to a column, like the
+/// key: its stored values and its queries use the same ones.
+///
+/// ```rust
+/// use ore_rs::scheme::chained::{OreAes128Bit6ChainedChaCha20, Options, Padding};
+///
+/// let options = Options::default()
+///     .with_padding(Padding::PowerOfTwo { min_bytes: 32 })
+///     .with_max_bytes(256);
+/// let ore = OreAes128Bit6ChainedChaCha20::init_with(&[0u8; 16], options).unwrap();
+/// assert!(ore.encrypt_str(&"a".repeat(256)).is_ok());
+/// assert!(ore.encrypt_str(&"a".repeat(257)).is_err());
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Options {
+    padding: Padding,
+    max_bytes: usize,
+}
+
+impl Default for Options {
+    /// [`Padding::default`] and [`DEFAULT_MAX_STR_BYTES`].
+    fn default() -> Self {
+        Self {
+            padding: Padding::default(),
+            max_bytes: DEFAULT_MAX_STR_BYTES,
+        }
+    }
+}
+
+impl Options {
+    /// The defaults; see [`Default`].
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The padding policy the string encryptors apply.
+    pub fn with_padding(self, padding: Padding) -> Self {
+        Self { padding, ..self }
+    }
+
+    /// The longest string, in UTF-8 bytes, the cipher encrypts; a longer
+    /// one returns [`OreError::TooLong`]. Bounds what one input can cost in
+    /// ciphertext size and encryption time, and how many length buckets a
+    /// column can show. Under [`Padding::Fixed`] the fixed length is also a
+    /// ceiling, and the lower of the two applies. `init_with` refuses a
+    /// ceiling of 0 or one that pads past [`MAX_STR_BYTES`].
+    pub fn with_max_bytes(self, max_bytes: usize) -> Self {
+        Self { max_bytes, ..self }
+    }
+
+    /// The padding policy.
+    pub fn padding(&self) -> Padding {
+        self.padding
+    }
+
+    /// The longest string the cipher encrypts; see [`Self::with_max_bytes`].
+    pub fn max_bytes(&self) -> usize {
+        self.ceiling()
+    }
+
+    /// `max_bytes`, or the fixed length if that is lower.
+    fn ceiling(&self) -> usize {
+        match self.padding {
+            Padding::Fixed { max_bytes } => self.max_bytes.min(usize::from(max_bytes)),
+            _ => self.max_bytes,
+        }
+    }
+
+    /// Why a cipher cannot be initialised with these options, if it cannot.
+    fn check(&self) -> Result<(), OreError> {
+        if self.max_bytes == 0 {
+            return Err(OreError::InitFailed);
+        }
+        // The policy must pad the empty string and the longest string.
+        self.padding
+            .padded_len(0)
+            .map_err(|_| OreError::InitFailed)?;
+        self.padding
+            .padded_len(self.ceiling())
+            .map_err(|_| OreError::InitFailed)?;
+        Ok(())
     }
 }
 
@@ -394,7 +495,7 @@ pub struct OreAes128Bit6Chained<R: Rng + SeedableRng> {
     /// Dedicated CMAC accumulator key (subsumes the fixed-N `prf1`/`prf2`).
     k_acc: [u8; 16],
     /// Applied by the string encryptors.
-    padding: Padding,
+    options: Options,
     rng: RefCell<R>,
 }
 
@@ -409,29 +510,35 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     /// through a labelled AES call for domain separation.
     ///
     /// Strings are padded with the default policy, powers of two with a
-    /// 16-byte floor ([`Padding::default`]).
+    /// 16-byte floor, and may be at most [`DEFAULT_MAX_STR_BYTES`] long
+    /// ([`Options::default`]).
     pub fn init(k1: &[u8; 16]) -> Result<Self, OreError> {
-        Self::init_with_padding(k1, Padding::default())
+        Self::init_with(k1, Options::default())
     }
 
-    /// [`Self::init`] with the given string padding policy. Returns
-    /// [`OreError::InitFailed`] for a policy that would pad even the empty
-    /// string past [`MAX_STR_BYTES`].
-    pub fn init_with_padding(k1: &[u8; 16], padding: Padding) -> Result<Self, OreError> {
-        padding.padded_len(0).map_err(|_| OreError::InitFailed)?;
+    /// [`Self::init`] with the given [`Options`]. Returns
+    /// [`OreError::InitFailed`] for a ceiling of 0, or a policy that would
+    /// pad the empty string or the longest string past [`MAX_STR_BYTES`].
+    pub fn init_with(k1: &[u8; 16], options: Options) -> Result<Self, OreError> {
+        options.check()?;
         let cipher = Aes128Enc::new(GenericArray::from_slice(k1));
         let mut k_acc = ACC_KEY_LABEL;
         cipher.encrypt_block(GenericArray::from_mut_slice(&mut k_acc));
         Ok(Self {
             k_acc,
-            padding,
+            options,
             rng: RefCell::new(R::from_entropy()),
         })
     }
 
+    /// The options this cipher was initialised with.
+    pub fn options(&self) -> Options {
+        self.options
+    }
+
     /// The padding policy the string encryptors apply.
     pub fn padding(&self) -> Padding {
-        self.padding
+        self.options.padding()
     }
 
     /// Derive the per-block PRP from the accumulator's `PRP_STREAM` branch.
@@ -585,19 +692,23 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     /// - [`OreError::ExceedsPadding`] if the policy is [`Padding::Fixed`]
     ///   and the string is longer;
     /// - [`OreError::TooManyBlocks`] if the padded string is longer than
-    ///   [`MAX_STR_BYTES`].
+    ///   [`MAX_STR_BYTES`];
+    /// - [`OreError::TooLong`] if the string is longer than the cipher's
+    ///   [`Options::max_bytes`].
     ///
     /// The ciphertext reveals the string's length bucket under the policy
     /// (its exact length for [`Padding::None`]), and comparisons reveal the
     /// order and common-prefix length; see the module docs.
     pub fn encrypt_str(&self, s: &str) -> Result<VarCipherText, OreError> {
-        stack::scrubbed(|| self.encrypt_blocks(&str_to_blocks(s, self.padding)?, self.padding))
+        stack::scrubbed(|| self.encrypt_blocks(&str_to_blocks(s, &self.options)?, self.padding()))
     }
 
     /// Left-only string ciphertext, padded and refused as
     /// [`Self::encrypt_str`] does.
     pub fn encrypt_left_str(&self, s: &str) -> Result<VarLeft, OreError> {
-        stack::scrubbed(|| self.encrypt_left_blocks(&str_to_blocks(s, self.padding)?, self.padding))
+        stack::scrubbed(|| {
+            self.encrypt_left_blocks(&str_to_blocks(s, &self.options)?, self.padding())
+        })
     }
 
     /// Compare two serialised full ciphertexts (lexicographic; shorter prefix
@@ -715,12 +826,16 @@ fn check_symbols(x: &[u8]) -> Result<Blocks6<&[u8]>, OreError> {
 /// refusing a string too long for the policy or the wire format *before*
 /// allocating or decomposing it. The decomposition is the whole plaintext
 /// (it inverts), so the buffer is wiped when dropped.
-fn str_to_blocks(s: &str, padding: Padding) -> Result<Blocks6<Zeroizing<Vec<u8>>>, OreError> {
+fn str_to_blocks(s: &str, options: &Options) -> Result<Blocks6<Zeroizing<Vec<u8>>>, OreError> {
     let bytes = s.as_bytes();
     if bytes.len() > MAX_STR_BYTES {
         return Err(OreError::TooManyBlocks);
     }
+    let padding = options.padding();
     let padded = padding.padded_len(bytes.len())?;
+    if bytes.len() > options.max_bytes() {
+        return Err(OreError::TooLong);
+    }
     if padding != Padding::None {
         refuse_trailing_nul(bytes)?;
     }
@@ -813,7 +928,112 @@ mod tests {
     }
 
     fn ore_with(padding: Padding) -> OreAes128Bit6ChainedChaCha20 {
-        OreAes128Bit6Chained::init_with_padding(&[0x11; 16], padding).unwrap()
+        OreAes128Bit6Chained::init_with(&[0x11; 16], Options::default().with_padding(padding))
+            .unwrap()
+    }
+
+    /// `ore_with`, with its own ceiling.
+    fn ore_with_max(padding: Padding, max_bytes: usize) -> OreAes128Bit6ChainedChaCha20 {
+        let options = Options::default()
+            .with_padding(padding)
+            .with_max_bytes(max_bytes);
+        OreAes128Bit6Chained::init_with(&[0x11; 16], options).unwrap()
+    }
+
+    /// The ceiling: the default is 1024 bytes, a cipher can set its own, a
+    /// fixed padding length is also a ceiling, and a ceiling of 0 or one
+    /// the policy cannot pad is refused at init.
+    #[test]
+    fn strings_over_the_ceiling_are_refused() {
+        type C = OreAes128Bit6ChainedChaCha20;
+        let k = [0x11; 16];
+        let c = ore();
+        assert_eq!(c.options().max_bytes(), DEFAULT_MAX_STR_BYTES);
+        assert!(c.encrypt_str(&"a".repeat(1024)).is_ok());
+        assert!(matches!(
+            c.encrypt_str(&"a".repeat(1025)),
+            Err(OreError::TooLong)
+        ));
+        assert!(matches!(
+            c.encrypt_left_str(&"a".repeat(1025)),
+            Err(OreError::TooLong)
+        ));
+
+        let small = C::init_with(&k, Options::default().with_max_bytes(100)).unwrap();
+        assert!(small.encrypt_str(&"a".repeat(100)).is_ok());
+        assert!(matches!(
+            small.encrypt_str(&"a".repeat(101)),
+            Err(OreError::TooLong)
+        ));
+        // A refused string costs nothing: the ceiling is checked before
+        // any block is derived, and under `None` too.
+        let unpadded = C::init_with(
+            &k,
+            Options::default()
+                .with_padding(Padding::None)
+                .with_max_bytes(8),
+        )
+        .unwrap();
+        assert!(unpadded.encrypt_str("12345678").is_ok());
+        assert!(matches!(
+            unpadded.encrypt_str("123456789"),
+            Err(OreError::TooLong)
+        ));
+
+        // Under a fixed length the lower of the two applies, and a string
+        // past the fixed length is still `ExceedsPadding`.
+        let fixed = ore_with(Padding::Fixed { max_bytes: 200 });
+        assert_eq!(fixed.options().max_bytes(), 200);
+        assert!(fixed.encrypt_str(&"a".repeat(200)).is_ok());
+        assert!(matches!(
+            fixed.encrypt_str(&"a".repeat(201)),
+            Err(OreError::ExceedsPadding)
+        ));
+        let fixed_low = C::init_with(
+            &k,
+            Options::default()
+                .with_padding(Padding::Fixed { max_bytes: 200 })
+                .with_max_bytes(50),
+        )
+        .unwrap();
+        assert_eq!(fixed_low.options().max_bytes(), 50);
+        assert!(matches!(
+            fixed_low.encrypt_str(&"a".repeat(51)),
+            Err(OreError::TooLong)
+        ));
+        // The fixed length still sets the ciphertext size.
+        assert_eq!(
+            fixed_low.encrypt_str("abc").unwrap().to_bytes().len(),
+            total_len(num_blocks_6bit(200))
+        );
+
+        // Refused at init: nothing could be encrypted, or the longest
+        // string would pad past the wire limit.
+        assert!(matches!(
+            C::init_with(&k, Options::default().with_max_bytes(0)),
+            Err(OreError::InitFailed)
+        ));
+        assert!(matches!(
+            C::init_with(&k, Options::default().with_max_bytes(32769)),
+            Err(OreError::InitFailed)
+        ));
+        assert!(C::init_with(&k, Options::default().with_max_bytes(32768)).is_ok());
+        assert!(C::init_with(
+            &k,
+            Options::default()
+                .with_padding(Padding::None)
+                .with_max_bytes(MAX_STR_BYTES)
+        )
+        .is_ok());
+        assert!(matches!(
+            C::init_with(
+                &k,
+                Options::default()
+                    .with_padding(Padding::None)
+                    .with_max_bytes(MAX_STR_BYTES + 1)
+            ),
+            Err(OreError::InitFailed)
+        ));
     }
 
     /// One of each kind of policy, with a floor and a fixed length that the
@@ -841,7 +1061,8 @@ mod tests {
         ));
 
         let unpadded = ore_with(Padding::None);
-        let blocks = str_to_blocks("alice", Padding::None).unwrap();
+        let blocks =
+            str_to_blocks("alice", &Options::default().with_padding(Padding::None)).unwrap();
         assert_eq!(
             unpadded
                 .encrypt_left_var(blocks.as_bytes())
@@ -1046,20 +1267,22 @@ mod tests {
         let k = [0x11; 16];
         type C = OreAes128Bit6ChainedChaCha20;
         let max = MAX_STR_BYTES as u16;
-        assert!(C::init_with_padding(&k, Padding::Fixed { max_bytes: max }).is_ok());
+        let with = |padding| Options::default().with_padding(padding);
+        assert!(C::init_with(&k, with(Padding::Fixed { max_bytes: max })).is_ok());
         assert!(matches!(
-            C::init_with_padding(&k, Padding::Fixed { max_bytes: max + 1 }),
+            C::init_with(&k, with(Padding::Fixed { max_bytes: max + 1 })),
             Err(OreError::InitFailed)
         ));
         // A floor at the limit is allowed, one past it is not.
-        assert!(C::init_with_padding(&k, Padding::PowerOfTwo { min_bytes: max }).is_ok());
+        assert!(C::init_with(&k, with(Padding::PowerOfTwo { min_bytes: max })).is_ok());
         assert!(matches!(
-            C::init_with_padding(&k, Padding::PowerOfTwo { min_bytes: max + 1 }),
+            C::init_with(&k, with(Padding::PowerOfTwo { min_bytes: max + 1 })),
             Err(OreError::InitFailed)
         ));
-        // Under the default, a string past the last power of two within the
-        // limit would pad past it, and is refused before any work is done.
-        let c = ore();
+        // Under the default policy, a string past the last power of two
+        // within the limit would pad past it, and is refused before any
+        // work is done (and before the ceiling is consulted).
+        let c = ore_with_max(Padding::default(), 32768);
         for len in [32769, MAX_STR_BYTES] {
             assert!(matches!(
                 c.encrypt_str(&"a".repeat(len)),
@@ -1266,9 +1489,12 @@ mod tests {
     #[ignore = "65535-block ciphertexts: about ten seconds unoptimised"]
     fn fixed_padding_at_the_wire_limit() {
         type C = OreAes128Bit6ChainedChaCha20;
-        let c = ore_with(Padding::Fixed {
-            max_bytes: MAX_STR_BYTES as u16,
-        });
+        let c = ore_with_max(
+            Padding::Fixed {
+                max_bytes: MAX_STR_BYTES as u16,
+            },
+            MAX_STR_BYTES,
+        );
         let full = c.encrypt_str("alice").unwrap().to_bytes();
         assert_eq!(full.len(), total_len(u16::MAX as usize));
         assert_eq!(VarCipherText::from_slice(&full).unwrap().to_bytes(), full);
@@ -1647,7 +1873,7 @@ mod tests {
     /// Every block's PRP tables for `s`, which must not survive an
     /// encryption in dead stack (review of #82 and #83).
     fn block_tables(ore: &OreAes128Bit6ChainedChaCha20, s: &str) -> Vec<Vec<u8>> {
-        let blocks = str_to_blocks(s, ore.padding).unwrap();
+        let blocks = str_to_blocks(s, &ore.options).unwrap();
         let mut acc = CmacAccumulator::new(&ore.k_acc);
         let mut needles = Vec::new();
         for (n, &sym) in blocks.as_bytes().iter().enumerate() {
@@ -1697,8 +1923,8 @@ mod tests {
                 core::hint::black_box(ore.encrypt_str(s).unwrap());
             },
             |ore, s| {
-                let blocks = str_to_blocks(s, ore.padding).unwrap();
-                core::hint::black_box(ore.encrypt_blocks(&blocks, ore.padding).unwrap());
+                let blocks = str_to_blocks(s, &ore.options).unwrap();
+                core::hint::black_box(ore.encrypt_blocks(&blocks, ore.padding()).unwrap());
             },
         );
     }
@@ -1710,8 +1936,8 @@ mod tests {
                 core::hint::black_box(ore.encrypt_left_str(s).unwrap());
             },
             |ore, s| {
-                let blocks = str_to_blocks(s, ore.padding).unwrap();
-                core::hint::black_box(ore.encrypt_left_blocks(&blocks, ore.padding).unwrap());
+                let blocks = str_to_blocks(s, &ore.options).unwrap();
+                core::hint::black_box(ore.encrypt_left_blocks(&blocks, ore.padding()).unwrap());
             },
         );
     }

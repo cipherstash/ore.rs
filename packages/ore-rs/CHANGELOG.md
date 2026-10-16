@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `OreAes128Bit6Chained::init_with(key, Options)`: `Options` carries the string `Padding`
+  policy (#110) and `max_bytes`, the longest string the cipher encrypts (default 1024
+  bytes, `DEFAULT_MAX_STR_BYTES`). A longer string returns `OreError::TooLong`. Ciphertext
+  size and encryption time grow with the padded length and the string is caller-supplied,
+  so a ceiling bounds what one input can cost; it also bounds the number of length buckets
+  a column can show. `init_with_padding` is replaced by `init_with`.
+
 ## [0.9.0-rc.1] - 2026-10-12
 
 Pre-release for testing with external projects. The Bit6 (`scheme::bit2_w6`) and chained
