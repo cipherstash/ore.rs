@@ -61,14 +61,14 @@ use std::cmp::Ordering;
 use std::convert::TryInto;
 
 use vitaminc_hmac::{HmacSha256Prf, WeakKeyError};
-use vitaminc_ore::{Context, OrderError, OrderKeyInit, OrderPlaintext, OrderScheme};
+use vitaminc_ore::{Context, OrderError, OrderKeyInit, OrderPlaintext, OrderScheme, OrderTarget};
 use vitaminc_prf::{BlockVisitor, Prf, PrfEncoding, PrfKeyInit};
 use vitaminc_protected::{Controlled, Protected};
 use zeroize::Zeroizing;
 
 use crate::scheme::bit2::OreAes128ChaCha20;
 use crate::scheme::bit2_w6::OreAes128Bit6ChaCha20;
-use crate::scheme::chained::OreAes128Bit6ChainedChaCha20;
+use crate::scheme::chained::{Options, OreAes128Bit6ChainedChaCha20, Padding};
 use crate::{OreCipher, OreError, OreOutput};
 
 /// The PRF domain the fixed-width scheme's two keys are derived under.
@@ -321,8 +321,13 @@ impl OrderKeyInit for Bit6BlockOre {
 /// The chained, variable-length block ORE scheme as a vitaminc order
 /// scheme: every target, text and bytes included, at six bits per block.
 ///
-/// Not yet frozen. A ciphertext reveals its plaintext's exact length, and
-/// a comparison reveals the common-prefix length; see
+/// Not yet frozen. Text is padded under the default policy
+/// ([`Padding::default`]), so a text ciphertext reveals the length bucket,
+/// and text that ends in NUL is refused ([`OreError::TrailingNul`]).
+/// Bytes are not padded, since padding would refuse every value that ends
+/// in a zero byte, so a bytes ciphertext reveals the exact length. Nor are
+/// fixed-width targets, whose length is the target's and public already.
+/// A comparison reveals the common-prefix length; see
 /// [`crate::scheme::chained`].
 pub struct ChainedBlockOre {
     prf: HmacSha256Prf,
@@ -375,7 +380,15 @@ impl OrderScheme for ChainedBlockOre {
         let material = derive(&self.prf, CHAINED_KEYS, salt)?;
         let mut k1 = Zeroizing::new([0u8; 16]);
         k1.copy_from_slice(&material[..16]);
-        let cipher = OreAes128Bit6ChainedChaCha20::init(&k1).map_err(OrderError::Backend)?;
+        // Every term of a column shares its target, so the policy is the
+        // same for all of them, and terms made under different policies
+        // never meet in a comparison.
+        let options = match plaintext.target() {
+            OrderTarget::Text => Options::default(),
+            _ => Options::default().with_padding(Padding::None),
+        };
+        let cipher =
+            OreAes128Bit6ChainedChaCha20::init_with(&k1, options).map_err(OrderError::Backend)?;
         let term = cipher
             .encrypt_bytes(plaintext.bytes().risky_ref())
             .map_err(OrderError::Backend)?;
@@ -757,6 +770,40 @@ mod tests {
             bit6.column(T::U8, ()).encrypt(0x80i16).unwrap()
         );
         assert!(Bit6BlockOre::try_from_bytes(Protected::new(vec![7; 8])).is_err());
+    }
+
+    #[test]
+    fn chained_pads_text_but_not_bytes() {
+        let chained = ChainedBlockOre::new(key());
+        let text = chained.column(T::Text, "col");
+        let (a, b) = (
+            text.encrypt("a").unwrap(),
+            text.encrypt("abcdefgh").unwrap(),
+        );
+        assert_eq!(
+            a.as_ref().len(),
+            b.as_ref().len(),
+            "text of one bucket encrypts to one length"
+        );
+        assert!(
+            matches!(
+                text.encrypt("a\0"),
+                Err(OrderError::Backend(OreError::TrailingNul))
+            ),
+            "padded text that ends in NUL is refused"
+        );
+
+        let bytes = chained.column(T::Bytes, "col");
+        let under = |v: &[u8]| bytes.encrypt(Raw(None, Physical::Bytes(v))).unwrap();
+        assert!(
+            under(&[1]).as_ref().len() < under(&[1; 8]).as_ref().len(),
+            "bytes are not padded"
+        );
+        assert_eq!(
+            under(&[1]).cmp(&under(&[1, 0])),
+            Ordering::Less,
+            "a trailing zero byte is kept"
+        );
     }
 
     quickcheck! {
