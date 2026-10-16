@@ -6,6 +6,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0-rc.2] - 2026-10-16
+
+### Benchmarks
+
+- keep the unpadded string benches, add padded ones
+
+### Documentation
+
+- fix intra-doc links to private items; gate rustdoc warnings in CI
+- put the decompose test docs on the right tests; say what padding does not hide
+
+### Features
+
+- pad strings to a length bucket, Padmé with a 16-byte floor by default
+- pad strings to powers of two with a 16-byte floor, not Padmé
+- mark Padding and OreError non-exhaustive
+- cap the string length a cipher encrypts; Options for init
+
+### Fixes
+
+- refuse block counts a padding policy cannot produce; review fixes
+
+### Refactoring
+
+- make the raw-symbol encryptors test-only
+
+### Testing
+
+- exhaustive, property, Kani and vector coverage for padding
+- fuzz the padded string encryptors; reseed the chained corpora
+
 ### Added
 
 - `OreAes128Bit6Chained::init_with(key, Options)`: `Options` carries the string `Padding`
