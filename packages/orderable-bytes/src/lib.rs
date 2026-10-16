@@ -14,11 +14,15 @@
 //!
 //! - [`FixedOrderableBytes`]: every value encodes to the same length,
 //!   [`ENCODED_LEN`](FixedOrderableBytes::ENCODED_LEN), available as an
-//!   owned array. Numbers, `bool`, `char`, byte arrays `[u8; N]`,
-//!   `Decimal` and the `chrono` types.
+//!   owned array. Numbers, `bool`, `char`, fixed-length binary values
+//!   ([`ByteArray`]), `Decimal` and the `chrono` types.
 //! - [`VariableOrderableBytes`]: the length varies with the value, and
-//!   the bytes are borrowed from it. Strings and byte strings (see
-//!   [`variable`]).
+//!   the bytes are borrowed from it. Strings and byte strings
+//!   ([`ByteString`]); see [`variable`].
+//!
+//! Bare `[u8; N]`, `[u8]` and `Vec<u8>` implement neither: wrap
+//! binary values in [`ByteArray`] or [`ByteString`]. See [`binary`]
+//! for why.
 //!
 //! A reference `&T` implements the same traits as `T`.
 //!
@@ -69,12 +73,15 @@ macro_rules! impl_fixed_orderable_bytes {
     };
 }
 
+pub mod binary;
 #[cfg(feature = "chrono")]
 pub mod chrono;
 #[cfg(feature = "decimal")]
 pub mod decimal;
 pub mod primitive;
 pub mod variable;
+
+pub use binary::{ByteArray, ByteString};
 
 #[cfg(test)]
 #[macro_use]
