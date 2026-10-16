@@ -71,12 +71,16 @@
 //! the packed prefix of `OreAes128Bit6` and for the legacy scheme, so their
 //! [`crate::OreEncrypt`] impls live here. The outputs, [`crate::scheme::chained::ChainedCipherText`] and
 //! [`crate::scheme::chained::ChainedLeft`], carry the block count in the type: their parsers and
-//! comparators take only that count, so an integer ciphertext is never
-//! ordered against a string by the typed path. A fixed-length value is
-//! not padded (every value of the type has the same length, so there is
-//! nothing to hide) and is not subject to the cipher's string ceiling; its
-//! ciphertext is tagged [`Padding::None`](crate::scheme::chained::Padding::None),
-//! and the typed parsers accept no other tag.
+//! comparators take only that count, so a `u128` ciphertext is never put
+//! into the shorter-sorts-first order with a ciphertext of another length.
+//! The count is a length guard, not a type guard: a 16-byte string and an
+//! `i128` are 22 blocks too, and under one key an equal encoding gives an
+//! equal ciphertext (`0u128`, `i128::MIN`, sixteen NUL bytes). Use one key
+//! per column. A fixed-length value is not padded (every value of the type
+//! has the same length, so there is nothing to hide) and is not subject to
+//! the cipher's string ceiling; its ciphertext is tagged
+//! [`Padding::None`](crate::scheme::chained::Padding::None), and the typed
+//! parsers accept no other tag.
 //!
 //! ```rust
 //! use ore_rs::scheme::chained::{ChainedCipherText, OreAes128Bit6ChainedChaCha20, U128_BLOCKS};
@@ -768,11 +772,19 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     /// The encoding is not padded (there is no length to hide) and the
     /// cipher's [`Options`] do not apply: the ciphertext is tagged
     /// [`Padding::None`], and the string ceiling is not checked.
-    /// The output is an untyped [`VarCipherText`]; to keep a type's
-    /// ciphertexts from being compared against strings or other types, use
-    /// the [`OreEncrypt`] impls, whose [`ChainedCipherText`] output pins the
-    /// block count.
+    /// The output is an untyped [`VarCipherText`]; the [`OreEncrypt`] impls
+    /// wrap it in [`ChainedCipherText`], which pins the block count so the
+    /// typed parsers and comparators refuse a ciphertext of another length
+    /// or a padded one. That is a length guard, not a type guard:
+    /// ciphertexts of two types with equal-length encodings (`u128` and
+    /// `i128`, or an unpadded 16-byte string) compare, and equal encodings
+    /// under one key give equal ciphertexts. Use one key per column.
+    ///
+    /// A type whose encoding is longer than [`MAX_STR_BYTES`] returns
+    /// [`OreError::TooManyBlocks`] before the encoding is made (`[u8; N]`
+    /// is a `FixedOrderableBytes` for any `N`, and the encoding is a copy).
     pub fn encrypt_fixed<T: FixedOrderableBytes>(&self, x: &T) -> Result<VarCipherText, OreError> {
+        check_fixed_len::<T>()?;
         // The encoding is a copy of the plaintext in this frame, so it is
         // made inside the scrub.
         stack::scrubbed(|| {
@@ -784,6 +796,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     /// Left-only ciphertext of a fixed-length value; see
     /// [`Self::encrypt_fixed`].
     pub fn encrypt_left_fixed<T: FixedOrderableBytes>(&self, x: &T) -> Result<VarLeft, OreError> {
+        check_fixed_len::<T>()?;
         stack::scrubbed(|| {
             let bytes = x.to_fixed_orderable_bytes();
             self.encrypt_left_blocks(&bytes_to_blocks(bytes.as_ref())?, Padding::None)
@@ -1115,6 +1128,16 @@ pub const MAX_STR_BYTES: usize = u16::MAX as usize * 6 / 8;
 
 const _: () = assert!(num_blocks_6bit(MAX_STR_BYTES) <= u16::MAX as usize);
 const _: () = assert!(num_blocks_6bit(MAX_STR_BYTES + 1) > u16::MAX as usize);
+
+/// Refuse a fixed-length type whose encoding would not fit the wire format,
+/// before [`OreAes128Bit6Chained::encrypt_fixed`] copies the encoding onto
+/// the stack. Decided by the type, so it never depends on the value.
+fn check_fixed_len<T: FixedOrderableBytes>() -> Result<(), OreError> {
+    if T::ENCODED_LEN > MAX_STR_BYTES {
+        return Err(OreError::TooManyBlocks);
+    }
+    Ok(())
+}
 
 /// Check raw symbols for the tests' `encrypt_var` and `encrypt_left_var`,
 /// refusing more blocks than the wire format can number *before* scanning
@@ -2016,6 +2039,28 @@ mod tests {
         // Untyped output of the fixed path parses as the typed output.
         let ct = c.encrypt_fixed(&x).unwrap();
         assert!(ChainedCipherText::<U128_BLOCKS>::from_slice(&ct.to_bytes()).is_ok());
+    }
+
+    /// `[u8; N]` is a fixed-length type for any `N`: one past the wire
+    /// limit is refused by the type's length, before its encoding is
+    /// copied, and the largest that fits is accepted.
+    #[test]
+    fn fixed_types_past_the_wire_limit_are_refused_by_length() {
+        let c = ore();
+        let too_wide = Box::new([0u8; MAX_STR_BYTES + 1]);
+        assert!(matches!(
+            c.encrypt_fixed(&*too_wide),
+            Err(OreError::TooManyBlocks)
+        ));
+        assert!(matches!(
+            c.encrypt_left_fixed(&*too_wide),
+            Err(OreError::TooManyBlocks)
+        ));
+        assert!(matches!(check_fixed_len::<[u8; MAX_STR_BYTES]>(), Ok(())));
+        assert!(matches!(
+            check_fixed_len::<[u8; MAX_STR_BYTES + 1]>(),
+            Err(OreError::TooManyBlocks)
+        ));
     }
 
     #[test]
