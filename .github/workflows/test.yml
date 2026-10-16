@@ -53,6 +53,12 @@ jobs:
       - name: format
         run: cargo fmt -- --check
 
+      # Broken or private intra-doc links fail here rather than on docs.rs.
+      - name: docs
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps --all-features
+
       - name: test
         run: cargo test --all-features
 
