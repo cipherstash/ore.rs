@@ -1121,8 +1121,9 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 
 [[package]]
 name = "vitaminc-aead"
-version = "0.5.1"
-source = "git+https://github.com/cipherstash/vitaminc?branch=feat%2Fore-term-compare#2413bd0e4bf7eb8932a31101c635e2373c1096c6"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fcea687f745050d80df32c93fbe7f8d18ed2cc5fb5e029814477dfe31449ec2e"
 dependencies = [
  "bytes",
  "futures-util",
@@ -1137,8 +1138,9 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-aead-derive"
-version = "0.5.1"
-source = "git+https://github.com/cipherstash/vitaminc?branch=feat%2Fore-term-compare#2413bd0e4bf7eb8932a31101c635e2373c1096c6"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "085afc8c77ffadb4c8a93c9c5fa2d897196a36ab38e17c08fe96f8b9c309e05f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1147,8 +1149,9 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-context"
-version = "0.5.1"
-source = "git+https://github.com/cipherstash/vitaminc?branch=feat%2Fore-term-compare#2413bd0e4bf7eb8932a31101c635e2373c1096c6"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4d5679e511871da942ba2b29fcb1df198ee2359218bf7f11cfec4fd3dcfeee0"
 dependencies = [
  "mutants",
  "vitaminc-protected",
@@ -1156,8 +1159,9 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-hmac"
-version = "0.5.1"
-source = "git+https://github.com/cipherstash/vitaminc?branch=feat%2Fore-term-compare#2413bd0e4bf7eb8932a31101c635e2373c1096c6"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "393354b2348eabce0420626fdc7cf70ac779870f82abb566fb491ea19eeea066"
 dependencies = [
  "hmac",
  "sha2",
@@ -1168,8 +1172,9 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-normalize"
-version = "0.5.1"
-source = "git+https://github.com/cipherstash/vitaminc?branch=feat%2Fore-term-compare#2413bd0e4bf7eb8932a31101c635e2373c1096c6"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dda6ec7f852ba8cd7e0ba6e8e7eaa3045e6fb866007c6d7ad6128833d8980f0c"
 dependencies = [
  "thiserror 2.0.21",
  "unicode-general-category",
@@ -1180,8 +1185,9 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-ore"
-version = "0.5.1"
-source = "git+https://github.com/cipherstash/vitaminc?branch=feat%2Fore-term-compare#2413bd0e4bf7eb8932a31101c635e2373c1096c6"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8eeddea1570c1b0572f285bbca73f0a8eafd3447c54c8329093f501f65b2496"
 dependencies = [
  "thiserror 2.0.21",
  "unicode-general-category",
@@ -1194,8 +1200,9 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-prf"
-version = "0.5.1"
-source = "git+https://github.com/cipherstash/vitaminc?branch=feat%2Fore-term-compare#2413bd0e4bf7eb8932a31101c635e2373c1096c6"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11de28e524ab1deecedbb023bd328916b6c023e2f52156521ac1df75a689d911"
 dependencies = [
  "mutants",
  "thiserror 2.0.21",
@@ -1205,8 +1212,9 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-protected"
-version = "0.5.1"
-source = "git+https://github.com/cipherstash/vitaminc?branch=feat%2Fore-term-compare#2413bd0e4bf7eb8932a31101c635e2373c1096c6"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "efe97c67b61fd749b20d84248416a6cc1dc3f024a4695e3f69eee63aee7cb7c2"
 dependencies = [
  "bitvec",
  "digest",
@@ -1221,8 +1229,9 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-protected-derive"
-version = "0.5.1"
-source = "git+https://github.com/cipherstash/vitaminc?branch=feat%2Fore-term-compare#2413bd0e4bf7eb8932a31101c635e2373c1096c6"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0483ecfcb3e874d45c9b2dc04d8e5ed55ff453023a9de98fddc4a24b315d9f6"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -1232,8 +1241,9 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-random"
-version = "0.5.1"
-source = "git+https://github.com/cipherstash/vitaminc?branch=feat%2Fore-term-compare#2413bd0e4bf7eb8932a31101c635e2373c1096c6"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "693ae19994e6a79f9839e510220f532daab6f2ab0b4167fdd0d8379a027c653f"
 dependencies = [
  "chacha20",
  "getrandom 0.4.3",
@@ -1246,8 +1256,9 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-random-derives"
-version = "0.5.1"
-source = "git+https://github.com/cipherstash/vitaminc?branch=feat%2Fore-term-compare#2413bd0e4bf7eb8932a31101c635e2373c1096c6"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7fb9ad6bb972f7e1b0889eba0a3ed534afe86dd8e52f197a2de20ebe25ee9e56"
 dependencies = [
  "proc-macro2",
  "quote",
