@@ -46,9 +46,8 @@ frozen; `vitaminc::BlockOre` is the legacy eight-bit scheme
 (`OreAes128`) up to 15 bytes. None of them takes a salt, so each derives
 its keys per term with HMAC-SHA256 under the salt the column hands it
 (scheme, domain and the caller's context). The feature is off by
-default, changes nothing in the typed API above, and needs Rust 1.88.
-This is a trial against vitaminc's `feat/ore-crate` branch; it moves to
-the published release when that lands.
+default, changes nothing in the typed API above, and needs Rust 1.88
+and vitaminc 0.6.
 
 ## Need help?
 
