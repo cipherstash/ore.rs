@@ -38,8 +38,9 @@ pub struct OreAes128<R: Rng + SeedableRng> {
     rng: RefCell<R>,
 }
 
-// Opaque Debug: never render key material. (`Aes128Enc`'s own Debug is already
-// opaque, but spell it out so the guarantee can't regress.)
+// Opaque Debug: never render key material. (`Aes128Prf`, which holds each
+// key, already has an opaque Debug, but spell it out here too so the
+// guarantee can't regress.)
 impl<R: Rng + SeedableRng> std::fmt::Debug for OreAes128<R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OreAes128").finish_non_exhaustive()

@@ -11,8 +11,8 @@ use thiserror::Error;
 use zeroize::ZeroizeOnDrop;
 
 // Every AES key schedule in the crate is an `aes::Aes128Enc`: the PRF, the Z2
-// hash, the PRP's PRNG, the CMAC accumulator and the per-block ciphers the
-// PRPs key locally. Each is wiped on drop only because `Aes128Enc:
+// hash, the PRP's PRNG, the CMAC accumulator, the per-block ciphers the PRPs
+// key locally and the v2 subkey derivation (`scheme::keys::aes_block`). Each is wiped on drop only because `Aes128Enc:
 // ZeroizeOnDrop`, which the `aes` crate gates behind its `zeroize` feature.
 // Assert it here, once, so the build fails fast if that feature is ever lost;
 // otherwise the key-schedule wipe would silently vanish while the types above
