@@ -856,39 +856,42 @@ mod tests {
         );
     }
 
-    /// An empty text or bytes value makes keyed blocks, not a ciphertext
-    /// of none, and every text and bytes term is the encryption of the
-    /// marker followed by the value.
+    /// The stored format of text and bytes: the encryption of the marker
+    /// byte `0x01`, then the value. The expected inputs are written out
+    /// rather than built from the plaintext, so this fails if the marker
+    /// is ever added twice: for example by this crate and by a vitaminc
+    /// release whose own encoding starts with it. An empty bytes value
+    /// therefore makes a keyed block, not a ciphertext of none.
     #[test]
     fn chained_encrypts_text_and_bytes_behind_the_marker() {
         let chained = ChainedBlockOre::new(key());
-        for (target, value) in [
-            (T::Bytes, Physical::Bytes(&[][..])),
-            (T::Text, Physical::Text("")),
-            (T::Bytes, Physical::Bytes(&[0xAB][..])),
-            (T::Text, Physical::Text("a")),
-        ] {
+        let cases: [(OrderTarget, Physical<'_>, &[u8]); 4] = [
+            (T::Bytes, Physical::Bytes(&[][..]), &[0x01]),
+            (T::Text, Physical::Text(""), &[0x01]),
+            (T::Bytes, Physical::Bytes(&[0xAB][..]), &[0x01, 0xAB]),
+            (T::Text, Physical::Text("a"), &[0x01, b'a']),
+        ];
+        for (target, value, input) in cases {
             let column = chained.column(target, "col");
-            let plaintext = order(target, None, value).unwrap();
-            let term = column.encrypt_term(&plaintext).unwrap();
+            let term = column
+                .encrypt_term(&order(target, None, value).unwrap())
+                .unwrap();
             let cipher = chained.cipher(target, column.salt()).unwrap();
-            let raw = plaintext.bytes().risky_ref();
-            let framed: Vec<u8> = [&[VARIABLE_WIDTH_MARKER][..], raw].concat();
             let direct =
                 |input: &[u8]| ChainedBlockOreTerm(cipher.encrypt_bytes(input).unwrap().to_bytes());
             assert_eq!(
-                column.compare(&term, &direct(&framed)),
+                column.compare(&term, &direct(input)),
                 Some(Ordering::Equal),
-                "{target:?}: marker, then the value"
+                "{target:?}: the marker once, then the value"
             );
             assert_eq!(
                 term.as_ref().len(),
-                direct(&framed).as_ref().len(),
+                direct(input).as_ref().len(),
                 "{target:?}"
             );
             // Unpadded bytes are where an empty value made no block at
             // all; padded text is already one bucket long.
-            if raw.is_empty() && target == T::Bytes {
+            if input.len() == 1 && target == T::Bytes {
                 assert!(
                     term.as_ref().len() > direct(&[]).as_ref().len(),
                     "an empty bytes value still makes a keyed block"
