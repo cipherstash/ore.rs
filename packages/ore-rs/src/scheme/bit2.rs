@@ -99,11 +99,10 @@ pub(crate) fn encode_right_block<W: BlockWidth, H: Hash>(
     prp: &W::Prp,
     x: W::Symbol,
     hasher: &H,
-    ro_blocks: &mut [AesBlock],
+    ro_blocks: &mut W::RoKeyBuf,
 ) {
-    debug_assert_eq!(ro_blocks.len(), W::DOMAIN);
-    let out = block.as_mut_bytes();
-    hasher.hash_all_into(ro_blocks, out);
+    let out = block.as_mut_bits();
+    W::hash_into(hasher, ro_blocks, out);
     prp.indicator_mask_xor(x, out);
 }
 

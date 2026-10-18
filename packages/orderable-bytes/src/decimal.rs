@@ -138,13 +138,8 @@ impl_fixed_orderable_bytes! {
         // `[-29, 28]` covers both branches without leaking the zero/non-zero
         // distinction in debug builds either.
         let leading_exp = digits as i32 - 1 + trailing - scale;
-        debug_assert!(
-            (-29..=28).contains(&leading_exp),
-            "leading_exp {} out of bounds — mantissa or scale corrupted",
-            leading_exp,
-        );
+        // `leading_exp + EXP_BIAS` is in `35..=92`, so it fits the 7-bit field.
         let biased_exp = (leading_exp + EXP_BIAS) as u8;
-        debug_assert!(biased_exp <= EXP_MASK, "biased_exp overflowed 7 bits");
 
         // Pad the significand out to 29 decimal digits so same-exponent compares
         // across different significand lengths are byte-wise correct.
@@ -174,11 +169,9 @@ impl_fixed_orderable_bytes! {
             let stepped = padded_mantissa.wrapping_mul(10);
             padded_mantissa = (padded_mantissa & !mask) | (stepped & mask);
         }
+        // `padded_mantissa ≤ 10^29 < 2^97` (above), so the bytes dropped here
+        // are zero.
         let mant_be = padded_mantissa.to_be_bytes();
-        debug_assert!(
-            mant_be[..16 - MANTISSA_BYTES].iter().all(|&b| b == 0),
-            "padded mantissa overflowed 104 bits",
-        );
         let mant_field = &mant_be[16 - MANTISSA_BYTES..];
 
         // Sign-class handling is folded into a single branchless mask so the

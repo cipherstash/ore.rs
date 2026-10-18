@@ -20,11 +20,26 @@ pub trait Prf {
 
 pub trait Hash {
     fn new(key: &HashKey) -> Self;
-    fn hash(&self, data: &[u8]) -> u8;
+    fn hash(&self, data: &[u8; 16]) -> u8;
     /// Hash every block in `input` (in place, trashing it) and pack the
     /// 1-bit outputs LSB-first into `out`: bit `j` of `out` is the hash of
-    /// `input[j]`. `out.len() * 8` must equal `input.len()`.
-    fn hash_all_into(&self, input: &mut [AesBlock], out: &mut [u8]);
+    /// `input[j]`. `D` must be `8 * B`, checked at compile time
+    /// ([`Packed`]).
+    fn hash_all_into<const D: usize, const B: usize>(
+        &self,
+        input: &mut [AesBlock; D],
+        out: &mut [u8; B],
+    );
+}
+
+/// `D` one-bit values packed LSB-first into `B` bytes. [`Self::OK`] is a
+/// compile-time check that they fit exactly; a function taking a
+/// `[_; D]` and a `[u8; B]` evaluates it, so a mismatched pair does not
+/// compile.
+pub(crate) struct Packed<const D: usize, const B: usize>;
+
+impl<const D: usize, const B: usize> Packed<D, B> {
+    pub(crate) const OK: () = assert!(D == 8 * B, "Packed: D values need exactly D / 8 bytes");
 }
 
 #[derive(Debug, Error)]
@@ -86,13 +101,15 @@ pub trait Prp<S>: Sized {
     #[allow(dead_code)]
     fn invert(&self, data: S) -> S;
 
+    /// The indicator mask: one bit per domain value, `[u8; DOMAIN / 8]`.
+    type Mask;
+
     /// XOR the indicator mask for `data` into `out`: bit `j` of the mask is
     /// `1` iff `invert(j) > data`. Bit order matches
-    /// `RightBlock32::set_bit` (LSB-first within each byte). `out.len() * 8`
-    /// must equal the permutation domain.
+    /// `RightBlock32::set_bit` (LSB-first within each byte).
     ///
     /// This is the bulk form of the per-`j` `invert`-and-compare loop the
     /// right-ciphertext encoder needs; implementations walk their inverse
     /// table linearly instead of doing `DOMAIN` indexed lookups.
-    fn indicator_mask_xor(&self, data: S, out: &mut [u8]);
+    fn indicator_mask_xor(&self, data: S, out: &mut Self::Mask);
 }

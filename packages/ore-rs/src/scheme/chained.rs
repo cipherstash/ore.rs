@@ -514,8 +514,13 @@ impl VarCipherText {
 }
 
 /// Write the wire header: version, scheme id, block count, padding policy.
+///
+/// Every ciphertext has at most `u16::MAX` blocks: encryption refuses more
+/// ([`OreError::TooManyBlocks`]) and parsing reads the count from a `u16`.
+/// Were a longer one made, the saturated count would not match its body, so
+/// every parser would refuse the bytes.
 fn write_header(count: usize, padding: Padding, out: &mut Vec<u8>) {
-    WIRE.write(count, out);
+    WIRE.write(u16::try_from(count).unwrap_or(u16::MAX), out);
     out.extend_from_slice(&padding.to_wire());
 }
 
@@ -592,7 +597,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     }
 
     /// Derive the per-block PRP from the accumulator's `PRP_STREAM` branch.
-    fn prp_at(&self, acc: &CmacAccumulator, n: u16) -> Result<LemireFyPrp<DOMAIN>, OreError> {
+    fn prp_at(&self, acc: &CmacAccumulator, n: u16) -> LemireFyPrp<DOMAIN> {
         let mut stream = [0u8; STREAM_BLOCKS * 16];
         for (c, chunk) in stream.chunks_mut(16).enumerate() {
             chunk.copy_from_slice(&acc.finalize(&final_block(
@@ -602,9 +607,9 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
                 WIDTH_BIT6,
             )));
         }
-        let prp = LemireFyPrp::<DOMAIN>::from_stream(&stream)?;
+        let prp = LemireFyPrp::<DOMAIN>::from_stream(&stream);
         stream.zeroize();
-        Ok(prp)
+        prp
     }
 
     /// Full Left+Right ciphertext for raw symbols `x` (one 6-bit symbol per
@@ -650,7 +655,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         for n in 0..count {
             let sym = x.symbol(n);
             let n16 = n as u16;
-            let prp = self.prp_at(&acc, n16)?;
+            let prp = self.prp_at(&acc, n16);
             let permuted = prp.permute(sym).get();
             xt.push(permuted);
 
@@ -719,7 +724,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         for n in 0..count {
             let sym = x.symbol(n);
             let n16 = n as u16;
-            let prp = self.prp_at(&acc, n16)?;
+            let prp = self.prp_at(&acc, n16);
             let permuted = prp.permute(sym).get();
             xt.push(permuted);
             f.push(acc.finalize(&final_block(
@@ -2377,7 +2382,7 @@ mod tests {
         let mut acc = CmacAccumulator::new(&ore.k_acc);
         let mut needles = Vec::new();
         for (n, &sym) in blocks.as_bytes().iter().enumerate() {
-            let prp = ore.prp_at(&acc, n as u16).unwrap();
+            let prp = ore.prp_at(&acc, n as u16);
             let symbols = (0..64).map(crate::primitives::Symbol::<64>::from_low_bits);
             needles.push(symbols.clone().map(|i| prp.permute(i).get()).collect());
             needles.push(symbols.map(|i| prp.invert(i).get()).collect());

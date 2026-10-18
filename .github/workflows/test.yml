@@ -53,6 +53,11 @@ jobs:
       - name: format
         run: cargo fmt -- --check
 
+      # Clippy denies the panic lints in library code; it has none for
+      # `assert!` / `debug_assert!`, so this covers them.
+      - name: no runtime asserts
+        run: python3 scripts/no-runtime-asserts.py
+
       # Broken or private intra-doc links fail here rather than on docs.rs.
       - name: docs
         env:

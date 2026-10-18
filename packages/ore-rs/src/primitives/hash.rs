@@ -15,41 +15,22 @@ impl Hash for Aes128Z2Hash {
         Self { cipher }
     }
 
-    fn hash(&self, data: &[u8]) -> u8 {
-        /*
-         * Slice size is not known at compile time so we assert here
-         * We could do this with compile checks but this would require an additional
-         * copy (and doesn't entirely avoid runtime checks anyway)
-         * See https://stackoverflow.com/questions/38168956/take-slice-of-certain-length-known-at-compile-time
-         */
-        assert_eq!(data.len(), 16);
-        // Can we clone into GenericArray directly? Are we doing an extra copy?
-        let mut output = [0u8; 16];
-        output.clone_from_slice(data);
-        let block = GenericArray::from_mut_slice(&mut output);
-        self.cipher.encrypt_block(block);
-        output[0] & 1u8
+    fn hash(&self, data: &[u8; 16]) -> u8 {
+        let mut block = AesBlock::from(*data);
+        self.cipher.encrypt_block(&mut block);
+        block[0] & 1u8
     }
 
-    fn hash_all_into(&self, data: &mut [AesBlock], out: &mut [u8]) {
-        // A real assert: the scalar pack below zips `out` with `data`, so a
-        // mismatch would silently truncate the mask in a release build.
-        assert_eq!(
-            out.len() * 8,
-            data.len(),
-            "hash_all_into: out.len() * 8 must equal data.len()"
-        );
+    fn hash_all_into<const D: usize, const B: usize>(
+        &self,
+        data: &mut [AesBlock; D],
+        out: &mut [u8; B],
+    ) {
         self.cipher.encrypt_blocks(data);
 
         // Pack the Z2 (1-bit) outputs LSB-first, eight blocks per byte —
-        // the same bit order as `RightBlock32::set_bit`. The 256-block case
-        // (Bit8's per-block RO output) has a vectorised gather; other sizes
-        // use the scalar pack.
-        if data.len() == 256 {
-            crate::primitives::simd::lsb_mask_256(data, out);
-        } else {
-            crate::primitives::simd::scalar::lsb_mask(data, out);
-        }
+        // the same bit order as `RightBlock32::set_bit`.
+        crate::primitives::simd::lsb_mask(data, out);
     }
 }
 
@@ -106,17 +87,13 @@ pub(crate) fn gf128_double_u128(x: u128) -> u128 {
     (x << 1) ^ ((x >> 127) * 0x87)
 }
 
-/// In-place GF(2^128) doubling `b ← 2·b`; `b` must be exactly 16 bytes
-/// (big-endian field element). Used by the scalar comparator path; the bulk
+/// In-place GF(2^128) doubling `b ← 2·b` on a big-endian field element.
+/// Used by the scalar comparator path; the bulk
 /// encrypt path folds the doubling and nonce XOR into one `u128` pass (see
 /// `hash_all_into`).
 #[inline]
-fn gf128_double(b: &mut [u8]) {
-    debug_assert_eq!(b.len(), 16);
-    let mut arr = [0u8; 16];
-    arr.copy_from_slice(b);
-    let doubled = gf128_double_u128(u128::from_be_bytes(arr));
-    b.copy_from_slice(&doubled.to_be_bytes());
+fn gf128_double(b: &mut [u8; 16]) {
+    *b = gf128_double_u128(u128::from_be_bytes(*b)).to_be_bytes();
 }
 
 impl Hash for FixedPiZ2Hash {
@@ -124,54 +101,41 @@ impl Hash for FixedPiZ2Hash {
         Self { nonce: *nonce }
     }
 
-    fn hash(&self, data: &[u8]) -> u8 {
-        assert_eq!(data.len(), 16);
+    fn hash(&self, data: &[u8; 16]) -> u8 {
         // BHKR σ-MMO: m = σ(x) ⊕ r; return lsb(π(m) ⊕ m).
-        let mut block = [0u8; 16];
-        block.copy_from_slice(data);
+        let mut block = *data;
         gf128_double(&mut block); // σ(x) = 2x
         for (slot, &r) in block.iter_mut().zip(self.nonce.iter()) {
             *slot ^= r; // m = σ(x) ⊕ r
         }
         let m_lsb = block[0] & 1u8;
-        let block = GenericArray::from_mut_slice(&mut block);
-        pi().encrypt_block(block);
+        let mut block = AesBlock::from(block);
+        pi().encrypt_block(&mut block);
         (block[0] & 1u8) ^ m_lsb
     }
 
-    fn hash_all_into(&self, data: &mut [AesBlock], out: &mut [u8]) {
-        debug_assert_eq!(out.len() * 8, data.len());
-
+    fn hash_all_into<const D: usize, const B: usize>(
+        &self,
+        data: &mut [AesBlock; D],
+        out: &mut [u8; B],
+    ) {
         // BHKR σ-MMO: m = σ(x) ⊕ r, then out = lsb(m) ^ lsb(π(m)), with
         // σ(x) = 2x in GF(2^128). Form m in place first so the feedforward
         // captures lsb(m) rather than lsb(x). Doubling and nonce XOR are fused
         // into one u128 pass per block — this is the 704-evals/u64 hot loop.
-        let mut nonce_arr = [0u8; 16];
-        nonce_arr.copy_from_slice(self.nonce.as_slice());
-        let nonce = u128::from_be_bytes(nonce_arr);
+        let nonce = u128::from_be_bytes(self.nonce.into());
         for block in data.iter_mut() {
-            let mut arr = [0u8; 16];
-            arr.copy_from_slice(block.as_slice());
-            let m = gf128_double_u128(u128::from_be_bytes(arr)) ^ nonce;
-            block.copy_from_slice(&m.to_be_bytes());
+            let m = gf128_double_u128(u128::from_be_bytes((*block).into())) ^ nonce;
+            *block = m.to_be_bytes().into();
         }
 
         // feedforward lsb(m)
-        if data.len() == 256 {
-            crate::primitives::simd::lsb_mask_256(data, out);
-        } else {
-            crate::primitives::simd::scalar::lsb_mask(data, out);
-        }
+        crate::primitives::simd::lsb_mask(data, out);
 
         pi().encrypt_blocks(data); // π(m)
 
-        let mut pi_mask = [0u8; 32];
-        let pi_mask = &mut pi_mask[..out.len()];
-        if data.len() == 256 {
-            crate::primitives::simd::lsb_mask_256(data, pi_mask);
-        } else {
-            crate::primitives::simd::scalar::lsb_mask(data, pi_mask);
-        }
+        let mut pi_mask = [0u8; B];
+        crate::primitives::simd::lsb_mask(data, &mut pi_mask);
         for (slot, &m) in out.iter_mut().zip(pi_mask.iter()) {
             *slot ^= m;
         }
@@ -205,24 +169,6 @@ mod tests {
         assert_eq!(0u8, hash.hash(&input));
     }
 
-    #[test]
-    #[should_panic(expected = "assertion `left == right` failed")]
-    fn hash_test_input_too_small() {
-        let hash = init_hash();
-        let input: [u8; 8] = hex!("00010203 04050607");
-
-        assert_eq!(0u8, hash.hash(&input));
-    }
-
-    #[test]
-    #[should_panic(expected = "assertion `left == right` failed")]
-    fn hash_test_input_too_large() {
-        let hash = init_hash();
-        let input: [u8; 24] = hex!("00010203 04050607 ffffffff bbbbbbbb cccccccc abababab");
-
-        hash.hash(&input);
-    }
-
     // The comparator uses the scalar `hash`; encryption uses the bulk
     // `hash_all_into`. For the BHKR σ-MMO they must agree bit-for-bit, over
     // both the scalar (n=64, the Bit6 domain) and SIMD (n=256) `lsb_mask`
@@ -232,25 +178,25 @@ mod tests {
         let nonce: [u8; 16] = hex!("0f0e0d0c 0b0a0908 07060504 03020100");
         let h: FixedPiZ2Hash = Hash::new(GenericArray::from_slice(&nonce));
 
-        for &n in &[64usize, 256usize] {
-            let mut blocks: Vec<AesBlock> = (0..n)
-                .map(|i| {
-                    let mut b = [0u8; 16];
-                    for (j, slot) in b.iter_mut().enumerate() {
-                        *slot = (i.wrapping_mul(31).wrapping_add(j)) as u8;
-                    }
-                    *GenericArray::from_slice(&b)
-                })
-                .collect();
+        check::<64, 8>(&h);
+        check::<256, 32>(&h);
 
-            let mut expected = vec![0u8; n / 8];
-            for (i, b) in blocks.iter().enumerate() {
-                expected[i / 8] |= h.hash(b.as_slice()) << (i % 8);
+        fn check<const D: usize, const B: usize>(h: &FixedPiZ2Hash) {
+            let mut blocks = [AesBlock::default(); D];
+            for (i, block) in blocks.iter_mut().enumerate() {
+                for (j, slot) in block.iter_mut().enumerate() {
+                    *slot = (i.wrapping_mul(31).wrapping_add(j)) as u8;
+                }
             }
 
-            let mut out = vec![0u8; n / 8];
+            let mut expected = [0u8; B];
+            for (i, b) in blocks.iter().enumerate() {
+                expected[i / 8] |= h.hash(&(*b).into()) << (i % 8);
+            }
+
+            let mut out = [0u8; B];
             h.hash_all_into(&mut blocks, &mut out);
-            assert_eq!(out, expected, "scalar vs bulk mismatch for n={}", n);
+            assert_eq!(out, expected, "scalar vs bulk mismatch for n={}", D);
         }
     }
 

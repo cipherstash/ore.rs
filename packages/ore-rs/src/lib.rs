@@ -136,6 +136,21 @@
 //! ```
 
 #![deny(missing_docs)]
+// Library code does not panic: it returns an error or carries the invariant
+// in a type. Tests may. Clippy has no lint for `assert!`;
+// `scripts/no-runtime-asserts.py` covers that in CI.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::unreachable,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::panic_in_result_fn
+    )
+)]
 
 #[cfg(feature = "chrono")]
 mod chrono;
@@ -160,14 +175,15 @@ pub mod ct_bench {
     /// the builder the schemes use (the target's oblivious builder).
     pub fn lemire_fy_prp_from_stream(stream: &[u8; 512]) -> u8 {
         LemireFyPrp::<64>::from_stream(stream)
-            .expect("512 bytes is a full stream")
             .permute(Symbol::from_low_bits(0))
             .get()
     }
 
-    fn from_stream_with(stream: &[u8; 512], build: fn(&[u8], &mut [u8; 64], &mut [u8; 64])) -> u8 {
+    fn from_stream_with(
+        stream: &[u8; 512],
+        build: fn(&[u8; 512], &mut [u8; 64], &mut [u8; 64]),
+    ) -> u8 {
         LemireFyPrp::<64>::from_stream_with(stream, build)
-            .expect("512 bytes is a full stream")
             .permute(Symbol::from_low_bits(0))
             .get()
     }

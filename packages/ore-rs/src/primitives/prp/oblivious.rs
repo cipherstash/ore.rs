@@ -52,14 +52,18 @@ use zeroize::Zeroize;
 /// The domain the oblivious builders support.
 pub(crate) const DOMAIN: usize = 64;
 
-/// Bytes of stream the builders consume: one 8-byte draw per step.
-pub(crate) const STREAM_BYTES: usize = (DOMAIN - 1) * 8;
+/// Bytes in a draw stream: one 8-byte draw per step for the `DOMAIN - 1`
+/// steps, plus 8 bytes the builders never read, which make the stream a
+/// whole number of AES blocks (32), as [`super::LemireFyPrp`] produces it.
+/// Every builder takes exactly this array, so a short stream is a type
+/// error, not a runtime check.
+pub(crate) const STREAM_BYTES: usize = DOMAIN * 8;
 
 /// The Lemire-reduced draw for Fisher–Yates step `i` (`1..64`): draw
 /// `63 - i`, as a little-endian u64, mapped to `0..=i` by multiply-high.
 /// Identical to the indexed builder's reduction.
 #[inline(always)]
-pub(crate) fn lemire_draw(stream: &[u8], i: usize) -> u8 {
+pub(crate) fn lemire_draw(stream: &[u8; STREAM_BYTES], i: usize) -> u8 {
     let d = DOMAIN - 1 - i;
     let mut draw = [0u8; 8];
     draw.copy_from_slice(&stream[d * 8..d * 8 + 8]);
@@ -72,18 +76,19 @@ pub(crate) fn lemire_draw(stream: &[u8], i: usize) -> u8 {
     j
 }
 
-/// Build `perm` and `inverse` from `stream` (at least [`STREAM_BYTES`]
-/// bytes) with a data-independent memory access pattern, using the fastest
+/// Build `perm` and `inverse` from `stream` with a data-independent memory access pattern, using the fastest
 /// oblivious builder for the target.
 #[inline]
-pub(crate) fn build(stream: &[u8], perm: &mut [u8; DOMAIN], inverse: &mut [u8; DOMAIN]) {
-    assert!(stream.len() >= STREAM_BYTES);
-
+pub(crate) fn build(
+    stream: &[u8; STREAM_BYTES],
+    perm: &mut [u8; DOMAIN],
+    inverse: &mut [u8; DOMAIN],
+) {
     // Kani cannot model the NEON and SSSE3 intrinsics, so under `cargo kani`
     // every target dispatches to the SWAR builder, which the harnesses prove
     // equal to the reference builder.
     #[cfg(all(target_arch = "aarch64", not(kani)))]
-    // SAFETY: NEON is baseline on aarch64; `stream` length asserted above.
+    // SAFETY: NEON is baseline on aarch64; `stream` is a full stream by type.
     unsafe {
         neon::build(stream, perm, inverse)
     }
@@ -92,7 +97,7 @@ pub(crate) fn build(stream: &[u8], perm: &mut [u8; DOMAIN], inverse: &mut [u8; D
     {
         #[cfg(all(target_arch = "x86_64", not(kani)))]
         if is_x86_feature_detected!("ssse3") {
-            // SAFETY: SSSE3 presence just checked; `stream` length asserted.
+            // SAFETY: SSSE3 presence just checked; `stream` is a full stream by type.
             unsafe { ssse3::build(stream, perm, inverse) };
             return;
         }
@@ -111,8 +116,11 @@ pub(crate) fn build(stream: &[u8], perm: &mut [u8; DOMAIN], inverse: &mut [u8; D
 pub(crate) mod reference {
     use super::*;
 
-    pub(crate) fn build(stream: &[u8], perm: &mut [u8; DOMAIN], inverse: &mut [u8; DOMAIN]) {
-        assert!(stream.len() >= STREAM_BYTES);
+    pub(crate) fn build(
+        stream: &[u8; STREAM_BYTES],
+        perm: &mut [u8; DOMAIN],
+        inverse: &mut [u8; DOMAIN],
+    ) {
         for (k, p) in perm.iter_mut().enumerate() {
             *p = k as u8;
         }
@@ -136,8 +144,11 @@ pub(crate) mod scalar {
     use super::*;
     use subtle_ng::{ConditionallySelectable, ConstantTimeEq};
 
-    pub(crate) fn build(stream: &[u8], perm: &mut [u8; DOMAIN], inverse: &mut [u8; DOMAIN]) {
-        assert!(stream.len() >= STREAM_BYTES);
+    pub(crate) fn build(
+        stream: &[u8; STREAM_BYTES],
+        perm: &mut [u8; DOMAIN],
+        inverse: &mut [u8; DOMAIN],
+    ) {
         for (k, (p, v)) in perm.iter_mut().zip(inverse.iter_mut()).enumerate() {
             *p = k as u8;
             *v = k as u8;
@@ -218,8 +229,11 @@ pub(crate) mod swar {
         }
     }
 
-    pub(crate) fn build(stream: &[u8], perm: &mut [u8; DOMAIN], inverse: &mut [u8; DOMAIN]) {
-        assert!(stream.len() >= STREAM_BYTES);
+    pub(crate) fn build(
+        stream: &[u8; STREAM_BYTES],
+        perm: &mut [u8; DOMAIN],
+        inverse: &mut [u8; DOMAIN],
+    ) {
         let mut index = [0u64; 8];
         for (w, word) in index.iter_mut().enumerate() {
             let mut b = [0u8; 8];
@@ -259,7 +273,7 @@ pub(crate) mod swar {
 
 #[cfg(all(target_arch = "aarch64", not(kani)))]
 mod neon {
-    use super::{lemire_draw, DOMAIN};
+    use super::{lemire_draw, DOMAIN, STREAM_BYTES};
     use core::arch::aarch64::*;
 
     /// `0, 1, …, 63`: the lane index of each table entry.
@@ -298,7 +312,7 @@ mod neon {
     /// dependency through `perm`. It covers all four chunks.
     #[inline(always)]
     unsafe fn steps<const C: usize>(
-        stream: &[u8],
+        stream: &[u8; STREAM_BYTES],
         p: &mut [uint8x16_t; 4],
         v: &mut [uint8x16_t; 4],
         index: &[uint8x16_t; 4],
@@ -330,15 +344,19 @@ mod neon {
 
     /// # Safety
     ///
-    /// Requires NEON (baseline on aarch64) and `stream.len() >=
-    /// STREAM_BYTES` (asserted by the caller). The only memory operations
+    /// Requires NEON (baseline on aarch64). `stream` is a full stream by
+    /// type. The only memory operations
     /// are the load of the constant `INDEX`, the bounds-checked stream reads
     /// in `lemire_draw`, and the two 64-byte stores into `perm` and
     /// `inverse`, which are exclusive references to 64-byte arrays. Both
     /// tables live in vector registers in between: every `p[k]` / `v[k]`
     /// index is a compile-time constant after inlining.
     #[target_feature(enable = "neon")]
-    pub(super) unsafe fn build(stream: &[u8], perm: &mut [u8; DOMAIN], inverse: &mut [u8; DOMAIN]) {
+    pub(super) unsafe fn build(
+        stream: &[u8; STREAM_BYTES],
+        perm: &mut [u8; DOMAIN],
+        inverse: &mut [u8; DOMAIN],
+    ) {
         let ix = vld1q_u8_x4(INDEX.as_ptr());
         let index = [ix.0, ix.1, ix.2, ix.3];
         let mut p = index;
@@ -356,7 +374,7 @@ mod neon {
 
 #[cfg(all(target_arch = "x86_64", not(kani)))]
 mod ssse3 {
-    use super::{lemire_draw, DOMAIN};
+    use super::{lemire_draw, DOMAIN, STREAM_BYTES};
     use core::arch::x86_64::*;
 
     /// `select(m, x, y)`: `x` where the mask lane is all ones, else `y`.
@@ -391,7 +409,7 @@ mod ssse3 {
     /// builder's `steps` (public chunk bounds, value-side inverse).
     #[inline(always)]
     unsafe fn steps<const C: usize>(
-        stream: &[u8],
+        stream: &[u8; STREAM_BYTES],
         p: &mut [__m128i; 4],
         v: &mut [__m128i; 4],
         index: &[__m128i; 4],
@@ -416,11 +434,15 @@ mod ssse3 {
 
     /// # Safety
     ///
-    /// Requires SSSE3 (checked by the caller) and `stream.len() >=
-    /// STREAM_BYTES` (asserted by the caller). Unaligned stores cover
+    /// Requires SSSE3 (checked by the caller). `stream` is a full stream by
+    /// type. Unaligned stores cover
     /// exactly the 64-byte `perm` and `inverse` arrays.
     #[target_feature(enable = "ssse3")]
-    pub(super) unsafe fn build(stream: &[u8], perm: &mut [u8; DOMAIN], inverse: &mut [u8; DOMAIN]) {
+    pub(super) unsafe fn build(
+        stream: &[u8; STREAM_BYTES],
+        perm: &mut [u8; DOMAIN],
+        inverse: &mut [u8; DOMAIN],
+    ) {
         let mut index = [_mm_setzero_si128(); 4];
         for (c, chunk) in index.iter_mut().enumerate() {
             *chunk = _mm_add_epi8(
@@ -449,7 +471,10 @@ mod tests {
 
     type Tables = ([u8; DOMAIN], [u8; DOMAIN]);
 
-    fn run(builder: fn(&[u8], &mut [u8; DOMAIN], &mut [u8; DOMAIN]), stream: &[u8]) -> Tables {
+    fn run(
+        builder: fn(&[u8; STREAM_BYTES], &mut [u8; DOMAIN], &mut [u8; DOMAIN]),
+        stream: &[u8; STREAM_BYTES],
+    ) -> Tables {
         let mut perm = [0u8; DOMAIN];
         let mut inverse = [0u8; DOMAIN];
         builder(stream, &mut perm, &mut inverse);
@@ -543,12 +568,5 @@ mod tests {
         for (k, p) in perm.iter().enumerate() {
             assert_eq!(usize::from(inverse[usize::from(*p)]), k);
         }
-    }
-
-    /// One byte short of a full stream is refused.
-    #[test]
-    #[should_panic]
-    fn build_rejects_a_short_stream() {
-        run(build, &[0u8; STREAM_BYTES - 1]);
     }
 }

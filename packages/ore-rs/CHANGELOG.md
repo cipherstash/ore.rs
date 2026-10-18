@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `OreCipher`) can implement it. Existing impls and callers are unaffected.
 - Every `OreEncrypt` impl macro now emits a round-trip and ordering test for the type it
   implements, so a type can't be declared supported without being exercised (#105).
+- Library code no longer panics through `assert!`, `debug_assert!`, `unwrap` or `expect`.
+  Length contracts between internal buffers are carried by array types, so a mismatch is a
+  compile error, and clippy's panic lints are denied outside tests (CI also rejects runtime
+  assertions, which clippy cannot lint). **Breaking:** `RightBlock32::set_bit` takes the bit
+  as a `u8`, which names exactly its 256 bits.
 
 ### Removed
 

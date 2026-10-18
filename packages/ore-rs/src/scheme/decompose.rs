@@ -23,14 +23,14 @@ pub(crate) const fn num_blocks_6bit(n: usize) -> usize {
 }
 
 /// Decompose `bytes` MSB-first into 6-bit block values, writing them to
-/// `out`. `out.len()` must be exactly `num_blocks_6bit(bytes.len())`.
+/// `out`, which is normally `num_blocks_6bit(bytes.len())` long.
 ///
 /// Block `i` holds plaintext bits `[6i, 6i + 6)` (bit 0 = MSB of byte 0),
 /// so lexicographic order over block values equals lexicographic order over
-/// the input bytes.
+/// the input bytes. Bits past the end of `bytes` read as zero, so a longer
+/// `out` holds the decomposition of `bytes` followed by NULs, and a shorter
+/// one a prefix of it.
 pub(crate) fn decompose_6bit(bytes: &[u8], out: &mut [u8]) {
-    debug_assert_eq!(out.len(), num_blocks_6bit(bytes.len()));
-
     for (i, slot) in out.iter_mut().enumerate() {
         let bit = 6 * i;
         let byte = bit / 8;
@@ -38,7 +38,7 @@ pub(crate) fn decompose_6bit(bytes: &[u8], out: &mut [u8]) {
 
         // Take 6 bits starting at `offset` within `bytes[byte]`, spilling
         // into the next byte (or zero padding past the end).
-        let hi = bytes[byte] as u16;
+        let hi = *bytes.get(byte).unwrap_or(&0) as u16;
         let lo = *bytes.get(byte + 1).unwrap_or(&0) as u16;
         let window = (hi << 8) | lo;
 
@@ -103,8 +103,8 @@ impl<B: AsRef<[u8]>> Blocks6<B> {
 }
 
 impl<B: AsRef<[u8]> + AsMut<[u8]>> Blocks6<B> {
-    /// Decompose `bytes` into `out` (see [`decompose_6bit`]).
-    /// `out.as_ref().len()` must be `num_blocks_6bit(bytes.len())`.
+    /// Decompose `bytes` into `out` (see [`decompose_6bit`]), which is
+    /// normally `num_blocks_6bit(bytes.len())` long.
     pub(crate) fn decompose(bytes: &[u8], mut out: B) -> Self {
         decompose_6bit(bytes, out.as_mut());
         Self(out)
@@ -114,11 +114,10 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> Blocks6<B> {
     /// `num_blocks_6bit(bytes.len())` blocks of `out`, and zeros after. NUL
     /// bytes add only zero bits, so this is the decomposition of `bytes`
     /// padded with NULs to any length with `out.as_ref().len()` blocks,
-    /// which must be at least `num_blocks_6bit(bytes.len())`.
+    /// which should be at least `num_blocks_6bit(bytes.len())` (a shorter
+    /// `out` holds a prefix; see [`decompose_6bit`]).
     pub(crate) fn decompose_padded(bytes: &[u8], mut out: B) -> Self {
-        let (head, tail) = out.as_mut().split_at_mut(num_blocks_6bit(bytes.len()));
-        decompose_6bit(bytes, head);
-        tail.fill(0);
+        decompose_6bit(bytes, out.as_mut());
         Self(out)
     }
 }
