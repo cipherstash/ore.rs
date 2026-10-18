@@ -31,6 +31,16 @@
 //! targets or two contexts therefore never share a key, and a term
 //! compares only within its own column.
 //!
+//! The chained scheme takes text and bytes, the targets whose length
+//! varies, behind one marker byte, [`VARIABLE_WIDTH_MARKER`]. Without it
+//! an empty bytes value would encrypt to a ciphertext of no blocks: a
+//! header and a random nonce, made without the key, which anyone could
+//! write into any column. With it every term holds at least one keyed
+//! block. A constant leading byte keeps the order. Text, which the
+//! default padding never leaves empty, takes the marker too, so the two
+//! variable-width targets share one rule. Fixed-width targets are never
+//! empty and go in as they are.
+//!
 //! # Examples
 //!
 //! ```
@@ -78,6 +88,27 @@ const BLOCK_ORE_KEYS: PrfEncoding = PrfEncoding::new("vitaminc/ore/block-ore/key
 
 /// The PRF domain the ORE v2 six-bit scheme's key is derived under.
 const BIT6_KEYS: PrfEncoding = PrfEncoding::new("vitaminc/ore/block-ore-bit6/keys/v1");
+
+/// The byte a variable-width plaintext (text or bytes) is encrypted
+/// behind by [`ChainedBlockOre`], so that an empty one still makes a keyed
+/// block. Part of the stored format: changing it changes every text and
+/// bytes term.
+pub const VARIABLE_WIDTH_MARKER: u8 = 0x01;
+
+/// Call `encrypt` with what [`ChainedBlockOre`] encrypts for `plaintext`:
+/// its bytes as they are for a fixed-width target, and behind
+/// [`VARIABLE_WIDTH_MARKER`] for text and bytes. The framed copy is sized
+/// exactly, so it never reallocates, and is wiped when it drops.
+fn with_input<T>(plaintext: &OrderPlaintext, encrypt: impl FnOnce(&[u8]) -> T) -> T {
+    let bytes = plaintext.bytes().risky_ref();
+    if plaintext.width().is_some() {
+        return encrypt(bytes);
+    }
+    let mut framed = Zeroizing::new(Vec::with_capacity(bytes.len() + 1));
+    framed.push(VARIABLE_WIDTH_MARKER);
+    framed.extend_from_slice(bytes);
+    encrypt(&framed)
+}
 
 /// The PRF domain the chained scheme's key is derived under.
 const CHAINED_KEYS: PrfEncoding = PrfEncoding::new("vitaminc/ore/chained-block-ore/keys/v1");
@@ -283,9 +314,11 @@ impl OrderKeyInit for Bit6BlockOre {
 /// The chained, variable-length block ORE scheme as a vitaminc order
 /// scheme: every target, text and bytes included, at six bits per block.
 ///
-/// Not yet frozen. Text is padded under the default policy
-/// ([`Padding::default`]), so a text ciphertext reveals the length bucket,
-/// and text that ends in NUL is refused ([`OreError::TrailingNul`]).
+/// Not yet frozen. Text and bytes go in behind [`VARIABLE_WIDTH_MARKER`],
+/// one byte that counts towards the length below. Text is padded under the
+/// default policy ([`Padding::default`]), so a text ciphertext reveals the
+/// length bucket, and text that ends in NUL is refused
+/// ([`OreError::TrailingNul`]).
 /// Bytes are not padded, since padding would refuse every value that ends
 /// in a zero byte, so a bytes ciphertext reveals the exact length. Nor are
 /// fixed-width targets, whose length is the target's and public already.
@@ -307,6 +340,27 @@ impl AsRef<[u8]> for ChainedBlockOreTerm {
     }
 }
 
+impl ChainedBlockOre {
+    /// The scheme keyed for one column of `target`.
+    fn cipher(
+        &self,
+        target: OrderTarget,
+        salt: &Context<'_>,
+    ) -> Result<OreAes128Bit6ChainedChaCha20, OrderError<OreError>> {
+        let material = derive(&self.prf, CHAINED_KEYS, salt)?;
+        let mut k1 = Zeroizing::new([0u8; 16]);
+        k1.copy_from_slice(&material[..16]);
+        // Every term of a column shares its target, so the policy is the
+        // same for all of them, and terms made under different policies
+        // never meet in a comparison.
+        let options = match target {
+            OrderTarget::Text => Options::default(),
+            _ => Options::default().with_padding(Padding::None),
+        };
+        OreAes128Bit6ChainedChaCha20::init_with(&k1, options).map_err(OrderError::Backend)
+    }
+}
+
 impl OrderScheme for ChainedBlockOre {
     const NAME: &'static str = "chained-block-ore";
     type Term = ChainedBlockOreTerm;
@@ -317,20 +371,8 @@ impl OrderScheme for ChainedBlockOre {
         plaintext: &OrderPlaintext,
         salt: &Context<'_>,
     ) -> Result<ChainedBlockOreTerm, OrderError<OreError>> {
-        let material = derive(&self.prf, CHAINED_KEYS, salt)?;
-        let mut k1 = Zeroizing::new([0u8; 16]);
-        k1.copy_from_slice(&material[..16]);
-        // Every term of a column shares its target, so the policy is the
-        // same for all of them, and terms made under different policies
-        // never meet in a comparison.
-        let options = match plaintext.target() {
-            OrderTarget::Text => Options::default(),
-            _ => Options::default().with_padding(Padding::None),
-        };
-        let cipher =
-            OreAes128Bit6ChainedChaCha20::init_with(&k1, options).map_err(OrderError::Backend)?;
-        let term = cipher
-            .encrypt_bytes(plaintext.bytes().risky_ref())
+        let cipher = self.cipher(plaintext.target(), salt)?;
+        let term = with_input(plaintext, |input| cipher.encrypt_bytes(input))
             .map_err(OrderError::Backend)?;
         Ok(ChainedBlockOreTerm(term.to_bytes()))
     }
@@ -812,6 +854,47 @@ mod tests {
             Some(Ordering::Less),
             "a trailing zero byte is kept"
         );
+    }
+
+    /// An empty text or bytes value makes keyed blocks, not a ciphertext
+    /// of none, and every text and bytes term is the encryption of the
+    /// marker followed by the value.
+    #[test]
+    fn chained_encrypts_text_and_bytes_behind_the_marker() {
+        let chained = ChainedBlockOre::new(key());
+        for (target, value) in [
+            (T::Bytes, Physical::Bytes(&[][..])),
+            (T::Text, Physical::Text("")),
+            (T::Bytes, Physical::Bytes(&[0xAB][..])),
+            (T::Text, Physical::Text("a")),
+        ] {
+            let column = chained.column(target, "col");
+            let plaintext = order(target, None, value).unwrap();
+            let term = column.encrypt_term(&plaintext).unwrap();
+            let cipher = chained.cipher(target, column.salt()).unwrap();
+            let raw = plaintext.bytes().risky_ref();
+            let framed: Vec<u8> = [&[VARIABLE_WIDTH_MARKER][..], raw].concat();
+            let direct =
+                |input: &[u8]| ChainedBlockOreTerm(cipher.encrypt_bytes(input).unwrap().to_bytes());
+            assert_eq!(
+                column.compare(&term, &direct(&framed)),
+                Some(Ordering::Equal),
+                "{target:?}: marker, then the value"
+            );
+            assert_eq!(
+                term.as_ref().len(),
+                direct(&framed).as_ref().len(),
+                "{target:?}"
+            );
+            // Unpadded bytes are where an empty value made no block at
+            // all; padded text is already one bucket long.
+            if raw.is_empty() && target == T::Bytes {
+                assert!(
+                    term.as_ref().len() > direct(&[]).as_ref().len(),
+                    "an empty bytes value still makes a keyed block"
+                );
+            }
+        }
     }
 
     quickcheck! {
