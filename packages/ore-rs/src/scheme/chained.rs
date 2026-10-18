@@ -782,13 +782,17 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     ///
     /// A type whose encoding is longer than [`MAX_STR_BYTES`] returns
     /// [`OreError::TooManyBlocks`] before the encoding is made (`[u8; N]`
-    /// is a `FixedOrderableBytes` for any `N`, and the encoding is a copy).
+    /// is a `FixedOrderableBytes` for any `N`). The encoding is borrowed
+    /// where the type allows it, so a byte array is never copied onto the
+    /// stack.
     pub fn encrypt_fixed<T: FixedOrderableBytes>(&self, x: &T) -> Result<VarCipherText, OreError> {
         check_fixed_len::<T>()?;
-        // The encoding is a copy of the plaintext in this frame, so it is
-        // made inside the scrub.
+        // The borrowed encoding: a byte array is not copied, so a large one
+        // leaves no plaintext past the scrub's reach. A type that does
+        // build its encoding (an integer's 16 bytes) builds it in this
+        // frame, so it is made inside the scrub.
         stack::scrubbed(|| {
-            let bytes = x.to_fixed_orderable_bytes();
+            let bytes = x.to_orderable_bytes();
             self.encrypt_blocks(&bytes_to_blocks(bytes.as_ref())?, Padding::None)
         })
     }
@@ -798,7 +802,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     pub fn encrypt_left_fixed<T: FixedOrderableBytes>(&self, x: &T) -> Result<VarLeft, OreError> {
         check_fixed_len::<T>()?;
         stack::scrubbed(|| {
-            let bytes = x.to_fixed_orderable_bytes();
+            let bytes = x.to_orderable_bytes();
             self.encrypt_left_blocks(&bytes_to_blocks(bytes.as_ref())?, Padding::None)
         })
     }
@@ -2422,6 +2426,58 @@ mod tests {
                 core::hint::black_box(ore.encrypt_blocks(&blocks, ore.padding()).unwrap());
             },
         );
+    }
+
+    /// A byte array as large as the wire format allows, on the heap: the
+    /// fixed-length encryptors must borrow it. A copy on the stack would be
+    /// larger than the optimised scrub and leave plaintext in dead stack.
+    fn assert_no_fixed_plaintext(encrypt: fn(&OreAes128Bit6ChainedChaCha20, &[u8; MAX_STR_BYTES])) {
+        use crate::primitives::stack::{residue, SCRUB_BYTES};
+        fn plaintext() -> Box<[u8; MAX_STR_BYTES]> {
+            let v: Vec<u8> = (0..MAX_STR_BYTES).map(|i| (i * 37 + 11) as u8).collect();
+            v.into_boxed_slice().try_into().unwrap()
+        }
+        // Windows from the start, middle and end of the array; a copy
+        // that outgrew the scrub leaves at least its deepest part behind.
+        let p = plaintext();
+        let needles: Vec<Vec<u8>> = [0, MAX_STR_BYTES / 2, MAX_STR_BYTES - 64]
+            .iter()
+            .map(|&at| p[at..at + 64].to_vec())
+            .collect();
+
+        // Positive control: the owned encoding, made under the scrub,
+        // survives it when it is larger than the scrub (optimised builds).
+        if MAX_STR_BYTES > SCRUB_BYTES {
+            let dead = residue::after(|| {
+                let p = plaintext();
+                stack::scrubbed(|| {
+                    core::hint::black_box(p.to_fixed_orderable_bytes());
+                });
+            });
+            assert!(needles.iter().any(|n| residue::contains(&dead, n)));
+        }
+
+        let dead = residue::after(move || encrypt(&ore(), &plaintext()));
+        for needle in &needles {
+            assert!(
+                !residue::contains(&dead, needle),
+                "plaintext left in dead stack"
+            );
+        }
+    }
+
+    #[test]
+    fn encrypt_fixed_leaves_no_large_array_on_the_stack() {
+        assert_no_fixed_plaintext(|ore, x| {
+            core::hint::black_box(ore.encrypt_fixed(x).unwrap());
+        });
+    }
+
+    #[test]
+    fn encrypt_left_fixed_leaves_no_large_array_on_the_stack() {
+        assert_no_fixed_plaintext(|ore, x| {
+            core::hint::black_box(ore.encrypt_left_fixed(x).unwrap());
+        });
     }
 
     #[test]
