@@ -67,6 +67,7 @@
 //! string never produces, unpadded), but raw symbols cannot be padded with
 //! zero symbols, since a trailing zero symbol is a real value there, so they
 //! are not offered as an API (#110).
+//!
 //! **Fixed-length types.** `u128` and `i128` (22 blocks) are too wide for
 //! the packed prefix of `OreAes128Bit6` and for the legacy scheme, so their
 //! [`crate::OreEncrypt`] impls live here. The outputs, [`crate::scheme::chained::ChainedCipherText`] and
@@ -95,7 +96,6 @@
 //!     Some(Ordering::Less)
 //! );
 //! ```
-//!
 //!
 //! **Stored rows compare offline.** A full ciphertext carries its
 //! deterministic left half (`xt`, `f`), so anyone holding two stored full
@@ -1964,8 +1964,9 @@ mod tests {
         // Strings are unpadded here: a padded one carries another policy
         // tag, which every comparator refuses before looking at the count.
         let unpadded = ore_with(Padding::None);
-        let s = unpadded.encrypt_str("alice").unwrap(); // 7 blocks
-                                                        // 16 bytes = 22 blocks; and the same string padded (to 16 bytes).
+        // 5 bytes = 7 blocks.
+        let s = unpadded.encrypt_str("alice").unwrap();
+        // 16 bytes = 22 blocks; and the same string padded (to 16 bytes).
         let s16 = unpadded.encrypt_str("0123456789abcdef").unwrap();
         let s16_padded = c.encrypt_str("0123456789abcdef").unwrap();
         assert_eq!(s16_padded.left.xt.len(), U128_BLOCKS);
@@ -2313,8 +2314,6 @@ mod tests {
             true
         }
 
-        /// Two encryptions of one plaintext (fresh nonces each) compare Equal,
-        /// and never produce identical bytes (the nonce streams differ).
         /// Typed `u128` ciphertexts order as the integers, on both the full
         /// and the left-query path.
         fn prop_u128_order(a: u128, b: u128) -> bool {
@@ -2333,6 +2332,8 @@ mod tests {
                 && ChainedCipherText::<I128_BLOCKS>::compare_left_to_full(&la, &cb) == Some(a.cmp(&b))
         }
 
+        /// Two encryptions of one plaintext (fresh nonces each) compare Equal,
+        /// and never produce identical bytes (the nonce streams differ).
         fn prop_equality_across_nonces(x: Vec<u8>) -> bool {
             let c = ore();
             let x = to_domain(&x);
