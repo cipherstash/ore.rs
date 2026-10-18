@@ -250,7 +250,7 @@ mod tests {
 
             let mut out = vec![0u8; n / 8];
             h.hash_all_into(&mut blocks, &mut out);
-            assert_eq!(out, expected, "scalar vs bulk mismatch for n={}", n);
+            assert_eq!(out, expected, "scalar vs bulk mismatch for n={n}");
         }
     }
 

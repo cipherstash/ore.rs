@@ -145,6 +145,8 @@ mod decimal;
 mod encrypt;
 mod primitives;
 pub mod scheme;
+#[cfg(feature = "vitaminc")]
+pub mod vitaminc;
 pub use crate::ciphertext::*;
 
 /// Timing-measurement entry points to private primitives, for the detached
