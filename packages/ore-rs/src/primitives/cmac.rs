@@ -203,7 +203,7 @@ mod tests {
     /// NIST construction without reusing the accumulator's state threading, so
     /// it can validate that threading for any block count (not just t∈{1,4}).
     fn reference_cmac(key: &[u8; 16], blocks: &[[u8; 16]]) -> [u8; 16] {
-        let cipher = aes::Aes128::new(GenericArray::from_slice(key));
+        let cipher = Aes128Enc::new(GenericArray::from_slice(key));
         let enc = |mut b: [u8; 16]| {
             cipher.encrypt_block(GenericArray::from_mut_slice(&mut b));
             b

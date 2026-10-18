@@ -8,6 +8,19 @@ pub(crate) mod stack;
 use aes::cipher::{consts::U16, generic_array::GenericArray};
 use aes::Block;
 use thiserror::Error;
+use zeroize::ZeroizeOnDrop;
+
+// Every AES key schedule in the crate is an `aes::Aes128Enc`: the PRF, the Z2
+// hash, the PRP's PRNG, the CMAC accumulator and the per-block ciphers the
+// PRPs key locally. Each is wiped on drop only because `Aes128Enc:
+// ZeroizeOnDrop`, which the `aes` crate gates behind its `zeroize` feature.
+// Assert it here, once, so the build fails fast if that feature is ever lost;
+// otherwise the key-schedule wipe would silently vanish while the types above
+// still (falsely) claimed `ZeroizeOnDrop` (ZA-0001).
+const _: fn() = || {
+    fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
+    assert_zeroize_on_drop::<aes::Aes128Enc>();
+};
 pub type AesBlock = Block;
 pub type PrfKey = GenericArray<u8, U16>;
 pub type HashKey = GenericArray<u8, U16>;
