@@ -92,6 +92,19 @@ fn cipher_left() -> OreAes128Bit6ChaCha20 {
     OreAes128Bit6::init(&K1).unwrap()
 }
 
+/// Salts pinned beside the empty one, so the salt encoding is frozen too.
+/// The first CMAC block holds the 8-byte length and 8 salt bytes: these end
+/// inside it, fill it exactly, and run into a third block.
+const SALTS: &[&[u8]] = &[b"age", b"users.dt", b"public.users.date_of_birth"];
+
+fn cipher_a_salted(salt: &[u8]) -> OreA {
+    OreAes128Bit6::init_with_salt(&K1, salt).unwrap()
+}
+
+fn cipher_left_salted(salt: &[u8]) -> OreAes128Bit6ChaCha20 {
+    OreAes128Bit6::init_with_salt(&K1, salt).unwrap()
+}
+
 #[path = "compat_w6_vectors/vectors.rs"]
 mod vectors;
 use vectors::*;
@@ -179,6 +192,27 @@ fn full_u64_one_cipher_vectors() {
             hex::encode(ct.to_bytes()),
             *expected,
             "full ciphertext mismatch for u64 {value}"
+        );
+    }
+}
+
+/// `456u64` under each of [`SALTS`], left and full.
+#[test]
+fn salted_u64_456_vectors() {
+    assert_eq!(SALTED_U64_456.len(), SALTS.len());
+    for (salt, (pinned_salt, left, full)) in SALTS.iter().zip(SALTED_U64_456) {
+        assert_eq!(salt, pinned_salt);
+        let ore = cipher_left_salted(salt);
+        assert_eq!(
+            hex::encode(456u64.encrypt_left(&ore).unwrap().to_bytes()),
+            *left,
+            "left ciphertext mismatch for salt {salt:?}"
+        );
+        let ct = 456u64.encrypt(&cipher_a_salted(salt)).unwrap();
+        assert_eq!(
+            hex::encode(ct.to_bytes()),
+            *full,
+            "full ciphertext mismatch for salt {salt:?}"
         );
     }
 }
@@ -384,6 +418,19 @@ fn generate() {
     for value in ONE_CIPHER_U64 {
         let ct = value.encrypt(&ore).unwrap();
         println!("    ({}, \"{}\"),", value, hex::encode(ct.to_bytes()));
+    }
+    println!("];");
+    println!();
+    println!("pub const SALTED_U64_456: &[(&[u8], &str, &str)] = &[");
+    for salt in SALTS {
+        let left = 456u64.encrypt_left(&cipher_left_salted(salt)).unwrap();
+        let full = 456u64.encrypt(&cipher_a_salted(salt)).unwrap();
+        println!(
+            "    (b{:?}, \"{}\", \"{}\"),",
+            std::str::from_utf8(salt).unwrap(),
+            hex::encode(left.to_bytes()),
+            hex::encode(full.to_bytes())
+        );
     }
     println!("];");
 }

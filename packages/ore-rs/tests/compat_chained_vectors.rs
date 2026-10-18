@@ -82,6 +82,19 @@ fn cipher_left() -> OreAes128Bit6ChainedChaCha20 {
 
 const FIXED: Padding = Padding::Fixed { max_bytes: 40 };
 
+/// Salts pinned beside the empty one, so the salt encoding is frozen too.
+/// The first CMAC block holds the 8-byte length and 8 salt bytes: these end
+/// inside it, fill it exactly, and run into a third block.
+const SALTS: &[&[u8]] = &[b"age", b"users.dt", b"public.users.date_of_birth"];
+
+fn cipher_a_salted(salt: &[u8]) -> OreA {
+    OreAes128Bit6Chained::init_with_salt(&K1, salt).unwrap()
+}
+
+fn cipher_left_salted(salt: &[u8]) -> OreAes128Bit6ChainedChaCha20 {
+    OreAes128Bit6Chained::init_with_salt(&K1, salt).unwrap()
+}
+
 fn cipher_a_with(padding: Padding) -> OreA {
     OreAes128Bit6Chained::init_with(&K1, Options::default().with_padding(padding)).unwrap()
 }
@@ -131,6 +144,27 @@ use vectors::*;
 // ---------------------------------------------------------------------------
 // Left ciphertexts (fully deterministic)
 // ---------------------------------------------------------------------------
+
+/// `"alice"` under each of [`SALTS`], left and full.
+#[test]
+fn salted_alice_vectors() {
+    assert_eq!(SALTED_ALICE.len(), SALTS.len());
+    for (salt, (pinned_salt, left, full)) in SALTS.iter().zip(SALTED_ALICE) {
+        assert_eq!(salt, pinned_salt);
+        let left_ct = cipher_left_salted(salt).encrypt_left_str("alice").unwrap();
+        assert_eq!(
+            hex::encode(left_ct.to_bytes()),
+            *left,
+            "left ciphertext mismatch for salt {salt:?}"
+        );
+        let ct = cipher_a_salted(salt).encrypt_str("alice").unwrap();
+        assert_eq!(
+            hex::encode(ct.to_bytes()),
+            *full,
+            "full ciphertext mismatch for salt {salt:?}"
+        );
+    }
+}
 
 #[test]
 fn left_str_vectors() {
@@ -645,6 +679,20 @@ fn generate() {
     for x in I128S {
         let ct = x.encrypt(&cipher_a()).unwrap();
         println!("    ({x}, \"{}\"),", hex::encode(ct.to_bytes()));
+    }
+    println!("];");
+    println!();
+
+    println!("pub const SALTED_ALICE: &[(&[u8], &str, &str)] = &[");
+    for salt in SALTS {
+        let left = cipher_left_salted(salt).encrypt_left_str("alice").unwrap();
+        let full = cipher_a_salted(salt).encrypt_str("alice").unwrap();
+        println!(
+            "    (b{:?}, \"{}\", \"{}\"),",
+            std::str::from_utf8(salt).unwrap(),
+            hex::encode(left.to_bytes()),
+            hex::encode(full.to_bytes())
+        );
     }
     println!("];");
 }
