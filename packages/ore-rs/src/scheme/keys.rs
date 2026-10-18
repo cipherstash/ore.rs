@@ -49,13 +49,10 @@ fn aes_block(k: &[u8; 16], label: &[u8; 16]) -> DerivedKey {
     out
 }
 
-/// The scheme's root key: `AES_key(label)`. `label` must be a 16-byte
-/// constant whose byte 15 is outside `0..=14` (see the module docs).
+/// The scheme's root key: `AES_key(label)`. `label` is a 16-byte constant
+/// whose byte 15 is outside `0..=14` (see the module docs); each scheme
+/// checks its label at compile time beside its definition.
 pub(crate) fn root(key: &[u8; 16], label: &[u8; 16]) -> DerivedKey {
-    debug_assert!(
-        label[15] > 14,
-        "root label collides with a legacy PRF input"
-    );
     aes_block(key, label)
 }
 

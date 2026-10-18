@@ -148,6 +148,10 @@ const NONCE_LEN: usize = 16;
 /// `'t'` (`0x74`), outside every legacy PRF input's byte 15. See
 /// `scheme::keys`.
 const ROOT_LABEL: [u8; 16] = *b"ORE.v2.chainroot";
+const _: () = assert!(
+    ROOT_LABEL[15] > 14,
+    "root label collides with a legacy PRF input"
+);
 /// Label for the accumulator key under the salted key (spec §3).
 const ACC_KEY_LABEL: [u8; 16] = *b"ORE.v2.chain.acc";
 

@@ -10,8 +10,8 @@
 //! legacy Bit8 `OreAes128` scheme.)
 //!
 //! Left ciphertexts are deterministic given the keys. Full ciphertexts include
-//! a random nonce drawn from the cipher's internal RNG, which `OreCipher::init`
-//! seeds via `SeedableRng::from_entropy`; [`TestRng`] overrides `from_entropy`
+//! a random nonce drawn from the cipher's internal RNG, which `init` seeds
+//! via `SeedableRng::from_entropy`; [`TestRng`] overrides `from_entropy`
 //! to a fixed seed so full-ciphertext bytes are reproducible.
 //!
 //! To regenerate (only legitimate if the wire format is *deliberately* changed):

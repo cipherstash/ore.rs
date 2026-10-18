@@ -115,6 +115,10 @@ impl<const N: usize> Drop for SeedBuf<N> {
 /// legacy PRF₂ input has byte 15 `= 0`; this label ends in ASCII `'t'`
 /// (`0x74`), so it is outside both. See `scheme::keys`.
 const ROOT_LABEL: [u8; 16] = *b"ORE.v2.bit6.root";
+const _: () = assert!(
+    ROOT_LABEL[15] > 14,
+    "root label collides with a legacy PRF input"
+);
 
 /// Labels for the two PRF keys under the salted key:
 /// `prf1 = AES_{k_salt}(PRF1_LABEL)`, `prf2 = AES_{k_salt}(PRF2_LABEL)`.

@@ -108,8 +108,9 @@ Two consequences for review:
 - **vs fixed-N (#82):** that scheme keeps two secret keys (`prf1`/`prf2`); the
   unification is a *chained-scheme* choice, not retroactive.
 - **vs the `init(k1, k2)` API:** `k` is KDF-derived, so a single master input
-  suffices, and the chained scheme's `init` takes `k1` only (open question 1,
-  resolved). The alternative design — two keys, one per branch, no branch tag —
+  suffices: the chained scheme's `init` takes one key, and `init_with_salt`
+  (or `init_with` and `Options::with_salt`) adds a salt (open question 1,
+  resolved; §3). The alternative design — two keys, one per branch, no branch tag —
   is equivalent in security but costs a second key schedule/subkey pair.
 
 ---
