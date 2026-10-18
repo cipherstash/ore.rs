@@ -39,8 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `OreAes128` panicked with an index out of bounds on any 16-byte plaintext, which is what
   the `u128`/`i128` impls on that scheme had always done (#105). Those impls are removed (see
   Removed): the legacy scheme cannot take 16 bytes, and the impl macro now rejects such a type
-  at compile time. Encrypting a `PlainText<N>` with `N > 15` directly returns `OreError::TooManyBlocks`
-  instead of panicking.
+  at compile time. Encrypting a `PlainText<N>` with `N > 15` directly returns
+  `OreError::TooManyBlocks` instead of panicking.
+- `OreAes128Bit6` panicked on a `PlainText<N>` with `N > 14` (`MAX_BLOCKS`) through
+  `OreCipher::encrypt` / `encrypt_left`; it now returns `OreError::TooManyBlocks`, as the legacy
+  scheme does.
 
 ## [0.9.0-rc.1] - 2026-10-12
 

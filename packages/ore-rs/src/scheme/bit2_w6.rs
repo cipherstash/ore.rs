@@ -152,7 +152,9 @@ impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
         &self,
         x: &Blocks6<PlainText<N>>,
     ) -> EncryptLeftResult<R, N> {
-        assert!(N <= MAX_BLOCKS);
+        if N > MAX_BLOCKS {
+            return Err(OreError::TooManyBlocks);
+        }
 
         let mut output = Left::<Self, N>::init();
         let seeds = self.derive_prp_seeds(x.inner());
@@ -177,7 +179,9 @@ impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
         &self,
         x: &Blocks6<PlainText<N>>,
     ) -> EncryptResult<R, N> {
-        assert!(N <= MAX_BLOCKS);
+        if N > MAX_BLOCKS {
+            return Err(OreError::TooManyBlocks);
+        }
 
         let mut left = Left::<Self, N>::init();
         let mut right = Right::<Self, N>::init();
@@ -260,7 +264,7 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128Bit6<R> {
 
     /// Encrypt `x`, whose entries are **6-bit block values** (`< 64`, as
     /// the crate-private `scheme::decompose` produces); `N` is the block count
-    /// (≤ [`MAX_BLOCKS`]). The [`crate::OreEncrypt`] impls handle the
+    /// (≤ [`MAX_BLOCKS`]; more returns [`OreError::TooManyBlocks`]). The [`crate::OreEncrypt`] impls handle the
     /// byte→block decomposition for primitive types and skip the check
     /// below. A value `>= 64` returns [`OreError::PrpError`].
     fn encrypt_left<const N: usize>(&self, x: &PlainText<N>) -> EncryptLeftResult<R, N> {
@@ -545,6 +549,23 @@ mod tests {
         rng.fill(&mut k2);
 
         OreCipher::init(&k1, &k2).unwrap()
+    }
+
+    /// A block count past `MAX_BLOCKS` through the public `OreCipher` path
+    /// is an error, as on the legacy scheme, not a panic (review of #113).
+    #[test]
+    fn too_many_blocks_is_an_error_not_a_panic() {
+        let ore = init_ore();
+        assert!(matches!(
+            ore.encrypt(&[0u8; MAX_BLOCKS + 1]),
+            Err(OreError::TooManyBlocks)
+        ));
+        assert!(matches!(
+            ore.encrypt_left(&[0u8; MAX_BLOCKS + 1]),
+            Err(OreError::TooManyBlocks)
+        ));
+        assert!(ore.encrypt(&[0u8; MAX_BLOCKS]).is_ok());
+        assert!(ore.encrypt_left(&[0u8; MAX_BLOCKS]).is_ok());
     }
 
     /// Cross-scheme regression (review of #82): under keys shared with the
