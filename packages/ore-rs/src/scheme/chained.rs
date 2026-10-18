@@ -359,9 +359,9 @@ impl Options {
 
     /// The salt the key is derived under: a name for what the key is for
     /// (a column, a tenant, a plaintext type). Ciphertexts under different
-    /// salts share no key material and never compare `Equal`; nothing on
-    /// the wire records the salt, so a mismatched pair compares to a
-    /// confident, meaningless order. The default is empty. See
+    /// salts share no key material; nothing on the wire records the salt,
+    /// so a mismatched pair compares to a confident, meaningless result,
+    /// `Equal` included. The default is empty. See
     /// [`OreAes128Bit6Chained::init_with`].
     pub fn with_salt(self, salt: &[u8]) -> Self {
         Self {
@@ -610,11 +610,13 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     /// with `k_salt = CMAC_{AES_key(ROOT_LABEL)}(salt)`; see the
     /// crate-private `scheme::keys` for the stages and their argument.
     ///
-    /// Ciphertexts under different salts share no key material and never
-    /// compare `Equal`, but nothing on the wire records the salt, so the
-    /// comparators cannot refuse a mismatched pair: they return a
-    /// confident, meaningless order. Keep the salt with the identity of
-    /// the stored data, as you keep the key.
+    /// Ciphertexts under different salts share no key material, but
+    /// nothing on the wire records the salt, so the comparators cannot
+    /// refuse a mismatched pair: they return a confident, meaningless
+    /// result, `Equal` included (the unpadded empty string has no blocks
+    /// and compares `Equal` under any salts), so no result confirms that
+    /// two salts match. Keep the salt with the identity of the stored
+    /// data, as you keep the key.
     pub fn init_with(key: &[u8; 16], options: Options) -> Result<Self, OreError> {
         options.check()?;
         let k_salt = keys::salted(&keys::root(key, &ROOT_LABEL), options.salt());
@@ -1463,8 +1465,9 @@ mod tests {
         );
     }
 
-    /// `init` is the empty salt; another salt gives unrelated ciphertexts
-    /// that never compare `Equal`, and the same salt reproduces them.
+    /// `init` is the empty salt; another salt gives unrelated ciphertexts,
+    /// and the same salt reproduces them. The two column salts have equal
+    /// lengths, so the length prefix alone cannot separate them.
     #[test]
     fn salt_separates_keys() {
         type C = OreAes128Bit6ChainedChaCha20;
@@ -1473,7 +1476,7 @@ mod tests {
         let empty = C::init_with_salt(&key, &[]).unwrap();
         let col_a = C::init_with_salt(&key, b"users.email").unwrap();
         let col_a2 = C::init_with_salt(&key, b"users.email").unwrap();
-        let col_b = C::init_with_salt(&key, b"users.name").unwrap();
+        let col_b = C::init_with_salt(&key, b"users.phone").unwrap();
         let col_a_opts = C::init_with(&key, Options::default().with_salt(b"users.email")).unwrap();
         assert_eq!(col_a.options().salt(), b"users.email");
 
@@ -1496,6 +1499,21 @@ mod tests {
             7u128.encrypt_left(&col_a).unwrap().to_bytes(),
             7u128.encrypt_left(&col_b).unwrap().to_bytes()
         );
+    }
+
+    /// A cross-salt comparison can answer `Equal`: the unpadded empty
+    /// string has no blocks, so there is no key material to differ.
+    /// The docs therefore promise nothing about cross-salt results.
+    #[test]
+    fn cross_salt_empty_strings_compare_equal() {
+        type C = OreAes128Bit6ChainedChaCha20;
+        let key = [0x42u8; 16];
+        let options = Options::default().with_padding(Padding::None);
+        let a = C::init_with(&key, options.clone().with_salt(b"users.email")).unwrap();
+        let b = C::init_with(&key, options.with_salt(b"users.phone")).unwrap();
+        let a = a.encrypt_str("").unwrap().to_bytes();
+        let b = b.encrypt_str("").unwrap().to_bytes();
+        assert_eq!(C::compare_raw_slices(&a, &b), Some(Ordering::Equal));
     }
 
     #[test]

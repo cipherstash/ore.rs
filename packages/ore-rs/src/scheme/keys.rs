@@ -126,6 +126,31 @@ mod tests {
         assert_ne!(*salted(&r, &[1u8; 8]), *salted(&r, &[1u8; 9]));
     }
 
+    /// Salts of one length, differing in a single byte, give distinct keys
+    /// at every position: the salt bytes are absorbed, not only the length
+    /// prefix. Lengths end on and either side of the block boundaries (the
+    /// first block holds salt bytes `0..8`, each later block 16 more), and
+    /// 40 bytes has positions on both sides of the edges at 8 and 24.
+    #[test]
+    fn every_salt_byte_separates_equal_length_salts() {
+        let r = root(&[1u8; 16], &ROOT);
+        for len in [1, 7, 8, 9, 23, 24, 25, 40] {
+            let base = vec![0x5au8; len];
+            let mut seen = std::collections::HashSet::new();
+            assert!(seen.insert(*salted(&r, &base)));
+            for at in 0..len {
+                let mut salt = base.clone();
+                salt[at] ^= 0x01;
+                assert!(
+                    seen.insert(*salted(&r, &salt)),
+                    "salt byte {} of {} ignored or colliding",
+                    at,
+                    len
+                );
+            }
+        }
+    }
+
     #[test]
     fn root_labels_end_outside_the_legacy_input_range() {
         for label in [b"ORE.v2.bit6.root", b"ORE.v2.chainroot"] {

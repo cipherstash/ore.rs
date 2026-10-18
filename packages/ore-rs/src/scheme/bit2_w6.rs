@@ -254,11 +254,13 @@ impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
     /// `k_salt = CMAC_{AES_key(ROOT_LABEL)}(salt)`; see the crate-private
     /// `scheme::keys` for the stages and their argument.
     ///
-    /// Ciphertexts under different salts share no key material and never
-    /// compare `Equal`, but nothing on the wire records the salt, so the
-    /// comparators cannot refuse a mismatched pair: they return a
-    /// confident, meaningless order. Keep the salt with the identity of
-    /// the stored data, as you keep the key.
+    /// Ciphertexts under different salts share no key material, but
+    /// nothing on the wire records the salt, so the comparators cannot
+    /// refuse a mismatched pair: they return a confident, meaningless
+    /// result, `Equal` included (a typed comparison of zero blocks is
+    /// `Equal` under any salts), so no result confirms that two salts
+    /// match. Keep the salt with the identity of the stored data, as you
+    /// keep the key.
     pub fn init_with_salt(key: &[u8; 16], salt: &[u8]) -> Result<Self, OreError> {
         let k_salt = keys::salted(&keys::root(key, &ROOT_LABEL), salt);
         let prf1 = Prf::new(GenericArray::from_slice(&*keys::subkey(
@@ -566,8 +568,9 @@ mod tests {
         Ore::init(&key).unwrap()
     }
 
-    /// `init` is the empty salt; another salt gives unrelated ciphertexts
-    /// that never compare `Equal`, and the same salt reproduces them.
+    /// `init` is the empty salt; another salt gives unrelated ciphertexts,
+    /// and the same salt reproduces them. The two column salts have equal
+    /// lengths, so the length prefix alone cannot separate them.
     #[test]
     fn salt_separates_keys() {
         let key = [0x42u8; 16];
@@ -575,7 +578,7 @@ mod tests {
         let empty = Ore::init_with_salt(&key, &[]).unwrap();
         let col_a = Ore::init_with_salt(&key, b"users.age").unwrap();
         let col_a2 = Ore::init_with_salt(&key, b"users.age").unwrap();
-        let col_b = Ore::init_with_salt(&key, b"users.height").unwrap();
+        let col_b = Ore::init_with_salt(&key, b"users.dob").unwrap();
 
         let left = |c: &Ore| 456u64.encrypt_left(c).unwrap().to_bytes();
         assert_eq!(left(&plain), left(&empty));
