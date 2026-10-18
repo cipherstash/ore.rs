@@ -43,7 +43,7 @@ mod tests {
     fn cipher() -> OreAes128ChaCha20 {
         let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
         let k2: [u8; 16] = hex!("0f0e0d0c 0b0a0908 07060504 03020100");
-        OreCipher::init(&k1, &k2).unwrap()
+        OreAes128ChaCha20::init(&k1, &k2).unwrap()
     }
 
     fn encrypt(ore: &OreAes128ChaCha20, d: Decimal) -> CipherText<OreAes128ChaCha20, ENCODED_LEN> {

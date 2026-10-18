@@ -89,7 +89,8 @@ macro_rules! impl_ore_encrypt_via_orderable_bytes {
 
             #[test]
             fn round_trip_order_and_equality() {
-                let ore: OreAes128ChaCha20 = OreCipher::init(&[0x11; 16], &[0x22; 16]).unwrap();
+                let ore: OreAes128ChaCha20 =
+                    OreAes128ChaCha20::init(&[0x11; 16], &[0x22; 16]).unwrap();
                 let (lo, hi): ($type, $type) = ($lo, $hi);
                 assert!(lo < hi);
 
