@@ -18,8 +18,17 @@ are byte-for-byte unchanged.
 These are the changes since 0.8.4. The [0.9.0-rc.1](#090-rc1---2026-10-12) notes below
 describe the two new schemes in detail.
 
-- **`OreAes128Bit6` (`scheme::bit2_w6`) for new fixed-width data:** 6-bit blocks, smaller
-  and faster ciphertexts than the legacy scheme, and no zero-run leakage.
+- **`OreAes128Bit6` (`scheme::bit2_w6`) for new fixed-width data.** Against the legacy
+  scheme, for a `u64` (Apple M1 Max, hardware AES, measured for this release):
+  - **About twice as fast to encrypt:** 11.3 µs against 21.8 µs for a full ciphertext, and
+    8.3 µs against 15.0 µs for a left (query) ciphertext. Each 6-bit block costs 64
+    random-oracle evaluations instead of 256.
+  - **28% less to store:** a full ciphertext is 295 bytes against 408. A block's right half
+    is 8 bytes instead of 32, so the right half of a `u64` is 104 bytes against 272. A left
+    ciphertext is larger, 191 bytes against 136: it carries a header and 11 blocks rather
+    than 8.
+  - **Less leakage:** no zero-run leakage, since each PRP seed binds the block index and the
+    block count.
 - **The chained scheme (`scheme::chained`) for strings and other variable-length data.**
   Strings are padded with NULs to a length bucket by default (powers of two with a 16-byte
   floor), so a ciphertext reveals the bucket, not the exact length. A cipher refuses
