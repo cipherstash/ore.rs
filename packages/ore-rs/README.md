@@ -97,6 +97,20 @@ let result = a > b; // compilation error
 
 Use `to_bytes` to serialise a ciphertext and `from_slice` to parse it, specifying the scheme and block count as in the quick start. You can also compare serialised ciphertexts directly with `compare_raw_slices`. Serde is not supported.
 
+## Plaintext types
+
+The following types implement `OreEncrypt`:
+
+| Scheme | Types |
+|---|---|
+| `OreAes128Bit6` | `bool`, `u8`–`u64`, `i8`–`i64`, `char`, `f32`, `f64` |
+| `OreAes128Bit6Chained` | `u128`, `i128` |
+| `OreAes128` | The Bit6 types, plus `rust_decimal::Decimal` with the `decimal` feature, and `chrono::NaiveDate` and `chrono::DateTime<Utc>` with the `chrono` feature |
+
+The chained scheme also provides `encrypt_str` for strings and `encrypt_fixed` for other fixed-length types.
+
+The plaintext encodings come from the sibling [`orderable-bytes`](https://crates.io/crates/orderable-bytes) crate.
+
 ## Bit6 performance and limits
 
 For a `u64`, Bit6 encrypts about twice as fast as the legacy scheme and produces a 28% smaller full ciphertext. These measurements are from the 0.9.0 benchmarks on an Apple M1 Max with hardware AES:
@@ -158,20 +172,6 @@ Only compare values encrypted with the same key and salt. Ciphertexts do not rec
 Use a separate key or salt for each plaintext type. Some types encode different values as the same bytes: `0u64` and `i64::MIN`, for example, produce ciphertexts that compare equal under the same key and salt.
 
 The v2 schemes use the supplied key only to derive a root key from a fixed label. They then derive separate internal keys using the salt and labels specific to each scheme. This prevents legacy ciphertexts from exposing v2 keys if the same key is used with both schemes. Legacy `OreAes128` still requires two keys: `init(k1, k2)`.
-
-## Plaintext types
-
-The following types implement `OreEncrypt`:
-
-| Scheme | Types |
-|---|---|
-| `OreAes128Bit6` | `bool`, `u8`–`u64`, `i8`–`i64`, `char`, `f32`, `f64` |
-| `OreAes128Bit6Chained` | `u128`, `i128` |
-| `OreAes128` | The Bit6 types, plus `rust_decimal::Decimal` with the `decimal` feature, and `chrono::NaiveDate` and `chrono::DateTime<Utc>` with the `chrono` feature |
-
-The chained scheme also provides `encrypt_str` for strings and `encrypt_fixed` for other fixed-length types.
-
-The plaintext encodings come from the sibling [`orderable-bytes`](https://crates.io/crates/orderable-bytes) crate.
 
 ## Using ore-rs with vitaminc
 
