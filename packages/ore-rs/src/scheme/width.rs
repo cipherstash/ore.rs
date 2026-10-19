@@ -256,8 +256,8 @@ impl BlockWidth for Bit6 {
     const BITS: usize = 6;
     type RightBlock = RightBlock8;
     // Fixed-draw Fisher–Yates, not the rejection-sampled Knuth shuffle:
-    // Bit6's wire format is not frozen, so it adopts the constant-time,
-    // ~9×-faster PRP construction. See `LemireFyPrp`.
+    // Bit6's wire format was not yet frozen when it adopted this
+    // constant-time, ~9×-faster PRP construction. See `LemireFyPrp`.
     type Prp = crate::primitives::prp::LemireFyPrp<64>;
     type Symbol = Symbol<64>;
     type RoKeyBuf = [AesBlock; 64];

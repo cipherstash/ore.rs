@@ -4,7 +4,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.9.0] - 2026-10-19
+
+The first release of the ORE v2 schemes. **The Bit6 (`scheme::bit2_w6`) and chained
+(`scheme::chained`) wire formats are frozen from this release:** the compatibility vectors
+in `tests/` pin their bytes, and a change to them would break stored ciphertexts. Store
+them from 0.9.0 on. Ciphertexts made by 0.9.0-rc.1 do not carry over: both schemes are
+re-keyed, and the chained header has grown (see Changed). Legacy `OreAes128` ciphertexts
+are byte-for-byte unchanged.
+
+### Highlights
+
+These are the changes since 0.8.4. The [0.9.0-rc.1](#090-rc1---2026-10-12) notes below
+describe the two new schemes in detail.
+
+- **`OreAes128Bit6` (`scheme::bit2_w6`) for new fixed-width data:** 6-bit blocks, smaller
+  and faster ciphertexts than the legacy scheme, and no zero-run leakage.
+- **The chained scheme (`scheme::chained`) for strings and other variable-length data.**
+  Strings are padded with NULs to a length bucket by default (powers of two with a 16-byte
+  floor), so a ciphertext reveals the bucket, not the exact length. A cipher refuses
+  strings past a ceiling (1024 bytes by default). `u128` and `i128` are encrypted here too.
+- **One key and an optional salt** key both v2 schemes: `init(key)`,
+  `init_with_salt(key, salt)`.
+- **vitaminc.** The `vitaminc` feature implements `vitaminc-ore`'s `OrderScheme` (vitaminc
+  0.6.1, Rust 1.88).
+- **No panics in library code.** Errors are returned; internal length contracts are types.
+- **Faster key setup on hardware AES.** Every cipher is the encrypt-only `Aes128Enc`, so
+  the legacy comparator, which keys a cipher per comparison, is about 20% faster.
+
+### Upgrading from 0.8
+
+- `OreCipher::init(k1, k2)` is no longer a trait method. Call the scheme's own
+  constructor: `OreAes128ChaCha20::init(&k1, &k2)`.
+- `u128` and `i128` no longer encrypt with `OreAes128` (every call panicked). Use the
+  chained scheme.
+- `RightBlock32::set_bit` takes a `u8`.
+- On aarch64, hardware AES needs `--cfg aes_armv8` in your build configuration (see the
+  README); without it AES falls back to software.
 
 ### Added
 
@@ -27,6 +63,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   any `FixedOrderableBytes` type and `VarLeft::from_slice`. Wire vectors are pinned in
   `tests/compat_chained_vectors.rs` (#105).
 - `scheme::bit2::MAX_BLOCKS` (15): the most bytes the legacy scheme takes.
+- The chained scheme's string encryptors pad a string with NUL bytes to a length bucket
+  (`Padding`): `PowerOfTwo { min_bytes: 16 }` by default, `Fixed { max_bytes }`, or `None`.
+  A 3-byte policy tag follows the common header (7 bytes in all), and the comparators
+  return `None` for two ciphertexts under different policies. A string that ends in NUL is
+  refused (`OreError::TrailingNul`), since it would encrypt like the string without it
+  (#104, #110).
+- The `vitaminc` feature: `vitaminc::{Bit6BlockOre, ChainedBlockOre, BlockOre}` implement
+  `vitaminc-ore`'s `OrderScheme` and `OrderKeyInit`. The v2 schemes bind vitaminc's salt
+  with `init_with_salt`, under an ORE key derived once from the scheme key. The chained
+  scheme takes text and bytes behind `VARIABLE_WIDTH_MARKER`, up to 1023 bytes. Off by
+  default, needs vitaminc 0.6.1 and Rust 1.88 (#115).
+- docs.rs builds with the `chrono`, `decimal` and `vitaminc` features.
 
 ### Changed
 
@@ -35,9 +83,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `OreAes128Bit6::init(key)` / `OreAes128Bit6Chained::init(key)` plus `init_with_salt`.
   Replace `let ore: OreAes128ChaCha20 = OreCipher::init(&k1, &k2)` with
   `OreAes128ChaCha20::init(&k1, &k2)`, and Bit6's two keys with one.
-- **v2 wire (not frozen, breaking for rc.1 ciphertexts):** every Bit6 and chained ciphertext
-  is re-keyed by the new derivation. The Bit6 and chained vectors are re-pinned; the legacy
+- **v2 wire, breaking for rc.1 ciphertexts:** every Bit6 and chained ciphertext is re-keyed
+  by the new derivation, and the chained header carries the padding tag. The Bit6 and chained vectors are re-pinned; the legacy
   vectors are unchanged. The wire format itself (header, layout) is unchanged.
+- **Breaking for rc.1:** the chained scheme's raw-symbol encryptors (`encrypt_var`,
+  `encrypt_left_var`) are no longer public. Strings are its public plaintext, with
+  `encrypt_fixed` for fixed-length types (#110).
+- `Padding` and `OreError` are `#[non_exhaustive]`.
+- CI builds and tests on Rust 1.88, the `vitaminc` feature's floor.
 - `OreEncrypt<T>` no longer requires `T: OreCipher`, so the chained scheme (which is not an
   `OreCipher`) can implement it. Existing impls and callers are unaffected.
 - Every `OreEncrypt` impl macro now emits a round-trip and ordering test for the type it
@@ -47,6 +100,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compile error, and clippy's panic lints are denied outside tests (CI also rejects runtime
   assertions, which clippy cannot lint). **Breaking:** `RightBlock32::set_bit` takes the bit
   as a `u8`, which names exactly its 256 bits.
+
+### Performance
+
+- Every AES cipher is the encrypt-only `Aes128Enc`. On the hardware backends (AES-NI,
+  ARMv8 with `aes_armv8`) key setup no longer builds a decryption schedule, so the legacy
+  comparator is about 20% faster (`compare-8`: 233 → 187 ns on an Apple M4) and legacy
+  encryption 3–6% faster. Bit6 and chained are within ±1%. The software backend is
+  unchanged (#109).
 
 ### Removed
 

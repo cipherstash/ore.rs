@@ -12,7 +12,7 @@
 //! used by adding `ore-rs` to your dependencies in your project's `Cargo.toml`.
 //! ```toml
 //! [dependencies]
-//! ore-rs = "0.8"
+//! ore-rs = "0.9"
 //! ```
 //!
 //! ## Example: Encrypt a number with ORE.

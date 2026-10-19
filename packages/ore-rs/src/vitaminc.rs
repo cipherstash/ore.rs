@@ -22,8 +22,7 @@
 //!   uuid), which are beyond its block cap.
 //! - [`ChainedBlockOre`], the variable-length scheme
 //!   ([`OreAes128Bit6ChainedChaCha20`]), for every kind, text and bytes
-//!   included. Not yet frozen: see the scheme's own docs for its review
-//!   status and what a ciphertext reveals.
+//!   included. See the scheme's own docs for what a ciphertext reveals.
 //!
 //! vitaminc hands every term the salt of the terms it compares with,
 //! `PAE("vitaminc/ore/v1", scheme, domain, context)`: one salt per scheme,
@@ -352,7 +351,7 @@ impl OrderKeyInit for Bit6BlockOre {
 /// The chained, variable-length block ORE scheme as a vitaminc order
 /// scheme: every target, text and bytes included, at six bits per block.
 ///
-/// Not yet frozen. Text and bytes go in behind [`VARIABLE_WIDTH_MARKER`],
+/// Text and bytes go in behind [`VARIABLE_WIDTH_MARKER`],
 /// one byte that counts towards the length below. Text is padded under the
 /// default policy ([`Padding::default`]), so a text ciphertext reveals the
 /// length bucket, and text that ends in NUL is refused
