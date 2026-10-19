@@ -7,8 +7,9 @@ use ore_rs::{CipherText, Left, OreCipher, OreOutput, Right};
 // The fixed-width v2 scheme at its two shipped widths (11 blocks for 64-bit
 // values, 6 for 32-bit). Parsing untrusted bytes as a full, left-only or
 // right-only ciphertext must never panic, anything accepted must re-encode
-// to itself, and the raw comparator must answer arbitrary pairs without
-// panicking and agree with the typed `Ord` on pairs that parse.
+// to itself, and the raw comparators (full against full, and left against
+// full) must answer arbitrary pairs without panicking and agree with their
+// typed forms on pairs that parse.
 fn check<const N: usize>(data: &[u8]) {
     if let Ok(ct) = CipherText::<OreAes128Bit6ChaCha20, N>::from_slice(data) {
         assert_eq!(
@@ -51,20 +52,26 @@ fn agree<const N: usize>(a: &[u8], b: &[u8]) {
     );
 }
 
-/// When `a` parses as a left ciphertext and `b` as a full one, the raw and
-/// typed left-to-full comparators must agree (#120).
+/// When `b` parses as a full ciphertext, the raw and typed left-to-full
+/// comparators must agree on every left that parses against it (#120): `a`
+/// itself, and a left made of `b`'s header and left-length prefix with `a`
+/// written over the body. A left never has a full ciphertext's length, so
+/// the `overlay` pairs below cannot supply one; this does.
 fn agree_left<const N: usize>(a: &[u8], b: &[u8]) {
-    let (Ok(left), Ok(full)) = (
-        Left::<OreAes128Bit6ChaCha20, N>::from_slice(a),
-        CipherText::<OreAes128Bit6ChaCha20, N>::from_slice(b),
-    ) else {
+    let Ok(full) = CipherText::<OreAes128Bit6ChaCha20, N>::from_slice(b) else {
         return;
     };
-    assert_eq!(
-        OreAes128Bit6ChaCha20::compare_left_to_full(a, b),
-        Some(left.compare_to_full(&full)),
-        "raw and typed left-to-full comparators disagree"
-    );
+    let from_b = overlay(&b[..Left::<OreAes128Bit6ChaCha20, N>::size()], a, 4);
+    for cand in [a, &from_b[..]] {
+        let Ok(left) = Left::<OreAes128Bit6ChaCha20, N>::from_slice(cand) else {
+            continue;
+        };
+        assert_eq!(
+            OreAes128Bit6ChaCha20::compare_left_to_full(cand, b),
+            Some(left.compare_to_full(&full)),
+            "raw and typed left-to-full comparators disagree"
+        );
+    }
 }
 
 /// `a` with its first `header` bytes kept and `b` written over the rest.

@@ -387,7 +387,9 @@ impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
     /// order of `left`'s plaintext against `full`'s, as
     /// [`OreCipher::compare_raw_slices`] gives it for two full ciphertexts.
     /// A query needs only the left half; the comparison reads `full`'s
-    /// left and right halves.
+    /// left and right halves. This does not make stored data safe at rest:
+    /// a stored full ciphertext carries its left half, so two stored rows
+    /// compare offline.
     ///
     /// `None` if either input is malformed (including a full ciphertext
     /// passed as `left`, or a left one as `full`), if their headers or
@@ -521,21 +523,23 @@ impl<const N: usize> Ord for CipherText<OreAes128Bit6ChaCha20, N> {
     }
 }
 
-impl<const N: usize> Left<OreAes128Bit6ChaCha20, N> {
+impl<R: Rng + SeedableRng, const N: usize> Left<OreAes128Bit6<R>, N> {
     /// The order of this left (query) ciphertext's plaintext against
     /// `full`'s: the typed form of
     /// [`OreAes128Bit6::compare_left_to_full`], and what `Ord` on
     /// [`CipherText`] computes from the first ciphertext's left half.
-    pub fn compare_to_full(&self, full: &CipherText<OreAes128Bit6ChaCha20, N>) -> Ordering {
+    pub fn compare_to_full(&self, full: &CipherText<OreAes128Bit6<R>, N>) -> Ordering {
         compare_typed(self, full)
     }
 }
 
 /// The typed comparator: `left`'s plaintext against `b`'s. Reads only
-/// `left` and `b`, as the raw comparator reads only `a`'s left view.
-fn compare_typed<const N: usize>(
-    left: &Left<OreAes128Bit6ChaCha20, N>,
-    b: &CipherText<OreAes128Bit6ChaCha20, N>,
+/// `left` and `b`, as the raw comparator reads only `a`'s left view. The
+/// RNG type `R` is only the encryptor's nonce source; comparison never
+/// uses it.
+fn compare_typed<R: Rng + SeedableRng, const N: usize>(
+    left: &Left<OreAes128Bit6<R>, N>,
+    b: &CipherText<OreAes128Bit6<R>, N>,
 ) -> Ordering {
     let mut is_equal = Choice::from(1);
     // Latch the first differing block during the scan, as in
@@ -842,6 +846,52 @@ mod tests {
         let mut bad = left.clone();
         bad[4] = 64;
         assert_eq!(Ore::compare_left_to_full(&bad, &full), None);
+        // The same on `full`'s side: a bad symbol, truncated, extended.
+        let mut bad = full.clone();
+        bad[4] = 64;
+        assert_eq!(Ore::compare_left_to_full(&left, &bad), None);
+        assert_eq!(
+            Ore::compare_left_to_full(&left, &full[..full.len() - 1]),
+            None
+        );
+        let mut longer = full.clone();
+        longer.push(0);
+        assert_eq!(Ore::compare_left_to_full(&left, &longer), None);
+        let mut longer = left.clone();
+        longer.push(0);
+        assert_eq!(Ore::compare_left_to_full(&longer, &full), None);
+        // Every header byte (version, scheme id, block count) altered on
+        // either side, and on both alike.
+        for i in 0..4 {
+            let (mut l, mut f) = (left.clone(), full.clone());
+            l[i] ^= 0xff;
+            f[i] ^= 0xff;
+            assert_eq!(Ore::compare_left_to_full(&l, &full), None, "left byte {i}");
+            assert_eq!(Ore::compare_left_to_full(&left, &f), None, "full byte {i}");
+            assert_eq!(Ore::compare_left_to_full(&l, &f), None, "both byte {i}");
+        }
+        // A 0-block pair, and one past `MAX_BLOCKS`, each with consistent
+        // headers and lengths.
+        for count in [0, MAX_BLOCKS + 1] {
+            let mut l = vec![0u8; 4 + left_body_len(count)];
+            let mut f = vec![0u8; 4 + full_body_len(count)];
+            let mut header = Vec::new();
+            WIRE.write(count as u16, &mut header);
+            l[..4].copy_from_slice(&header);
+            f[..4].copy_from_slice(&header);
+            assert_eq!(Ore::compare_left_to_full(&l, &f), None, "{count} blocks");
+        }
+    }
+
+    /// The typed comparator is not tied to the ChaCha20 RNG: the RNG only
+    /// draws nonces when encrypting.
+    #[test]
+    fn compare_to_full_takes_any_rng() {
+        type OtherRng = rand_chacha::ChaCha8Rng;
+        let ore: OreAes128Bit6<OtherRng> = OreAes128Bit6::init(&[7u8; 16]).unwrap();
+        let left = 3u64.encrypt_left(&ore).unwrap();
+        let full = 5u64.encrypt(&ore).unwrap();
+        assert_eq!(left.compare_to_full(&full), Ordering::Less);
     }
 
     quickcheck! {
