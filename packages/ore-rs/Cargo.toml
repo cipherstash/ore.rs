@@ -6,18 +6,14 @@ authors = [
     "James Sadler <james@cipherstash.com>",
 ]
 edition = "2018"
+# vitaminc's floor.
+rust-version = "1.88"
 homepage = "https://cipherstash.com"
 repository = "https://github.com/cipherstash/ore.rs"
 documentation = "https://docs.rs/ore-rs"
 description = "Order-revealing encryption library used by the CipherStash searchable encryption platform"
 license-file = "../../LICENCE"
 readme = "README.md"
-
-# docs.rs builds default features only; these show the chrono and decimal
-# impls and the vitaminc adapter. (`ct-bench` and the Kani features are not
-# public API.)
-[package.metadata.docs.rs]
-features = ["chrono", "decimal", "vitaminc"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dev-dependencies]
@@ -26,29 +22,27 @@ criterion = "0.5.1"
 # and benches — never inside the library proper.
 hex-literal = "0.4.1"
 quickcheck = "1.0.3"
-# Test-only: macros for constructing `Decimal` literals in unit tests.
-rust_decimal_macros = "1.28"
+# The typed rows of vitaminc's `FitsIn` table, for the tests that encrypt
+# dates, timestamps, decimals and uuids as a caller holds them.
+chrono = { version = "0.4.44", default-features = false, features = ["std"] }
+rust_decimal = { version = "1.41", default-features = false, features = ["std"] }
+uuid = { version = "1", default-features = false }
+# This crate's own `test-support` feature, on for its tests, and the
+# conformance checks vitaminc-ore runs against a real scheme.
+ore-rs = { path = ".", features = ["test-support"] }
 
 [features]
-# Adds ORE support for `chrono::NaiveDate` and `chrono::DateTime<Utc>`. The
-# orderable-bytes encoders live in the sibling `orderable-bytes` crate.
-chrono = ["dep:chrono", "orderable-bytes/chrono"]
-# Adds ORE support for `rust_decimal::Decimal` via a fixed-length 14-byte
-# order-preserving encoding fed into the existing fixed-N ORE machinery.
-# The encoder lives in the sibling `orderable-bytes` crate.
-decimal = ["dep:rust_decimal", "orderable-bytes/decimal"]
+# Seeded constructors for the schemes, so a test can pin a full
+# ciphertext's bytes, and vitaminc-ore's conformance checks. A seeded
+# scheme draws every nonce from the seed, so it must never ship: two
+# values encrypted under one seed share their nonces, which the scheme's
+# security assumes they do not.
+test-support = ["vitaminc-ore/test-support"]
 # Exposes `ct_bench`, timing-measurement entry points to otherwise private
 # primitives, for the detached `packages/ct-dudect` crate. Not part of the
 # public API: a feature rather than a `cfg` so it never trips
 # `unexpected_cfgs`, and never enabled by a dependant.
 ct-bench = []
-# Implements vitaminc-ore's `OrderScheme` for the block ORE schemes, so a
-# vitaminc order index can encrypt its sealed order plaintexts here (ADR
-# 0002 in cipherstash/stack: vitaminc at the bottom, scheme crates
-# implement the trait). Off by default: cipherstash-client takes no
-# vitaminc dependency. Needs Rust 1.88, vitaminc's floor; CI builds every
-# job on 1.88, and lints the crate with the feature off as well as on.
-vitaminc = ["dep:vitaminc-ore", "dep:vitaminc-hmac", "dep:vitaminc-prf", "dep:vitaminc-protected"]
 # Adds the two heaviest Kani harnesses: exhaustive-length `ct_select_byte`
 # (about 9 minutes) and SWAR-builder equivalence (about 15 minutes on an M4,
 # too heavy for GitHub's runners). CI runs `cargo kani` without it; run
@@ -59,21 +53,24 @@ kani-full = []
 aes = { version = "0.8.2", features = ["zeroize"] }
 block-modes = "0.9.1"
 byteorder = "1.4.3"
-chrono = { version = "0.4.42", default-features = false, optional = true }
-orderable-bytes = { path = "../orderable-bytes", version = "^0.2", default-features = false }
-rand = "0.8.6"
-rand_chacha = "0.3.1"
-rust_decimal = { version = "1.28", default-features = false, optional = true }
 num = "0.4.0"
 hex = "0.4.3"
 subtle-ng = "2.5.0"
 zeroize = { version = "1.5.7", features = ["zeroize_derive"] }
 thiserror = "1.0.38"
-# vitaminc 0.6 is the first release with the `OrderScheme` trait.
-vitaminc-ore = { version = "0.6.1", optional = true }
-vitaminc-hmac = { version = "0.6.1", optional = true }
-vitaminc-prf = { version = "0.6.1", optional = true }
-vitaminc-protected = { version = "0.6.1", optional = true }
+# `TryRng`, to draw a nonce from a `SafeRand`; the `chacha` feature is
+# for the tests' seeded generators.
+rand = { version = "0.10.1", features = ["chacha"] }
+# vitaminc is the typed front door (docs/plans/2026-10-19-ore-0-10-vitaminc-front-door.md):
+# vitaminc-ore seals every plaintext and owns the encodings, and the
+# schemes here implement its traits. Taken from the branch that carries
+# the 0.7 changes (`open` per space, `OrderQuery`) until 0.7 is published.
+vitaminc-ore = { git = "https://github.com/cipherstash/vitaminc", branch = "feat/ore-order-query", features = ["chrono", "rust_decimal", "uuid"] }
+vitaminc-hmac = { git = "https://github.com/cipherstash/vitaminc", branch = "feat/ore-order-query" }
+vitaminc-prf = { git = "https://github.com/cipherstash/vitaminc", branch = "feat/ore-order-query" }
+vitaminc-protected = { git = "https://github.com/cipherstash/vitaminc", branch = "feat/ore-order-query" }
+vitaminc-random = { git = "https://github.com/cipherstash/vitaminc", branch = "feat/ore-order-query" }
+vitaminc-context = { git = "https://github.com/cipherstash/vitaminc", branch = "feat/ore-order-query" }
 
 # `cfg(kani)` gates the Kani proof harnesses (compiled only by `cargo kani`).
 [lints.rust]
@@ -86,16 +83,6 @@ harness = false
 [[bench]]
 name = "bit6"
 harness = false
-
-[[bench]]
-name = "decimal"
-harness = false
-required-features = ["decimal"]
-
-[[bench]]
-name = "chrono"
-harness = false
-required-features = ["chrono"]
 
 [[bench]]
 name = "chained"

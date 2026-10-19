@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 use crate::primitives::NONCE_SIZE;
-pub use crate::OreCipher;
+pub(crate) use crate::OreCipher;
 
 /// Wire-format header prepended to every serialised artifact (Left, Right
 /// or combined ciphertext) of schemes introduced from ORE v2 onwards.
@@ -94,12 +94,6 @@ pub trait OreOutput: Sized {
 
     /// Try to deserialize from a slice
     fn from_slice(data: &[u8]) -> Result<Self, ParseError>;
-
-    /// Deserialise from a byte slice.
-    #[deprecated(since = "0.8.0", note = "please use `from_slice` instead")]
-    fn from_bytes(data: &[u8]) -> Result<Self, ParseError> {
-        Self::from_slice(data)
-    }
 }
 
 /// The Left half of a fixed-N BlockORE ciphertext: the per-block PRF₁ tags
@@ -147,9 +141,6 @@ pub trait CipherTextBlock: Default + Copy + std::fmt::Debug {
     /// Deserialise a block from a byte slice. Returns [`ParseError`] if the
     /// slice is malformed or the wrong length.
     fn from_bytes(data: &[u8]) -> Result<Self, ParseError>;
-
-    /// Reset this block to its default value in place.
-    fn default_in_place(&mut self);
 }
 
 /// Error returned when a serialised ciphertext can't be parsed (wrong

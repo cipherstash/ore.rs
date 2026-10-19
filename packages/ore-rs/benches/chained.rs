@@ -1,15 +1,23 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hex_literal::hex;
-use ore_rs::scheme::chained::{
-    Options, OreAes128Bit6Chained, OreAes128Bit6ChainedChaCha20, Padding,
-};
+use ore_rs::scheme::chained::{Options, OreAes128Bit6Chained, Padding};
+use ore_rs::OreScheme;
+use vitaminc_ore::{order, OrderPlaintext, OrderTarget, Physical};
+use vitaminc_protected::Protected;
 
 /// Unpadded, so that each bench's name gives the length it encrypts and the
 /// results compare with earlier runs. The padded benches below use the
 /// default policy.
-fn init_ore(padding: Padding) -> OreAes128Bit6ChainedChaCha20 {
+fn init_ore(padding: Padding) -> OreAes128Bit6Chained {
     let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-    OreAes128Bit6Chained::init_with(&k1, Options::default().with_padding(padding)).unwrap()
+    OreAes128Bit6Chained::init_with(Protected::new(k1), Options::default().with_padding(padding))
+        .unwrap()
+}
+
+/// Text as vitaminc encodes it: a marker byte, then the folded string, so
+/// a bench named for `n` characters encrypts `n + 1` bytes.
+fn text(s: &str) -> OrderPlaintext {
+    order(OrderTarget::Text, None, Physical::Text(s)).unwrap()
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
@@ -17,37 +25,38 @@ fn criterion_benchmark(c: &mut Criterion) {
     let padded = init_ore(Padding::default());
 
     // Short (~8 chars ≈ 11 blocks) and long (~40 chars ≈ 54 blocks) strings.
-    let short = "alice";
-    let medium = "alice@example.com";
-    let long = "the quick brown fox jumps over the lazy dog";
+    let short = text("alice");
+    let medium = text("alice@example.com");
+    let long = text("the quick brown fox jumps over the lazy dog");
 
     c.bench_function("chained-encrypt-str-5", |b| {
-        b.iter(|| ore.encrypt_str(black_box(short)).unwrap())
+        b.iter(|| ore.encrypt_plaintext(black_box(&short)).unwrap())
     });
     c.bench_function("chained-encrypt-str-17", |b| {
-        b.iter(|| ore.encrypt_str(black_box(medium)).unwrap())
+        b.iter(|| ore.encrypt_plaintext(black_box(&medium)).unwrap())
     });
     c.bench_function("chained-encrypt-str-43", |b| {
-        b.iter(|| ore.encrypt_str(black_box(long)).unwrap())
+        b.iter(|| ore.encrypt_plaintext(black_box(&long)).unwrap())
     });
     c.bench_function("chained-encrypt-left-str-17", |b| {
-        b.iter(|| ore.encrypt_left_str(black_box(medium)).unwrap())
+        b.iter(|| ore.encrypt_query_plaintext(black_box(&medium)).unwrap())
     });
 
-    // The default policy pads 5 bytes to 16 and 17 bytes to 32.
+    // The default policy pads 6 bytes to 16 and 18 bytes to 32.
     c.bench_function("chained-encrypt-str-5-padded", |b| {
-        b.iter(|| padded.encrypt_str(black_box(short)).unwrap())
+        b.iter(|| padded.encrypt_plaintext(black_box(&short)).unwrap())
     });
     c.bench_function("chained-encrypt-str-17-padded", |b| {
-        b.iter(|| padded.encrypt_str(black_box(medium)).unwrap())
+        b.iter(|| padded.encrypt_plaintext(black_box(&medium)).unwrap())
     });
 
-    let a = ore.encrypt_str(medium).unwrap().to_bytes();
-    let b_ct = ore.encrypt_str("alice@example.org").unwrap().to_bytes();
+    let a = ore.encrypt_plaintext(&medium).unwrap().into_bytes();
+    let b_ct = ore
+        .encrypt_plaintext(&text("alice@example.org"))
+        .unwrap()
+        .into_bytes();
     c.bench_function("chained-compare-str-17", |bench| {
-        bench.iter(|| {
-            OreAes128Bit6ChainedChaCha20::compare_raw_slices(black_box(&a), black_box(&b_ct))
-        })
+        bench.iter(|| OreAes128Bit6Chained::compare_raw_slices(black_box(&a), black_box(&b_ct)))
     });
 }
 

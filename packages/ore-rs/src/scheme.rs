@@ -1,8 +1,11 @@
-//! Concrete BlockORE schemes. The crate currently exposes one scheme,
-//! [`bit2`], which uses a 2-bit indicator function with AES-128 as the PRF
-//! and Knuth-shuffle as the per-block PRP. Future schemes (different
-//! indicator widths or primitive choices) would land alongside it as
-//! sibling submodules.
+//! Concrete BlockORE schemes. The two v2 schemes are the engines behind
+//! [`crate::vitaminc::BlockOre`], which routes a plaintext to one of them by
+//! its width: [`bit2_w6`] for fixed-width values up to 10 bytes, and
+//! [`chained`] for wider values, text and bytes. The legacy [`bit2`] scheme
+//! remains for compatibility with existing data.
+//!
+//! Every scheme takes a sealed `vitaminc_ore::OrderPlaintext` and nothing
+//! else, through [`crate::OreScheme`]; the typed way in is vitaminc's.
 
 /// 2-bit-indicator BlockORE with AES-128 PRF and Knuth-shuffle PRP.
 pub mod bit2;

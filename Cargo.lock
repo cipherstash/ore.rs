@@ -15,6 +15,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ahash"
+version = "0.7.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "891477e0c6a8957309ee5c45a6368af3ae14bb510732d2684ffa19af310920f9"
+dependencies = [
+ "getrandom 0.2.15",
+ "once_cell",
+ "version_check",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -76,9 +87,55 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e2211b0817f061502a8dd9f11a37e879e79763e3c698d2418cf824d8cb2f21e"
 
 [[package]]
+name = "borsh"
+version = "1.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "553c5d846a6ba5150c65e3b1b8ec073bcf1abc20f9b7220de384a4443ea4e20a"
+dependencies = [
+ "borsh-derive",
+ "bytes",
+ "cfg_aliases",
+]
+
+[[package]]
+name = "borsh-derive"
+version = "1.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12cdfe656708a01f89b451a7d36466e6fe6c414de0aa18fc54f864f6f9ca9f56"
+dependencies = [
+ "once_cell",
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.9",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.16.0"
 source = "git+https://github.com/fitzgen/bumpalo.git?rev=4eeab88#4eeab8847c85d5cde135ca21ae14a54e56b05224"
+
+[[package]]
+name = "bytecheck"
+version = "0.6.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23cdc57ce23ac53c931e88a43d06d070a6fd142f2617be5855eb75efc9beb1c2"
+dependencies = [
+ "bytecheck_derive",
+ "ptr_meta",
+ "simdutf8",
+]
+
+[[package]]
+name = "bytecheck_derive"
+version = "0.6.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3db406d29fbcd95542e92559bed4d8ad92636d1ca8b3b72ede10b4bcc010e659"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
 
 [[package]]
 name = "byteorder"
@@ -106,6 +163,12 @@ name = "cfg-if"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
+
+[[package]]
+name = "cfg_aliases"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 
 [[package]]
 name = "chacha20"
@@ -427,6 +490,15 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
+dependencies = [
+ "ahash",
+]
+
+[[package]]
+name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
@@ -474,7 +546,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
 dependencies = [
  "equivalent",
- "hashbrown",
+ "hashbrown 0.17.1",
 ]
 
 [[package]]
@@ -654,18 +726,19 @@ dependencies = [
  "hex",
  "hex-literal",
  "num",
- "orderable-bytes",
+ "ore-rs",
  "quickcheck",
- "rand 0.8.6",
- "rand_chacha",
+ "rand 0.10.3",
  "rust_decimal",
- "rust_decimal_macros",
  "subtle-ng",
  "thiserror 1.0.61",
+ "uuid",
+ "vitaminc-context",
  "vitaminc-hmac",
  "vitaminc-ore",
  "vitaminc-prf",
  "vitaminc-protected",
+ "vitaminc-random",
  "zeroize",
 ]
 
@@ -725,6 +798,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "ptr_meta"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0738ccf7ea06b608c10564b31debd4f5bc5e197fc8bfe088f68ae5ce81e7a4f1"
+dependencies = [
+ "ptr_meta_derive",
+]
+
+[[package]]
+name = "ptr_meta_derive"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16b845dbfca988fa33db069c0e230574d15a3088f147a87b64c7589eb662c9ac"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -856,13 +949,58 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adad44e29e4c806119491a7f06f03de4d1af22c3a680dd47f1e6e179439d1f56"
 
 [[package]]
+name = "rend"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71fe3824f5629716b1589be05dacd749f6aa084c87e00e016714a8cdfccc997c"
+dependencies = [
+ "bytecheck",
+]
+
+[[package]]
+name = "rkyv"
+version = "0.7.46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2297bf9c81a3f0dc96bc9521370b88f054168c29826a75e89c55ff196e7ed6a1"
+dependencies = [
+ "bitvec",
+ "bytecheck",
+ "bytes",
+ "hashbrown 0.12.3",
+ "ptr_meta",
+ "rend",
+ "rkyv_derive",
+ "seahash",
+ "tinyvec",
+ "uuid",
+]
+
+[[package]]
+name = "rkyv_derive"
+version = "0.7.46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "84d7b42d4b8d06048d3ac8db0eb31bcb942cbeb709f0b5f2b2ebde398d3038f5"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "rust_decimal"
 version = "1.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2ce901f9a19d251159075a4c37af514c3b8ef99c22e02dd8c19161cf397ee94a"
 dependencies = [
  "arrayvec",
+ "borsh",
+ "bytes",
  "num-traits",
+ "rand 0.8.6",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -889,6 +1027,12 @@ checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
 ]
+
+[[package]]
+name = "seahash"
+version = "4.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c107b6f4780854c8b126e228ea8869f4d7b71260f962fefb57b996b8959ba6b"
 
 [[package]]
 name = "serde"
@@ -955,6 +1099,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "simdutf8"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -971,6 +1121,17 @@ name = "subtle-ng"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "734676eb262c623cec13c3155096e08d1f8f29adce39ba17948b18dad1e54142"
+
+[[package]]
+name = "syn"
+version = "1.0.109"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72b64191b275b66ffe2469e8af2c1cfe3bafa67b529ead792a6d0160888b4237"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unicode-ident",
+]
 
 [[package]]
 name = "syn"
@@ -1114,6 +1275,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "uuid"
+version = "1.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f87b8aa10b915a06587d0dec516c282ff295b475d94abf425d62b57710070a2"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "version_check"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1122,13 +1293,15 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 [[package]]
 name = "vitaminc-aead"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71b8c5c4ced92545dce5fd7cf04581d08210def174cc81475cf227fa2506c5b7"
+source = "git+https://github.com/cipherstash/vitaminc?branch=feat%2Fore-order-query#f3279d2eaaea1f8cf6224f86ff9138d2c069916d"
 dependencies = [
  "bytes",
+ "chrono",
  "futures-util",
+ "rust_decimal",
  "serde",
  "thiserror 2.0.21",
+ "uuid",
  "vitaminc-aead-derive",
  "vitaminc-context",
  "vitaminc-protected",
@@ -1139,8 +1312,7 @@ dependencies = [
 [[package]]
 name = "vitaminc-aead-derive"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c546497a972d0f0498f2f8d5f537c514bad82df8662951c63d0c80023808900"
+source = "git+https://github.com/cipherstash/vitaminc?branch=feat%2Fore-order-query#f3279d2eaaea1f8cf6224f86ff9138d2c069916d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1150,8 +1322,7 @@ dependencies = [
 [[package]]
 name = "vitaminc-context"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa4c4bc2bd9811253eb427657565a45bd4826e2379e93ee1c4d00c808a769882"
+source = "git+https://github.com/cipherstash/vitaminc?branch=feat%2Fore-order-query#f3279d2eaaea1f8cf6224f86ff9138d2c069916d"
 dependencies = [
  "mutants",
  "vitaminc-protected",
@@ -1160,8 +1331,7 @@ dependencies = [
 [[package]]
 name = "vitaminc-hmac"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd361f626e95cbe770b9d012e4a86c43cfefe4aefb3d5b3ed9339a83085bdc53"
+source = "git+https://github.com/cipherstash/vitaminc?branch=feat%2Fore-order-query#f3279d2eaaea1f8cf6224f86ff9138d2c069916d"
 dependencies = [
  "hmac",
  "sha2",
@@ -1173,8 +1343,7 @@ dependencies = [
 [[package]]
 name = "vitaminc-normalize"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "214b2a9d085924c3bc3c91f3ba74238e8848bf54990e5f48f170c71fbacea07a"
+source = "git+https://github.com/cipherstash/vitaminc?branch=feat%2Fore-order-query#f3279d2eaaea1f8cf6224f86ff9138d2c069916d"
 dependencies = [
  "thiserror 2.0.21",
  "unicode-general-category",
@@ -1186,12 +1355,14 @@ dependencies = [
 [[package]]
 name = "vitaminc-ore"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed88c54b5f06f2177ecbfb7666812adf645406f6fb555f4e2f0fd7fa218e71c4"
+source = "git+https://github.com/cipherstash/vitaminc?branch=feat%2Fore-order-query#f3279d2eaaea1f8cf6224f86ff9138d2c069916d"
 dependencies = [
+ "chrono",
+ "rust_decimal",
  "thiserror 2.0.21",
  "unicode-general-category",
  "unicode-normalization",
+ "uuid",
  "vitaminc-aead",
  "vitaminc-context",
  "vitaminc-normalize",
@@ -1201,8 +1372,7 @@ dependencies = [
 [[package]]
 name = "vitaminc-prf"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2715cca25006b4656223bc932ab4fd7f70d387aa4ec63a4e2ef33aa8cd2b3a5"
+source = "git+https://github.com/cipherstash/vitaminc?branch=feat%2Fore-order-query#f3279d2eaaea1f8cf6224f86ff9138d2c069916d"
 dependencies = [
  "mutants",
  "thiserror 2.0.21",
@@ -1213,8 +1383,7 @@ dependencies = [
 [[package]]
 name = "vitaminc-protected"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1bb76dd473f5aa89b844f92018ebe3041deb8e5390e7061cca4283d959ff855"
+source = "git+https://github.com/cipherstash/vitaminc?branch=feat%2Fore-order-query#f3279d2eaaea1f8cf6224f86ff9138d2c069916d"
 dependencies = [
  "bitvec",
  "digest",
@@ -1230,8 +1399,7 @@ dependencies = [
 [[package]]
 name = "vitaminc-protected-derive"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7478ed160c019059746e75fc613563dcdcd5266d155a34601d29377a1c4afc3"
+source = "git+https://github.com/cipherstash/vitaminc?branch=feat%2Fore-order-query#f3279d2eaaea1f8cf6224f86ff9138d2c069916d"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -1242,8 +1410,7 @@ dependencies = [
 [[package]]
 name = "vitaminc-random"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b477af7c01c3d9ef2647e46952ad3df7f246b3f806b1d4009ee83beecec613a"
+source = "git+https://github.com/cipherstash/vitaminc?branch=feat%2Fore-order-query#f3279d2eaaea1f8cf6224f86ff9138d2c069916d"
 dependencies = [
  "chacha20",
  "getrandom 0.4.3",
@@ -1257,8 +1424,7 @@ dependencies = [
 [[package]]
 name = "vitaminc-random-derives"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab5a0de8da428c6789dc067a578a0462e411099721d616736cf29e1622230c35"
+source = "git+https://github.com/cipherstash/vitaminc?branch=feat%2Fore-order-query#f3279d2eaaea1f8cf6224f86ff9138d2c069916d"
 dependencies = [
  "proc-macro2",
  "quote",

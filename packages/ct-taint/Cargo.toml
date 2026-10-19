@@ -25,6 +25,15 @@ hex-literal = "0.4"
 [dependencies.ore-rs]
 path = "../ore-rs"
 
+# The sealed plaintexts the schemes take, from the same branch as the crate.
+[dependencies.vitaminc-ore]
+git = "https://github.com/cipherstash/vitaminc"
+branch = "feat/ore-order-query"
+
+[dependencies.vitaminc-protected]
+git = "https://github.com/cipherstash/vitaminc"
+branch = "feat/ore-order-query"
+
 # Frames must resolve for the suppressions to match by function name, so keep
 # debug info in the optimised build. Optimisation is required: the question is
 # whether the *shipped* code is branch-free, and the debug build is not the

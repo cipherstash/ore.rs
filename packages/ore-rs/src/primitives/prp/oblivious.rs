@@ -485,11 +485,11 @@ mod tests {
     /// exercised, not only the prefix quickcheck happens to fill.
     fn stream_from(seed: &[u8]) -> [u8; STREAM_BYTES] {
         let mut s = [0u8; STREAM_BYTES];
-        let mut rng = <rand_chacha::ChaCha20Rng as rand::SeedableRng>::seed_from_u64(
+        let mut rng = <rand::rngs::ChaCha20Rng as rand::SeedableRng>::seed_from_u64(
             seed.iter()
                 .fold(0u64, |h, &b| h.wrapping_mul(131).wrapping_add(u64::from(b))),
         );
-        rand::RngCore::fill_bytes(&mut rng, &mut s);
+        rand::Rng::fill_bytes(&mut rng, &mut s);
         for (d, b) in s.iter_mut().zip(seed) {
             *d ^= *b;
         }

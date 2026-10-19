@@ -1,106 +1,80 @@
-//! Wire-format vectors for the `OreAes128Bit6Chained` scheme — the v2
-//! variable-length (chained-prefix) scheme with the v2 wire header, the CMAC
-//! accumulator (review brief A2/A3) and the BHKR σ-MMO hash `H` (A1).
+//! Wire-format vectors for the chained scheme: the v2 variable-length
+//! (chained-prefix) scheme with the v2 wire header, the CMAC accumulator
+//! (review brief A2/A3) and the BHKR σ-MMO hash `H` (A1).
 //!
 //! These tests pin the exact serialised bytes produced for a fixed key and
 //! fixed inputs, plus comparison results over those bytes. They freeze the v2
-//! chained wire format introduced by this PR: once released, any change that
-//! alters these bytes is a wire-format break for stored chained ciphertexts
-//! and must fail here. (Mirror of `compat_w6_vectors.rs`, which does the same
-//! for the fixed-width Bit6 scheme.)
+//! chained wire format, released in 0.9.0: any change that alters these bytes
+//! is a wire-format break for stored chained ciphertexts and must fail here.
 //!
 //! Strings are pinned under three padding policies: the default (powers of
-//! two with a 16-byte floor), none, and a fixed length.
+//! two with a 16-byte floor), none, and a fixed length. They go in as raw
+//! UTF-8 through the crate-private text path, which is why this module is
+//! inside the crate: through vitaminc the same strings arrive behind a
+//! marker byte, case and accents folded, and encrypt to other bytes. The
+//! 128-bit integers go in through the public sealed path.
 //!
 //! Left ciphertexts are deterministic given the key. Full ciphertexts include
-//! a random nonce drawn from the cipher's internal RNG, which `init` seeds via
-//! `SeedableRng::from_entropy`; [`TestRng`] overrides `from_entropy` to a
-//! fixed seed so full-ciphertext bytes are reproducible.
+//! a random nonce, drawn from the cipher's generator; `init_seeded` seeds it,
+//! so full-ciphertext bytes are reproducible.
 //!
 //! To regenerate (only legitimate if the wire format is *deliberately* changed):
 //!
 //! ```text
-//! cargo test --test compat_chained_vectors -- --ignored --nocapture generate
+//! cargo test -p ore-rs --lib -- --ignored --nocapture compat_vectors::generate
 //! ```
 
-use ore_rs::scheme::chained::{
-    ChainedCipherText, ChainedLeft, Options, OreAes128Bit6Chained, OreAes128Bit6ChainedChaCha20,
-    Padding, VarCipherText, I128_BLOCKS, U128_BLOCKS,
-};
-use ore_rs::{OreEncrypt, OreOutput};
-use rand::{RngCore, SeedableRng};
-use rand_chacha::ChaCha20Rng;
+use super::{Options, OreAes128Bit6Chained, Padding, VarCipherText};
+use crate::testing::{i128_pt, salt, u128_pt};
+use crate::OreScheme;
 use std::cmp::Ordering;
+use vitaminc_protected::Protected;
 
 const K1: [u8; 16] = [
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
 ];
 
-/// RNG whose `from_entropy` is deterministic, so that `init` (which calls
-/// `from_entropy` internally) produces a reproducible nonce stream.
-struct TestRng<const SEED: u8>(ChaCha20Rng);
-
-impl<const SEED: u8> RngCore for TestRng<SEED> {
-    fn next_u32(&mut self) -> u32 {
-        self.0.next_u32()
-    }
-    fn next_u64(&mut self) -> u64 {
-        self.0.next_u64()
-    }
-    fn fill_bytes(&mut self, dest: &mut [u8]) {
-        self.0.fill_bytes(dest)
-    }
-    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand::Error> {
-        self.0.try_fill_bytes(dest)
-    }
-}
-
-impl<const SEED: u8> SeedableRng for TestRng<SEED> {
-    type Seed = [u8; 32];
-    fn from_seed(seed: Self::Seed) -> Self {
-        Self(ChaCha20Rng::from_seed(seed))
-    }
-    fn from_entropy() -> Self {
-        Self::from_seed([SEED; 32])
-    }
-}
-
-type OreA = OreAes128Bit6Chained<TestRng<0x2a>>;
-type OreB = OreAes128Bit6Chained<TestRng<0x77>>;
-
-fn cipher_a() -> OreA {
-    OreAes128Bit6Chained::init(&K1).unwrap()
-}
-
-fn cipher_b() -> OreB {
-    OreAes128Bit6Chained::init(&K1).unwrap()
-}
-
-fn cipher_left() -> OreAes128Bit6ChainedChaCha20 {
-    OreAes128Bit6Chained::init(&K1).unwrap()
-}
-
+/// The fixed length pinned beside the default and `None`.
 const FIXED: Padding = Padding::Fixed { max_bytes: 40 };
+
+type C = OreAes128Bit6Chained;
+
+fn seeded(seed: u8, options: Options) -> C {
+    C::init_seeded(Protected::new(K1), options, [seed; 32]).unwrap()
+}
+
+fn cipher_a() -> C {
+    seeded(0x2a, Options::default())
+}
+
+fn cipher_b() -> C {
+    seeded(0x77, Options::default())
+}
+
+/// For left ciphertexts, which draw no nonce.
+fn cipher_left() -> C {
+    C::init(Protected::new(K1)).unwrap()
+}
 
 /// Salts pinned beside the empty one, so the salt encoding is frozen too.
 /// The first CMAC block holds the 8-byte length and 8 salt bytes: these end
 /// inside it, fill it exactly, and run into a third block.
 const SALTS: &[&[u8]] = &[b"age", b"users.dt", b"public.users.date_of_birth"];
 
-fn cipher_a_salted(salt: &[u8]) -> OreA {
-    OreAes128Bit6Chained::init_with_salt(&K1, salt).unwrap()
+fn cipher_a_salted(s: &[u8]) -> C {
+    seeded(0x2a, Options::default().with_salt(&salt(s)))
 }
 
-fn cipher_left_salted(salt: &[u8]) -> OreAes128Bit6ChainedChaCha20 {
-    OreAes128Bit6Chained::init_with_salt(&K1, salt).unwrap()
+fn cipher_left_salted(s: &[u8]) -> C {
+    C::init_with_salt(Protected::new(K1), &salt(s)).unwrap()
 }
 
-fn cipher_a_with(padding: Padding) -> OreA {
-    OreAes128Bit6Chained::init_with(&K1, Options::default().with_padding(padding)).unwrap()
+fn cipher_a_with(padding: Padding) -> C {
+    seeded(0x2a, Options::default().with_padding(padding))
 }
 
-fn cipher_left_with(padding: Padding) -> OreAes128Bit6ChainedChaCha20 {
-    OreAes128Bit6Chained::init_with(&K1, Options::default().with_padding(padding)).unwrap()
+fn cipher_left_with(padding: Padding) -> C {
+    C::init_with(Protected::new(K1), Options::default().with_padding(padding)).unwrap()
 }
 
 /// Pinned `(string, hex)` pairs.
@@ -132,14 +106,34 @@ const STRINGS: &[&str] = &[
     "bob",
 ];
 
-/// Fixed-length integers pinned through the `OreEncrypt` impls (22 blocks
-/// each): the domain edges, zero, and a value with every byte distinct.
+/// 128-bit integers pinned through the sealed path (22 blocks each): the
+/// domain edges, zero, and a value with every byte distinct.
 const U128S: &[u128] = &[0, 1, 0x0123_4567_89ab_cdef_fedc_ba98_7654_3210, u128::MAX];
 const I128S: &[i128] = &[i128::MIN, -1, 0, 1, i128::MAX];
 
-#[path = "compat_chained_vectors/vectors.rs"]
+#[path = "compat_vectors_data.rs"]
 mod vectors;
 use vectors::*;
+
+fn left_u128(ore: &C, x: u128) -> Vec<u8> {
+    ore.encrypt_query_plaintext(&u128_pt(x))
+        .unwrap()
+        .into_bytes()
+}
+
+fn left_i128(ore: &C, x: i128) -> Vec<u8> {
+    ore.encrypt_query_plaintext(&i128_pt(x))
+        .unwrap()
+        .into_bytes()
+}
+
+fn full_u128(ore: &C, x: u128) -> Vec<u8> {
+    ore.encrypt_plaintext(&u128_pt(x)).unwrap().into_bytes()
+}
+
+fn full_i128(ore: &C, x: i128) -> Vec<u8> {
+    ore.encrypt_plaintext(&i128_pt(x)).unwrap().into_bytes()
+}
 
 // ---------------------------------------------------------------------------
 // Left ciphertexts (fully deterministic)
@@ -149,19 +143,19 @@ use vectors::*;
 #[test]
 fn salted_alice_vectors() {
     assert_eq!(SALTED_ALICE.len(), SALTS.len());
-    for (salt, (pinned_salt, left, full)) in SALTS.iter().zip(SALTED_ALICE) {
-        assert_eq!(salt, pinned_salt);
-        let left_ct = cipher_left_salted(salt).encrypt_left_str("alice").unwrap();
+    for (s, (pinned_salt, left, full)) in SALTS.iter().zip(SALTED_ALICE) {
+        assert_eq!(s, pinned_salt);
+        let left_ct = cipher_left_salted(s).encrypt_left_str("alice").unwrap();
         assert_eq!(
             hex::encode(left_ct.to_bytes()),
             *left,
-            "left ciphertext mismatch for salt {salt:?}"
+            "left ciphertext mismatch for salt {s:?}"
         );
-        let ct = cipher_a_salted(salt).encrypt_str("alice").unwrap();
+        let ct = cipher_a_salted(s).encrypt_str("alice").unwrap();
         assert_eq!(
             hex::encode(ct.to_bytes()),
             *full,
-            "full ciphertext mismatch for salt {salt:?}"
+            "full ciphertext mismatch for salt {s:?}"
         );
     }
 }
@@ -195,7 +189,7 @@ fn left_str_vectors_other_policies() {
 }
 
 // ---------------------------------------------------------------------------
-// Full ciphertexts (deterministic via TestRng nonce stream)
+// Full ciphertexts (deterministic via the seeded nonce stream)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -228,86 +222,63 @@ fn full_str_vectors_other_policies() {
 fn left_u128_vectors() {
     let ore = cipher_left();
     for (x, expected) in LEFT_U128 {
-        let left = x.encrypt_left(&ore).unwrap();
-        assert_eq!(
-            hex::encode(left.to_bytes()),
-            *expected,
-            "left mismatch for {x}"
-        );
-        assert_eq!(left.to_bytes().len(), ChainedLeft::<U128_BLOCKS>::size());
+        let left = left_u128(&ore, *x);
+        assert_eq!(hex::encode(&left), *expected, "left mismatch for {x}");
+        assert_eq!(left.len(), super::left_len(22));
     }
     for (x, expected) in LEFT_I128 {
-        let left = x.encrypt_left(&ore).unwrap();
-        assert_eq!(
-            hex::encode(left.to_bytes()),
-            *expected,
-            "left mismatch for {x}"
-        );
-        assert_eq!(left.to_bytes().len(), ChainedLeft::<I128_BLOCKS>::size());
+        let left = left_i128(&ore, *x);
+        assert_eq!(hex::encode(&left), *expected, "left mismatch for {x}");
+        assert_eq!(left.len(), super::left_len(22));
     }
 }
 
 #[test]
 fn full_u128_vectors() {
     for (x, expected) in FULL_U128 {
-        let ct = x.encrypt(&cipher_a()).unwrap();
-        assert_eq!(
-            hex::encode(ct.to_bytes()),
-            *expected,
-            "full mismatch for {x}"
-        );
-        assert_eq!(
-            ct.to_bytes().len(),
-            ChainedCipherText::<U128_BLOCKS>::size()
-        );
+        let ct = full_u128(&cipher_a(), *x);
+        assert_eq!(hex::encode(&ct), *expected, "full mismatch for {x}");
+        assert_eq!(ct.len(), super::total_len(22));
     }
     for (x, expected) in FULL_I128 {
-        let ct = x.encrypt(&cipher_a()).unwrap();
-        assert_eq!(
-            hex::encode(ct.to_bytes()),
-            *expected,
-            "full mismatch for {x}"
-        );
-        assert_eq!(
-            ct.to_bytes().len(),
-            ChainedCipherText::<I128_BLOCKS>::size()
-        );
+        let ct = full_i128(&cipher_a(), *x);
+        assert_eq!(hex::encode(&ct), *expected, "full mismatch for {x}");
+        assert_eq!(ct.len(), super::total_len(22));
     }
 }
 
-/// Pinned integer ciphertexts order as the integers under the typed
-/// comparators, and parse back through the typed parsers.
+/// Pinned integer ciphertexts order as the integers, and parse back.
 #[test]
 fn compare_u128_vectors_matches_integer_order() {
     for (xa, ha) in FULL_U128 {
         for (xb, hb) in FULL_U128 {
             assert_eq!(
-                ChainedCipherText::<U128_BLOCKS>::compare_raw_slices(&pinned(ha), &pinned(hb)),
+                C::compare_raw_slices(&pinned(ha), &pinned(hb)),
                 Some(xa.cmp(xb)),
                 "u128 {xa} vs {xb}"
             );
         }
         for (xl, hl) in LEFT_U128 {
             assert_eq!(
-                ChainedCipherText::<U128_BLOCKS>::compare_left_to_full(&pinned(hl), &pinned(ha)),
+                C::compare_left_to_full(&pinned(hl), &pinned(ha)),
                 Some(xl.cmp(xa)),
                 "u128 left {xl} vs {xa}"
             );
         }
-        let ct = ChainedCipherText::<U128_BLOCKS>::from_slice(&pinned(ha)).unwrap();
+        let ct = VarCipherText::from_slice(&pinned(ha)).unwrap();
         assert_eq!(ct.to_bytes(), pinned(ha));
     }
     for (xa, ha) in FULL_I128 {
         for (xb, hb) in FULL_I128 {
             assert_eq!(
-                ChainedCipherText::<I128_BLOCKS>::compare_raw_slices(&pinned(ha), &pinned(hb)),
+                C::compare_raw_slices(&pinned(ha), &pinned(hb)),
                 Some(xa.cmp(xb)),
                 "i128 {xa} vs {xb}"
             );
         }
         for (xl, hl) in LEFT_I128 {
             assert_eq!(
-                ChainedCipherText::<I128_BLOCKS>::compare_left_to_full(&pinned(hl), &pinned(ha)),
+                C::compare_left_to_full(&pinned(hl), &pinned(ha)),
                 Some(xl.cmp(xa)),
                 "i128 left {xl} vs {xa}"
             );
@@ -315,11 +286,11 @@ fn compare_u128_vectors_matches_integer_order() {
     }
 }
 
-/// The typed comparator refuses a string ciphertext of another block count;
-/// the untyped one orders an unpadded one lexicographically. A padded
-/// string carries another policy tag, which both refuse.
+/// An unpadded string of 22 blocks and a `u128` are ordered against each
+/// other, lexicographically: the block count is a length, not a type. A
+/// padded string carries another policy tag, which the comparators refuse.
 #[test]
-fn typed_comparator_rejects_other_block_counts() {
+fn block_counts_are_lengths_not_types() {
     let n = pinned(FULL_U128[0].1);
     let (alice, unpadded) = FULL_STR_UNPADDED
         .iter()
@@ -327,22 +298,9 @@ fn typed_comparator_rejects_other_block_counts() {
         .map(|(s, h)| (*s, pinned(h)))
         .unwrap();
     assert_eq!(alice, "alice");
-    assert_eq!(
-        ChainedCipherText::<U128_BLOCKS>::compare_raw_slices(&n, &unpadded),
-        None
-    );
-    assert!(OreAes128Bit6ChainedChaCha20::compare_raw_slices(&n, &unpadded).is_some());
-    assert!(ChainedCipherText::<U128_BLOCKS>::from_slice(&unpadded).is_err());
-
+    assert!(C::compare_raw_slices(&n, &unpadded).is_some());
     let padded = pinned(full_alice());
-    assert_eq!(
-        ChainedCipherText::<U128_BLOCKS>::compare_raw_slices(&n, &padded),
-        None
-    );
-    assert_eq!(
-        OreAes128Bit6ChainedChaCha20::compare_raw_slices(&n, &padded),
-        None
-    );
+    assert_eq!(C::compare_raw_slices(&n, &padded), None);
 }
 
 #[test]
@@ -381,7 +339,7 @@ fn compare_raw_slices_matches_plaintext_order() {
         for (sb, hb) in FULL_STR {
             let expected = sa.as_bytes().cmp(sb.as_bytes());
             assert_eq!(
-                OreAes128Bit6ChainedChaCha20::compare_raw_slices(&pinned(ha), &pinned(hb)),
+                C::compare_raw_slices(&pinned(ha), &pinned(hb)),
                 Some(expected),
                 "compare_raw_slices({sa:?}, {sb:?})"
             );
@@ -391,7 +349,6 @@ fn compare_raw_slices_matches_plaintext_order() {
 
 #[test]
 fn compare_matches_plaintext_order_other_policies() {
-    type C = OreAes128Bit6ChainedChaCha20;
     for (padding, lefts, fulls) in other_policies() {
         for ((sa, ha), (_, hl)) in fulls.iter().zip(lefts.iter()) {
             for (sb, hb) in fulls {
@@ -414,7 +371,6 @@ fn compare_matches_plaintext_order_other_policies() {
 /// Ciphertexts of one string under different policies do not compare.
 #[test]
 fn comparators_refuse_mixed_policies() {
-    type C = OreAes128Bit6ChainedChaCha20;
     let alice =
         |set: &[(&str, &'static str)]| pinned(set.iter().find(|(s, _)| *s == "alice").unwrap().1);
     let fulls = [
@@ -457,7 +413,7 @@ fn compare_left_to_full_matches_plaintext_order() {
         for (sb, hf) in FULL_STR {
             let expected = sa.as_bytes().cmp(sb.as_bytes());
             assert_eq!(
-                OreAes128Bit6ChainedChaCha20::compare_left_to_full(&pinned(hl), &pinned(hf)),
+                C::compare_left_to_full(&pinned(hl), &pinned(hf)),
                 Some(expected),
                 "compare_left_to_full({sa:?}, {sb:?})"
             );
@@ -474,11 +430,11 @@ fn compare_raw_slices_equality_across_nonces() {
         "different nonces must give different bytes"
     );
     assert_eq!(
-        OreAes128Bit6ChainedChaCha20::compare_raw_slices(&alice_a, &alice_b),
+        C::compare_raw_slices(&alice_a, &alice_b),
         Some(Ordering::Equal)
     );
     assert_eq!(
-        OreAes128Bit6ChainedChaCha20::compare_raw_slices(&alice_b, &alice_a),
+        C::compare_raw_slices(&alice_b, &alice_a),
         Some(Ordering::Equal)
     );
 }
@@ -532,24 +488,12 @@ fn parser_rejects_out_of_domain_symbols() {
 fn comparators_reject_out_of_domain_symbols() {
     let good = pinned(full_alice());
     let bad = with_out_of_domain_symbol(full_alice());
-    assert_eq!(
-        OreAes128Bit6ChainedChaCha20::compare_raw_slices(&bad, &good),
-        None
-    );
-    assert_eq!(
-        OreAes128Bit6ChainedChaCha20::compare_raw_slices(&good, &bad),
-        None
-    );
+    assert_eq!(C::compare_raw_slices(&bad, &good), None);
+    assert_eq!(C::compare_raw_slices(&good, &bad), None);
 
     let bad_left = with_out_of_domain_symbol(left_alice());
-    assert_eq!(
-        OreAes128Bit6ChainedChaCha20::compare_left_to_full(&bad_left, &good),
-        None
-    );
-    assert_eq!(
-        OreAes128Bit6ChainedChaCha20::compare_left_to_full(&pinned(left_alice()), &bad),
-        None
-    );
+    assert_eq!(C::compare_left_to_full(&bad_left, &good), None);
+    assert_eq!(C::compare_left_to_full(&pinned(left_alice()), &bad), None);
 }
 
 #[test]
@@ -558,14 +502,8 @@ fn comparators_reject_wrong_lengths_and_headers() {
     let left = pinned(left_alice());
 
     // A left-only artefact is not a full ciphertext, and vice versa.
-    assert_eq!(
-        OreAes128Bit6ChainedChaCha20::compare_raw_slices(&left, &full),
-        None
-    );
-    assert_eq!(
-        OreAes128Bit6ChainedChaCha20::compare_left_to_full(&full, &full),
-        None
-    );
+    assert_eq!(C::compare_raw_slices(&left, &full), None);
+    assert_eq!(C::compare_left_to_full(&full, &full), None);
     assert!(VarCipherText::from_slice(&left).is_err());
 
     // Truncation and extension.
@@ -577,33 +515,24 @@ fn comparators_reject_wrong_lengths_and_headers() {
     // Wrong version / scheme id.
     let mut v = full.clone();
     v[0] ^= 1;
-    assert_eq!(
-        OreAes128Bit6ChainedChaCha20::compare_raw_slices(&v, &full),
-        None
-    );
+    assert_eq!(C::compare_raw_slices(&v, &full), None);
     let mut s = full.clone();
     s[1] ^= 1;
-    assert_eq!(
-        OreAes128Bit6ChainedChaCha20::compare_raw_slices(&s, &full),
-        None
-    );
+    assert_eq!(C::compare_raw_slices(&s, &full), None);
 
     // Unknown padding kind.
     let mut p = full.clone();
     p[4] = 3;
-    assert_eq!(
-        OreAes128Bit6ChainedChaCha20::compare_raw_slices(&p, &p),
-        None
-    );
+    assert_eq!(C::compare_raw_slices(&p, &p), None);
     assert!(VarCipherText::from_slice(&p).is_err());
 }
 
 #[test]
-#[ignore = "generator: prints the contents of tests/compat_chained_vectors/vectors.rs"]
+#[ignore = "generator: prints the contents of src/scheme/chained/compat_vectors_data.rs"]
 fn generate() {
-    println!("// Contents of tests/compat_chained_vectors/vectors.rs");
+    println!("// Contents of src/scheme/chained/compat_vectors_data.rs");
     println!(
-        "// Generated by `cargo test --test compat_chained_vectors -- --ignored --nocapture generate`"
+        "// Generated by `cargo test -p ore-rs --lib -- --ignored --nocapture compat_vectors::generate`"
     );
     println!("// DO NOT regenerate unless deliberately breaking the wire format (see plan doc).");
     println!();
@@ -653,43 +582,45 @@ fn generate() {
 
     println!("pub const LEFT_U128: &[(u128, &str)] = &[");
     for x in U128S {
-        let left = x.encrypt_left(&ore).unwrap();
-        println!("    ({x}, \"{}\"),", hex::encode(left.to_bytes()));
+        println!("    ({x}, \"{}\"),", hex::encode(left_u128(&ore, *x)));
     }
     println!("];");
     println!();
 
     println!("pub const LEFT_I128: &[(i128, &str)] = &[");
     for x in I128S {
-        let left = x.encrypt_left(&ore).unwrap();
-        println!("    ({x}, \"{}\"),", hex::encode(left.to_bytes()));
+        println!("    ({x}, \"{}\"),", hex::encode(left_i128(&ore, *x)));
     }
     println!("];");
     println!();
 
     println!("pub const FULL_U128: &[(u128, &str)] = &[");
     for x in U128S {
-        let ct = x.encrypt(&cipher_a()).unwrap();
-        println!("    ({x}, \"{}\"),", hex::encode(ct.to_bytes()));
+        println!(
+            "    ({x}, \"{}\"),",
+            hex::encode(full_u128(&cipher_a(), *x))
+        );
     }
     println!("];");
     println!();
 
     println!("pub const FULL_I128: &[(i128, &str)] = &[");
     for x in I128S {
-        let ct = x.encrypt(&cipher_a()).unwrap();
-        println!("    ({x}, \"{}\"),", hex::encode(ct.to_bytes()));
+        println!(
+            "    ({x}, \"{}\"),",
+            hex::encode(full_i128(&cipher_a(), *x))
+        );
     }
     println!("];");
     println!();
 
     println!("pub const SALTED_ALICE: &[(&[u8], &str, &str)] = &[");
-    for salt in SALTS {
-        let left = cipher_left_salted(salt).encrypt_left_str("alice").unwrap();
-        let full = cipher_a_salted(salt).encrypt_str("alice").unwrap();
+    for s in SALTS {
+        let left = cipher_left_salted(s).encrypt_left_str("alice").unwrap();
+        let full = cipher_a_salted(s).encrypt_str("alice").unwrap();
         println!(
             "    (b{:?}, \"{}\", \"{}\"),",
-            std::str::from_utf8(salt).unwrap(),
+            std::str::from_utf8(s).unwrap(),
             hex::encode(left.to_bytes()),
             hex::encode(full.to_bytes())
         );

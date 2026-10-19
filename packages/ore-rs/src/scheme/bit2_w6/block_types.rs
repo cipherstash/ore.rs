@@ -1,5 +1,3 @@
-use zeroize::Zeroize;
-
 use crate::ciphertext::{CipherTextBlock, ParseError};
 use crate::scheme::width::RightBitVec;
 
@@ -59,9 +57,5 @@ impl CipherTextBlock for RightBlock8 {
 
             Ok(Self { data: arr })
         }
-    }
-
-    fn default_in_place(&mut self) {
-        self.data.zeroize()
     }
 }

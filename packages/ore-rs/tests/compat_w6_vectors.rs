@@ -4,15 +4,18 @@
 //!
 //! These tests pin the exact serialised bytes produced for fixed keys and
 //! plaintexts, plus comparison results over those bytes. They freeze the v2
-//! Bit6 wire format introduced by this PR: once released, any change that
-//! alters these bytes is a wire-format break for stored Bit6 ciphertexts and
-//! must fail here. (Mirror of `compat_vectors.rs`, which does the same for the
-//! legacy Bit8 `OreAes128` scheme.)
+//! Bit6 wire format, released in 0.9.0: any change that alters these bytes
+//! is a wire-format break for stored Bit6 ciphertexts and must fail here.
+//! (Mirror of `compat_vectors.rs`, which does the same for the legacy Bit8
+//! `OreAes128` scheme.)
+//!
+//! The plaintexts go in through the public path, sealed by vitaminc-ore, so
+//! this also pins that vitaminc's encodings are the bytes 0.9 encrypted.
 //!
 //! Left ciphertexts are deterministic given the keys. Full ciphertexts include
-//! a random nonce drawn from the cipher's internal RNG, which `init` seeds
-//! via `SeedableRng::from_entropy`; [`TestRng`] overrides `from_entropy`
-//! to a fixed seed so full-ciphertext bytes are reproducible.
+//! a random nonce, drawn from the cipher's generator; `init_seeded` (the
+//! `test-support` feature) seeds it, so full-ciphertext bytes are
+//! reproducible.
 //!
 //! To regenerate (only legitimate if the wire format is *deliberately* changed):
 //!
@@ -20,61 +23,75 @@
 //! cargo test --test compat_w6_vectors -- --ignored --nocapture generate
 //! ```
 
-use ore_rs::{
-    scheme::bit2_w6::{OreAes128Bit6, OreAes128Bit6ChaCha20},
-    CipherText, Left, OreCipher, OreEncrypt, OreOutput,
-};
-use rand::{RngCore, SeedableRng};
-use rand_chacha::ChaCha20Rng;
+use ore_rs::scheme::bit2_w6::OreAes128Bit6;
+use ore_rs::OreScheme;
 use std::cmp::Ordering;
+use vitaminc_context::Context;
+use vitaminc_ore::{order, Float, Int, OrderPlaintext, OrderTarget, Physical};
+use vitaminc_protected::Protected;
 
 const K1: [u8; 16] = [
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
 ];
 
-/// RNG whose `from_entropy` is deterministic, so that `init`
-/// (which calls `from_entropy` internally) produces a reproducible nonce stream.
-struct TestRng<const SEED: u8>(ChaCha20Rng);
-
-impl<const SEED: u8> RngCore for TestRng<SEED> {
-    fn next_u32(&mut self) -> u32 {
-        self.0.next_u32()
-    }
-    fn next_u64(&mut self) -> u64 {
-        self.0.next_u64()
-    }
-    fn fill_bytes(&mut self, dest: &mut [u8]) {
-        self.0.fill_bytes(dest)
-    }
-    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand::Error> {
-        self.0.try_fill_bytes(dest)
-    }
+/// A salt from raw bytes: the bytes are the context, verbatim, as a 0.9
+/// caller's `init_with_salt(key, bytes)` had them.
+fn salt(bytes: &[u8]) -> Context<'static> {
+    Context::from_encoded(bytes.to_vec())
 }
 
-impl<const SEED: u8> SeedableRng for TestRng<SEED> {
-    type Seed = [u8; 32];
-    fn from_seed(seed: Self::Seed) -> Self {
-        Self(ChaCha20Rng::from_seed(seed))
-    }
-    fn from_entropy() -> Self {
-        Self::from_seed([SEED; 32])
-    }
+/// A cipher whose nonce stream is seeded with `seed`, under `salt`.
+fn seeded(seed: u8, salt: &Context<'_>) -> OreAes128Bit6 {
+    OreAes128Bit6::init_seeded(Protected::new(K1), salt, [seed; 32]).unwrap()
 }
 
-type OreA = OreAes128Bit6<TestRng<0x2a>>;
-type OreB = OreAes128Bit6<TestRng<0x77>>;
-type OreC = OreAes128Bit6<TestRng<0x5c>>;
-
-fn cipher_a() -> OreA {
-    OreAes128Bit6::init(&K1).unwrap()
+fn cipher_a() -> OreAes128Bit6 {
+    seeded(0x2a, &Context::empty())
 }
 
-fn cipher_b() -> OreB {
-    OreAes128Bit6::init(&K1).unwrap()
+fn cipher_b() -> OreAes128Bit6 {
+    seeded(0x77, &Context::empty())
 }
 
-fn cipher_c() -> OreC {
-    OreAes128Bit6::init(&K1).unwrap()
+fn cipher_c() -> OreAes128Bit6 {
+    seeded(0x5c, &Context::empty())
+}
+
+/// For left ciphertexts, which draw no nonce.
+fn cipher_left() -> OreAes128Bit6 {
+    OreAes128Bit6::init(Protected::new(K1)).unwrap()
+}
+
+fn cipher_a_salted(s: &[u8]) -> OreAes128Bit6 {
+    seeded(0x2a, &salt(s))
+}
+
+fn cipher_left_salted(s: &[u8]) -> OreAes128Bit6 {
+    OreAes128Bit6::init_with_salt(Protected::new(K1), &salt(s)).unwrap()
+}
+
+fn u64_pt(x: u64) -> OrderPlaintext {
+    order(OrderTarget::U64, None, Physical::Int(Int::U64(x))).unwrap()
+}
+
+fn i64_pt(x: i64) -> OrderPlaintext {
+    order(OrderTarget::I64, None, Physical::Int(Int::I64(x))).unwrap()
+}
+
+fn u32_pt(x: u32) -> OrderPlaintext {
+    order(OrderTarget::U32, None, Physical::Int(Int::U32(x))).unwrap()
+}
+
+fn f64_pt(x: f64) -> OrderPlaintext {
+    order(OrderTarget::F64, None, Physical::Float(Float::F64(x))).unwrap()
+}
+
+fn left(ore: &OreAes128Bit6, plaintext: &OrderPlaintext) -> Vec<u8> {
+    ore.encrypt_query_plaintext(plaintext).unwrap().into_bytes()
+}
+
+fn full(ore: &OreAes128Bit6, plaintext: &OrderPlaintext) -> Vec<u8> {
+    ore.encrypt_plaintext(plaintext).unwrap().into_bytes()
 }
 
 /// Plaintexts for [`FULL_U64_ONE_CIPHER`], in ascending order. Blocks are the
@@ -88,22 +105,10 @@ const ONE_CIPHER_U64: [u64; 4] = [
     0x1420_3040_5060_7080,
 ];
 
-fn cipher_left() -> OreAes128Bit6ChaCha20 {
-    OreAes128Bit6::init(&K1).unwrap()
-}
-
 /// Salts pinned beside the empty one, so the salt encoding is frozen too.
 /// The first CMAC block holds the 8-byte length and 8 salt bytes: these end
 /// inside it, fill it exactly, and run into a third block.
 const SALTS: &[&[u8]] = &[b"age", b"users.dt", b"public.users.date_of_birth"];
-
-fn cipher_a_salted(salt: &[u8]) -> OreA {
-    OreAes128Bit6::init_with_salt(&K1, salt).unwrap()
-}
-
-fn cipher_left_salted(salt: &[u8]) -> OreAes128Bit6ChaCha20 {
-    OreAes128Bit6::init_with_salt(&K1, salt).unwrap()
-}
 
 #[path = "compat_w6_vectors/vectors.rs"]
 mod vectors;
@@ -115,35 +120,34 @@ use vectors::*;
 
 #[test]
 fn left_u64_456() {
-    let ore = cipher_left();
-    let left = 456u64.encrypt_left(&ore).unwrap();
-    assert_eq!(hex::encode(left.to_bytes()), LEFT_U64_456);
+    assert_eq!(
+        hex::encode(left(&cipher_left(), &u64_pt(456))),
+        LEFT_U64_456
+    );
 }
 
 #[test]
 fn left_u64_zero() {
-    let ore = cipher_left();
-    let left = 0u64.encrypt_left(&ore).unwrap();
-    assert_eq!(hex::encode(left.to_bytes()), LEFT_U64_0);
+    assert_eq!(hex::encode(left(&cipher_left(), &u64_pt(0))), LEFT_U64_0);
 }
 
 #[test]
 fn left_u32_1000() {
-    let ore = cipher_left();
-    let left = 1000u32.encrypt_left(&ore).unwrap();
-    assert_eq!(hex::encode(left.to_bytes()), LEFT_U32_1000);
+    assert_eq!(
+        hex::encode(left(&cipher_left(), &u32_pt(1000))),
+        LEFT_U32_1000
+    );
 }
 
 // ---------------------------------------------------------------------------
-// Full ciphertexts (deterministic via TestRng nonce stream)
+// Full ciphertexts (deterministic via the seeded nonce stream)
 // ---------------------------------------------------------------------------
 
 #[test]
 fn full_u64_vectors() {
     for (value, expected) in FULL_U64 {
-        let ct = value.encrypt(&cipher_a()).unwrap();
         assert_eq!(
-            hex::encode(ct.to_bytes()),
+            hex::encode(full(&cipher_a(), &u64_pt(*value))),
             *expected,
             "full ciphertext mismatch for u64 {value}"
         );
@@ -153,9 +157,8 @@ fn full_u64_vectors() {
 #[test]
 fn full_u32_vectors() {
     for (value, expected) in FULL_U32 {
-        let ct = value.encrypt(&cipher_a()).unwrap();
         assert_eq!(
-            hex::encode(ct.to_bytes()),
+            hex::encode(full(&cipher_a(), &u32_pt(*value))),
             *expected,
             "full ciphertext mismatch for u32 {value}"
         );
@@ -165,9 +168,8 @@ fn full_u32_vectors() {
 #[test]
 fn full_i64_vectors() {
     for (value, expected) in FULL_I64 {
-        let ct = value.encrypt(&cipher_a()).unwrap();
         assert_eq!(
-            hex::encode(ct.to_bytes()),
+            hex::encode(full(&cipher_a(), &i64_pt(*value))),
             *expected,
             "full ciphertext mismatch for i64 {value}"
         );
@@ -176,8 +178,7 @@ fn full_i64_vectors() {
 
 #[test]
 fn full_f64_vector() {
-    let ct = 1.5f64.encrypt(&cipher_a()).unwrap();
-    assert_eq!(hex::encode(ct.to_bytes()), FULL_F64_1_5);
+    assert_eq!(hex::encode(full(&cipher_a(), &f64_pt(1.5))), FULL_F64_1_5);
 }
 
 #[test]
@@ -187,9 +188,8 @@ fn full_u64_one_cipher_vectors() {
     let ore = cipher_c();
     for (value, (pinned_value, expected)) in ONE_CIPHER_U64.iter().zip(FULL_U64_ONE_CIPHER) {
         assert_eq!(value, pinned_value);
-        let ct = value.encrypt(&ore).unwrap();
         assert_eq!(
-            hex::encode(ct.to_bytes()),
+            hex::encode(full(&ore, &u64_pt(*value))),
             *expected,
             "full ciphertext mismatch for u64 {value}"
         );
@@ -200,27 +200,27 @@ fn full_u64_one_cipher_vectors() {
 #[test]
 fn salted_u64_456_vectors() {
     assert_eq!(SALTED_U64_456.len(), SALTS.len());
-    for (salt, (pinned_salt, left, full)) in SALTS.iter().zip(SALTED_U64_456) {
-        assert_eq!(salt, pinned_salt);
-        let ore = cipher_left_salted(salt);
+    for (s, (pinned_salt, left_hex, full_hex)) in SALTS.iter().zip(SALTED_U64_456) {
+        assert_eq!(s, pinned_salt);
         assert_eq!(
-            hex::encode(456u64.encrypt_left(&ore).unwrap().to_bytes()),
-            *left,
-            "left ciphertext mismatch for salt {salt:?}"
+            hex::encode(left(&cipher_left_salted(s), &u64_pt(456))),
+            *left_hex,
+            "left ciphertext mismatch for salt {s:?}"
         );
-        let ct = 456u64.encrypt(&cipher_a_salted(salt)).unwrap();
         assert_eq!(
-            hex::encode(ct.to_bytes()),
-            *full,
-            "full ciphertext mismatch for salt {salt:?}"
+            hex::encode(full(&cipher_a_salted(s), &u64_pt(456))),
+            *full_hex,
+            "full ciphertext mismatch for salt {s:?}"
         );
     }
 }
 
 #[test]
 fn full_u64_456_alternate_nonce() {
-    let ct = 456u64.encrypt(&cipher_b()).unwrap();
-    assert_eq!(hex::encode(ct.to_bytes()), FULL_U64_456_SEED_B);
+    assert_eq!(
+        hex::encode(full(&cipher_b(), &u64_pt(456))),
+        FULL_U64_456_SEED_B
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -238,7 +238,7 @@ fn compare_raw_slices_total_order_u64() {
         for (j, (_, b)) in FULL_U64.iter().enumerate() {
             let expected = i.cmp(&j);
             assert_eq!(
-                OreAes128Bit6ChaCha20::compare_raw_slices(&pinned(a), &pinned(b)),
+                OreAes128Bit6::compare_raw_slices(&pinned(a), &pinned(b)),
                 Some(expected),
                 "u64 vector order mismatch at ({i}, {j})"
             );
@@ -253,7 +253,7 @@ fn compare_raw_slices_total_order_i64() {
         for (j, (_, b)) in FULL_I64.iter().enumerate() {
             let expected = i.cmp(&j);
             assert_eq!(
-                OreAes128Bit6ChaCha20::compare_raw_slices(&pinned(a), &pinned(b)),
+                OreAes128Bit6::compare_raw_slices(&pinned(a), &pinned(b)),
                 Some(expected),
                 "i64 vector order mismatch at ({i}, {j})"
             );
@@ -267,7 +267,7 @@ fn compare_raw_slices_equality_across_nonces() {
     // must compare equal.
     let (_, seed_a) = FULL_U64[2];
     assert_eq!(
-        OreAes128Bit6ChaCha20::compare_raw_slices(&pinned(seed_a), &pinned(FULL_U64_456_SEED_B)),
+        OreAes128Bit6::compare_raw_slices(&pinned(seed_a), &pinned(FULL_U64_456_SEED_B)),
         Some(Ordering::Equal)
     );
 }
@@ -279,7 +279,8 @@ fn compare_raw_slices_across_nonces() {
     // this: its unequal pairs share one nonce.
     // The nonce opens the right half, after the 4-byte header and 11 left
     // blocks of 17 bytes.
-    let nonce = |ct: &str| pinned(ct)[4 + 11 * 17..4 + 11 * 17 + 16].to_vec();
+    const LEFT_LEN: usize = 4 + 11 * 17;
+    let nonce = |ct: &str| pinned(ct)[LEFT_LEN..LEFT_LEN + 16].to_vec();
     for (i, (_, a)) in FULL_U64_ONE_CIPHER.iter().enumerate() {
         for (j, (_, b)) in FULL_U64_ONE_CIPHER.iter().enumerate() {
             if i != j {
@@ -287,34 +288,19 @@ fn compare_raw_slices_across_nonces() {
             }
             let expected = i.cmp(&j);
             assert_eq!(
-                OreAes128Bit6ChaCha20::compare_raw_slices(&pinned(a), &pinned(b)),
+                OreAes128Bit6::compare_raw_slices(&pinned(a), &pinned(b)),
                 Some(expected),
                 "raw order mismatch at ({i}, {j})"
             );
-            let ct_a = CipherText::<OreAes128Bit6ChaCha20, 11>::from_slice(&pinned(a)).unwrap();
-            let ct_b = CipherText::<OreAes128Bit6ChaCha20, 11>::from_slice(&pinned(b)).unwrap();
+            // The left half of `a`, as a query, orders the same way.
             assert_eq!(
-                ct_a.cmp(&ct_b),
-                expected,
-                "typed order mismatch at ({i}, {j})"
+                OreAes128Bit6::compare_left_to_full(&pinned(a)[..LEFT_LEN], &pinned(b)),
+                Some(expected),
+                "left-to-full order mismatch at ({i}, {j})"
             );
         }
     }
 }
-
-#[test]
-fn typed_comparison_of_pinned_bytes() {
-    // u64 is 11 blocks at 6-bit width.
-    let a = CipherText::<OreAes128Bit6ChaCha20, 11>::from_slice(&pinned(FULL_U64[1].1)).unwrap();
-    let b = CipherText::<OreAes128Bit6ChaCha20, 11>::from_slice(&pinned(FULL_U64[3].1)).unwrap();
-    assert!(a < b);
-    assert!(b > a);
-    assert_eq!(a.cmp(&a), Ordering::Equal);
-}
-
-// ---------------------------------------------------------------------------
-// Generator (run manually; see module docs)
-// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Malformed symbols: an `xt` byte outside the 64-element domain
@@ -328,50 +314,57 @@ fn with_out_of_domain_symbol(hex_str: &str) -> Vec<u8> {
     bytes
 }
 
-#[test]
-fn parsers_reject_out_of_domain_symbols() {
-    let full = with_out_of_domain_symbol(FULL_U64[0].1);
-    assert!(CipherText::<OreAes128Bit6ChaCha20, 11>::from_slice(&full).is_err());
-
-    let left = with_out_of_domain_symbol(LEFT_U64_456);
-    assert!(Left::<OreAes128Bit6ChaCha20, 11>::from_slice(&left).is_err());
-
-    // The highest in-domain symbol still parses.
-    let mut edge = pinned(FULL_U64[0].1);
-    edge[4] = 63;
-    assert!(CipherText::<OreAes128Bit6ChaCha20, 11>::from_slice(&edge).is_ok());
-}
-
-/// The pinned left ciphertext of 456 against every pinned full `u64`,
-/// raw and typed (#120).
+/// The pinned left ciphertext of 456 against every pinned full `u64` (#120).
 #[test]
 fn left_to_full_on_pinned_bytes() {
     let left = pinned(LEFT_U64_456);
-    let typed_left = Left::<OreAes128Bit6ChaCha20, 11>::from_slice(&left).unwrap();
     for (value, full) in FULL_U64 {
         let full = pinned(full);
-        let want = 456u64.cmp(value);
         assert_eq!(
-            OreAes128Bit6ChaCha20::compare_left_to_full(&left, &full),
-            Some(want),
-            "raw, against {value}"
-        );
-        let typed_full = CipherText::<OreAes128Bit6ChaCha20, 11>::from_slice(&full).unwrap();
-        assert_eq!(
-            typed_left.compare_to_full(&typed_full),
-            want,
-            "typed, against {value}"
+            OreAes128Bit6::compare_left_to_full(&left, &full),
+            Some(456u64.cmp(value)),
+            "against {value}"
         );
     }
 }
 
 #[test]
-fn raw_comparator_rejects_out_of_domain_symbols() {
+fn comparators_reject_out_of_domain_symbols() {
     let good = pinned(FULL_U64[0].1);
     let bad = with_out_of_domain_symbol(FULL_U64[0].1);
-    assert_eq!(OreAes128Bit6ChaCha20::compare_raw_slices(&bad, &good), None);
-    assert_eq!(OreAes128Bit6ChaCha20::compare_raw_slices(&good, &bad), None);
+    assert_eq!(OreAes128Bit6::compare_raw_slices(&bad, &good), None);
+    assert_eq!(OreAes128Bit6::compare_raw_slices(&good, &bad), None);
+    let bad_left = with_out_of_domain_symbol(LEFT_U64_456);
+    assert_eq!(OreAes128Bit6::compare_left_to_full(&bad_left, &good), None);
+    assert_eq!(
+        OreAes128Bit6::compare_left_to_full(&pinned(LEFT_U64_456), &bad),
+        None
+    );
+    // The highest in-domain symbol is still a symbol.
+    let mut edge = pinned(FULL_U64[0].1);
+    edge[4] = 63;
+    assert!(OreAes128Bit6::compare_raw_slices(&edge, &good).is_some());
 }
+
+/// The scheme takes a fixed width of up to ten bytes and nothing else.
+#[test]
+fn wide_and_variable_width_plaintexts_are_refused() {
+    let ore = cipher_left();
+    let text = order(OrderTarget::Text, None, Physical::Text("alice")).unwrap();
+    assert!(matches!(
+        ore.encrypt_plaintext(&text),
+        Err(ore_rs::OreError::VariableLength)
+    ));
+    let wide = order(OrderTarget::U128, None, Physical::Int(Int::U128(1))).unwrap();
+    assert!(matches!(
+        ore.encrypt_plaintext(&wide),
+        Err(ore_rs::OreError::TooManyBlocks)
+    ));
+}
+
+// ---------------------------------------------------------------------------
+// Generator (run manually; see module docs)
+// ---------------------------------------------------------------------------
 
 #[test]
 #[ignore = "generator: prints the contents of tests/compat_w6_vectors/vectors.rs"]
@@ -388,71 +381,73 @@ fn generate() {
         println!("pub const {}: &str = \"{}\";", name, hex::encode(bytes));
     };
 
-    print_left(
-        "LEFT_U64_456",
-        456u64.encrypt_left(&ore).unwrap().to_bytes(),
-    );
-    print_left("LEFT_U64_0", 0u64.encrypt_left(&ore).unwrap().to_bytes());
-    print_left(
-        "LEFT_U32_1000",
-        1000u32.encrypt_left(&ore).unwrap().to_bytes(),
-    );
+    print_left("LEFT_U64_456", left(&ore, &u64_pt(456)));
+    print_left("LEFT_U64_0", left(&ore, &u64_pt(0)));
+    print_left("LEFT_U32_1000", left(&ore, &u32_pt(1000)));
     println!();
 
     println!("pub const FULL_U64: &[(u64, &str)] = &[");
     for value in [0u64, 1, 456, 1 << 32, u64::MAX] {
-        let ct = value.encrypt(&cipher_a()).unwrap();
-        println!("    ({}, \"{}\"),", value, hex::encode(ct.to_bytes()));
+        println!(
+            "    ({}, \"{}\"),",
+            value,
+            hex::encode(full(&cipher_a(), &u64_pt(value)))
+        );
     }
     println!("];");
     println!();
 
     println!("pub const FULL_U32: &[(u32, &str)] = &[");
     for value in [0u32, 1000, u32::MAX] {
-        let ct = value.encrypt(&cipher_a()).unwrap();
-        println!("    ({}, \"{}\"),", value, hex::encode(ct.to_bytes()));
+        println!(
+            "    ({}, \"{}\"),",
+            value,
+            hex::encode(full(&cipher_a(), &u32_pt(value)))
+        );
     }
     println!("];");
     println!();
 
     println!("pub const FULL_I64: &[(i64, &str)] = &[");
     for value in [i64::MIN, -1i64, 0, 1, i64::MAX] {
-        let ct = value.encrypt(&cipher_a()).unwrap();
-        println!("    ({}, \"{}\"),", value, hex::encode(ct.to_bytes()));
+        println!(
+            "    ({}, \"{}\"),",
+            value,
+            hex::encode(full(&cipher_a(), &i64_pt(value)))
+        );
     }
     println!("];");
     println!();
 
-    let f = 1.5f64.encrypt(&cipher_a()).unwrap();
     println!(
         "pub const FULL_F64_1_5: &str = \"{}\";",
-        hex::encode(f.to_bytes())
+        hex::encode(full(&cipher_a(), &f64_pt(1.5)))
     );
-
-    let alt = 456u64.encrypt(&cipher_b()).unwrap();
     println!(
         "pub const FULL_U64_456_SEED_B: &str = \"{}\";",
-        hex::encode(alt.to_bytes())
+        hex::encode(full(&cipher_b(), &u64_pt(456)))
     );
     println!();
 
     let ore = cipher_c();
     println!("pub const FULL_U64_ONE_CIPHER: &[(u64, &str)] = &[");
     for value in ONE_CIPHER_U64 {
-        let ct = value.encrypt(&ore).unwrap();
-        println!("    ({}, \"{}\"),", value, hex::encode(ct.to_bytes()));
+        println!(
+            "    ({}, \"{}\"),",
+            value,
+            hex::encode(full(&ore, &u64_pt(value)))
+        );
     }
     println!("];");
     println!();
+
     println!("pub const SALTED_U64_456: &[(&[u8], &str, &str)] = &[");
-    for salt in SALTS {
-        let left = 456u64.encrypt_left(&cipher_left_salted(salt)).unwrap();
-        let full = 456u64.encrypt(&cipher_a_salted(salt)).unwrap();
+    for s in SALTS {
         println!(
             "    (b{:?}, \"{}\", \"{}\"),",
-            std::str::from_utf8(salt).unwrap(),
-            hex::encode(left.to_bytes()),
-            hex::encode(full.to_bytes())
+            std::str::from_utf8(s).unwrap(),
+            hex::encode(left(&cipher_left_salted(s), &u64_pt(456))),
+            hex::encode(full(&cipher_a_salted(s), &u64_pt(456)))
         );
     }
     println!("];");

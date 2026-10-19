@@ -1,135 +1,97 @@
-//! [`OrderScheme`] for the block ORE schemes, so a vitaminc order index
-//! can encrypt its sealed order plaintexts here. Behind the `vitaminc`
-//! feature; nothing else in this crate depends on vitaminc.
+//! [`OrderScheme`] and [`OrderQuery`] for block ORE: the typed front door.
 //!
 //! vitaminc decides the encoding of every kind of value and seals it as an
 //! [`OrderPlaintext`] that only it can build, so a scheme here is never
-//! handed bytes that skipped the encoding. This module decides the rest:
-//! which scheme takes which plaintext, how a term is stored and compared,
-//! and how the scheme's keys are bound to the term's domain and the
-//! caller's context.
+//! handed bytes that skipped the encoding. A caller opens a space on
+//! [`BlockOre`] with a target and a context, encrypts values there, and
+//! compares terms and queries through the space; it never names an engine.
 //!
-//! Three schemes implement the trait:
+//! One scheme, two engines. [`BlockOre`] routes a space to an engine by
+//! its target's width, once, when the space is opened:
 //!
-//! - [`Bit6BlockOre`], the ORE v2 fixed-width scheme
-//!   ([`OreAes128Bit6ChaCha20`]), the one to prefer for new data: every
-//!   fixed-width target up to ten bytes, so the integers to 64 bits,
-//!   `f64` and dates. Timestamps and decimals are too wide for it.
-//! - [`BlockOre`], the frozen fixed-width scheme ([`OreAes128ChaCha20`]),
-//!   for every fixed-width target up to 15 bytes: the integers to 64 bits,
-//!   `f64`, dates, timestamps and decimals. It refuses text and
-//!   bytes, whose length varies, and the 16-byte kinds (`i128`, `u128`,
-//!   uuid), which are beyond its block cap.
-//! - [`ChainedBlockOre`], the variable-length scheme
-//!   ([`OreAes128Bit6ChainedChaCha20`]), for every kind, text and bytes
-//!   included. See the scheme's own docs for what a ciphertext reveals.
+//! - up to ten bytes, the packed-prefix Bit6 engine
+//!   ([`OreAes128Bit6`]): the integers to 64 bits, `f64` and dates;
+//! - wider, or of no fixed width, the chained engine
+//!   ([`OreAes128Bit6Chained`]): 128-bit integers, uuids, timestamps,
+//!   decimals, text and bytes.
 //!
-//! vitaminc hands every term the salt of the terms it compares with,
-//! `PAE("vitaminc/ore/v1", scheme, domain, context)`: one salt per scheme,
-//! target and context. The two v2 schemes bind it through ore-rs's own
-//! salt stage ([`OreAes128Bit6ChaCha20::init_with_salt`], and the salt in
-//! the chained scheme's [`Options`]), under a 16-byte
-//! ORE key derived once from the scheme key with HMAC-SHA256 when the
-//! scheme is made. The frozen [`BlockOre`] takes no salt, so it derives its
-//! two keys for every term with HMAC-SHA256 under the salt. Either way two
-//! targets or two contexts never share a key, and a term compares only
-//! with terms of its own target and context.
+//! Every term carries its engine in its wire header, so a comparison
+//! dispatches on the bytes and refuses a pair from two engines, which no
+//! space produces. The legacy scheme has no adapter: it is for stored data,
+//! and the README says not to put new data on it.
 //!
-//! The chained scheme takes text and bytes, the targets whose length
-//! varies, behind one marker byte, [`VARIABLE_WIDTH_MARKER`]. Without it
-//! an empty bytes value would encrypt to a ciphertext of no blocks: a
-//! header and a random nonce, made without the key, which anyone could
-//! write in among any terms. With it every term holds at least one keyed
-//! block. A constant leading byte keeps the order. Text, which the
-//! default padding never leaves empty, takes the marker too, so the two
-//! variable-width targets share one rule. Fixed-width targets are never
-//! empty and go in as they are.
+//! **Keys.** [`OrderKeyInit`] keys the scheme from a 32-byte key, from
+//! which one 16-byte ORE key is derived with HMAC-SHA256 under
+//! [`ORE_KEY`] when the scheme is made. Each space is then keyed from that
+//! key under the salt vitaminc derives, `PAE("vitaminc/ore/v1",
+//! "block-ore", domain, context)`, through the engines' own salt stage, so
+//! two targets or two contexts never share key material.
+//!
+//! **Padding.** Text is padded under the scheme's policy
+//! ([`BlockOre::with_text_padding`], [`Padding::default`] unless set), so a
+//! text term reveals a length bucket, and text that ends in NUL is refused
+//! ([`OreError::TrailingNul`]). Bytes are never padded, since NUL padding
+//! would refuse every value that ends in a zero byte, so a bytes term
+//! reveals the exact length. Fixed-width targets have nothing to hide.
+//! Text and bytes are refused past the scheme's ceiling
+//! ([`BlockOre::with_max_bytes`], [`DEFAULT_MAX_STR_BYTES`] unless set),
+//! which counts the marker byte vitaminc puts before them.
 //!
 //! # Examples
 //!
 //! ```
 //! use std::cmp::Ordering;
-//! use ore_rs::vitaminc::Bit6BlockOre;
-//! use vitaminc_ore::{Int, Logical, OrderEncrypt, OrderKeyInit, OrderTarget, Physical, Raw};
+//! use ore_rs::vitaminc::BlockOre;
+//! use vitaminc_ore::target::{I32, Text};
+//! use vitaminc_ore::{OrderEncrypt, OrderKeyInit};
 //! use vitaminc_protected::Protected;
 //! # let key_bytes = [7u8; 32];
 //!
-//! // Key the scheme; `try_from_bytes` takes material of runtime length.
-//! let scheme = Bit6BlockOre::new(Protected::new(key_bytes));
+//! let scheme = BlockOre::new(Protected::new(key_bytes));
 //!
-//! // Terms of `i32`s under one context: four bytes, six blocks, whatever
-//! // width a value arrives at. The caller never sees the encoding.
-//! // (`column` is vitaminc 0.6's name for opening them.)
-//! let quantity = scheme.column(OrderTarget::I32, ("orders", "quantity"));
-//! let term = quantity.encrypt(42i64)?;
-//! // They compare with each other; a term alone has no order.
-//! assert_eq!(quantity.compare(&quantity.encrypt(41i8)?, &term), Some(Ordering::Less));
-//! let stored: &[u8] = term.as_ref();
+//! // A space of `i32`s under one context, keyed once for all its terms.
+//! let quantity = scheme.target(I32).context(("orders", "quantity"));
+//! let stored = quantity.encrypt(42i16)?;
+//! let query = quantity.encrypt_query(41i16)?;
+//! assert_eq!(quantity.compare_query(&query, &stored), Some(Ordering::Less));
+//! let bytes: &[u8] = stored.as_ref();
 //!
-//! // A typed scalar goes in under a target of its type.
-//! let birthdays = scheme.column(OrderTarget::Date, "birthdays");
-//! let day = Raw(Some(Logical::Date), Physical::Int(Int::I32(19_000)));
-//! let birthday = birthdays.encrypt(day)?;
-//! # let _ = (stored, birthday);
-//! # Ok::<(), vitaminc_ore::OrderError<ore_rs::OreError>>(())
+//! // Text goes to the chained engine; the caller does not choose.
+//! let names = scheme.target(Text).context("names");
+//! let alice = names.encrypt_checked("alice")?;
+//! let bob = names.encrypt_checked("bob")?;
+//! assert_eq!(names.compare(&alice, &bob), Some(Ordering::Less));
+//! # let _ = bytes;
+//! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
 use std::cmp::Ordering;
-use std::convert::TryInto;
 
+use vitaminc_context::Context;
 use vitaminc_hmac::{HmacSha256Prf, WeakKeyError};
-use vitaminc_ore::{Context, OrderError, OrderKeyInit, OrderPlaintext, OrderScheme, OrderTarget};
+use vitaminc_ore::{OrderKeyInit, OrderPlaintext, OrderQuery, OrderScheme, OrderTarget};
 use vitaminc_prf::{BlockVisitor, Prf, PrfEncoding, PrfKeyInit};
-use vitaminc_protected::{Controlled, Protected};
+use vitaminc_protected::Protected;
 use zeroize::Zeroizing;
 
-use crate::scheme::bit2::OreAes128ChaCha20;
-use crate::scheme::bit2_w6::OreAes128Bit6ChaCha20;
-use crate::scheme::chained::{Options, OreAes128Bit6ChainedChaCha20, Padding};
-use crate::{OreCipher, OreError, OreOutput};
+use crate::ciphertext::parse_header;
+use crate::scheme::bit2_w6::{OreAes128Bit6, MAX_BYTES};
+use crate::scheme::chained::{Options, OreAes128Bit6Chained, Padding, DEFAULT_MAX_STR_BYTES};
+use crate::{OreError, OreScheme, Query, Term};
 
-/// The PRF domain the fixed-width scheme's two keys are derived under.
-const BLOCK_ORE_KEYS: PrfEncoding = PrfEncoding::new("vitaminc/ore/block-ore/keys/v1");
+/// The PRF domain the ORE key is derived under, once per scheme key.
+pub const ORE_KEY: &str = "vitaminc/ore/block-ore/key/v2";
 
-/// The PRF domain the ORE v2 six-bit scheme's ORE key is derived under,
-/// once per scheme key. (`v1` derived a key per term under the salt.)
-const BIT6_KEY: PrfEncoding = PrfEncoding::new("vitaminc/ore/block-ore-bit6/key/v2");
-
-/// The byte a variable-width plaintext (text or bytes) is encrypted
-/// behind by [`ChainedBlockOre`], so that an empty one still makes a keyed
-/// block. Part of the stored format: changing it changes every text and
-/// bytes term.
-pub const VARIABLE_WIDTH_MARKER: u8 = 0x01;
-
-/// Call `encrypt` with what [`ChainedBlockOre`] encrypts for `plaintext`:
-/// its bytes as they are for a fixed-width target, and behind
-/// [`VARIABLE_WIDTH_MARKER`] for text and bytes. The framed copy is sized
-/// exactly, so it never reallocates, and is wiped when it drops.
-fn with_input<T>(plaintext: &OrderPlaintext, encrypt: impl FnOnce(&[u8]) -> T) -> T {
-    let bytes = plaintext.bytes().risky_ref();
-    if plaintext.width().is_some() {
-        return encrypt(bytes);
-    }
-    let mut framed = Zeroizing::new(Vec::with_capacity(bytes.len() + 1));
-    framed.push(VARIABLE_WIDTH_MARKER);
-    framed.extend_from_slice(bytes);
-    encrypt(&framed)
-}
-
-/// The PRF domain the chained scheme's ORE key is derived under, once per
-/// scheme key. (`v1` derived a key per term under the salt.)
-const CHAINED_KEY: PrfEncoding = PrfEncoding::new("vitaminc/ore/chained-block-ore/key/v2");
-
-/// The 16-byte ORE key a v2 scheme is keyed with: the scheme key through
-/// HMAC-SHA256 under `encoding`, with no salt. Made once, with the scheme;
-/// each term's salt is bound afterwards by `init_with_salt`. `None` only
-/// if HMAC refused, which it cannot once keyed: the scheme then refuses
-/// every term ([`ore_key_or_refuse`]) rather than panic.
-fn ore_key(prf: &HmacSha256Prf, encoding: PrfEncoding) -> Option<Zeroizing<[u8; 16]>> {
+/// The 16-byte ORE key the scheme is keyed with: the scheme key through
+/// HMAC-SHA256 under [`ORE_KEY`], with no salt. Made once, with the
+/// scheme; each space's salt is bound afterwards by the engines. `None`
+/// only if HMAC refused, which it cannot once keyed: the scheme then
+/// refuses every space ([`OreError::InitFailed`]) rather than panic.
+fn ore_key(prf: &HmacSha256Prf) -> Option<Zeroizing<[u8; 16]>> {
     let material = prf
         .prf_bytes_vec(
             Protected::new(Vec::new()),
-            encoding,
+            PrfEncoding::new(ORE_KEY),
             Context::empty(),
             BlockVisitor,
         )
@@ -141,120 +103,211 @@ fn ore_key(prf: &HmacSha256Prf, encoding: PrfEncoding) -> Option<Zeroizing<[u8; 
     Some(key)
 }
 
-/// The scheme's ORE key, or the refusal [`ore_key`] stands for.
-fn ore_key_or_refuse(key: &Option<Zeroizing<[u8; 16]>>) -> Result<&[u8; 16], OrderError<OreError>> {
-    key.as_deref()
-        .ok_or(OrderError::Backend(OreError::InitFailed))
-}
-
-/// Thirty-two bytes of key material for one [`BlockOre`] term: the scheme
-/// key through HMAC-SHA256 under `encoding` and the term's salt. Wiped on
-/// drop.
-fn derive(
-    prf: &HmacSha256Prf,
-    encoding: PrfEncoding,
-    salt: &Context<'_>,
-) -> Result<Zeroizing<[u8; 32]>, OrderError<OreError>> {
-    let salt = salt.clone().into_owned();
-    prf.prf_bytes_vec(Protected::new(Vec::new()), encoding, salt, BlockVisitor)
-        .into_result()
-        .map(Zeroizing::new)
-        // HMAC cannot fail once keyed; keep the refusal rather than a panic.
-        .map_err(|_| OrderError::Backend(OreError::InitFailed))
-}
-
-/// The frozen fixed-width block ORE scheme as a vitaminc order scheme.
+/// Block ORE as a vitaminc order scheme: every target, routed to the
+/// engine its width wants when a space is opened.
 ///
-/// Takes every fixed-width target of at most 15 bytes, at its width: an
-/// `i32` is four blocks, a decimal fourteen. Refuses text,
-/// bytes and the 16-byte kinds as [`OrderError::Unsupported`].
-///
-/// The term keeps the whole serialised ciphertext, left and right halves,
-/// and compares with the scheme's comparator. The right half carries a
-/// random nonce, so one plaintext encrypts to different bytes each time,
-/// and those terms compare equal.
+/// A term is the serialised ciphertext, left and right halves; a query is
+/// the left half alone. Both are compared by the scheme, never byte by
+/// byte: a term carries a random nonce, so one value has many terms,
+/// which compare `Equal`.
 pub struct BlockOre {
-    prf: HmacSha256Prf,
-}
-
-/// A [`BlockOre`] term: the serialised ciphertext. Compared by the
-/// scheme's comparator, [`OrderScheme::compare`], rather than byte by
-/// byte, and only with terms of its own target and context.
-#[derive(Debug, Clone)]
-pub struct BlockOreTerm(Vec<u8>);
-
-impl AsRef<[u8]> for BlockOreTerm {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
+    key: Option<Zeroizing<[u8; 16]>>,
+    text_padding: Padding,
+    max_bytes: usize,
 }
 
 impl BlockOre {
-    /// The scheme keyed for one term.
-    fn cipher(&self, salt: &Context<'_>) -> Result<OreAes128ChaCha20, OrderError<OreError>> {
-        let material = derive(&self.prf, BLOCK_ORE_KEYS, salt)?;
-        let mut k1 = Zeroizing::new([0u8; 16]);
-        let mut k2 = Zeroizing::new([0u8; 16]);
-        k1.copy_from_slice(&material[..16]);
-        k2.copy_from_slice(&material[16..]);
-        OreAes128ChaCha20::init(&k1, &k2).map_err(OrderError::Backend)
+    /// The padding policy of every `Text` space this scheme opens;
+    /// [`Padding::default`] unless set. Stored terms and the queries that
+    /// compare with them must share a policy, so set it once, with the
+    /// key.
+    pub fn with_text_padding(mut self, padding: Padding) -> Self {
+        self.text_padding = padding;
+        self
+    }
+
+    /// The longest text or bytes value, in bytes, every space of this
+    /// scheme encrypts, counting the marker byte vitaminc puts before it;
+    /// [`DEFAULT_MAX_STR_BYTES`] unless set. A longer one is refused
+    /// ([`OreError::TooLong`]).
+    pub fn with_max_bytes(mut self, max_bytes: usize) -> Self {
+        self.max_bytes = max_bytes;
+        self
+    }
+
+    /// The padding policy of this scheme's text spaces.
+    pub fn text_padding(&self) -> Padding {
+        self.text_padding
+    }
+
+    /// The ceiling on text and bytes values.
+    pub fn max_bytes(&self) -> usize {
+        self.max_bytes
+    }
+
+    /// The ORE key, or the refusal [`ore_key`] stands for.
+    fn key(&self) -> Result<Protected<[u8; 16]>, OreError> {
+        self.key
+            .as_deref()
+            .map(|key| Protected::new(*key))
+            .ok_or(OreError::InitFailed)
     }
 }
 
-/// Encrypt `bytes`, which are exactly `N` long, as `N` blocks.
-fn fixed<const N: usize>(
-    cipher: &OreAes128ChaCha20,
-    bytes: &[u8],
-) -> Result<Vec<u8>, OrderError<OreError>> {
-    let input: &[u8; N] = bytes
-        .try_into()
-        // vitaminc's plaintext is sealed, so its length is its width; this
-        // is unreachable, and refused rather than unwrapped.
-        .map_err(|_| OrderError::Backend(OreError::InitFailed))?;
-    Ok(cipher
-        .encrypt(input)
-        .map_err(OrderError::Backend)?
-        .to_bytes())
+// Opaque Debug: never render key material.
+impl std::fmt::Debug for BlockOre {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BlockOre")
+            .field("text_padding", &self.text_padding)
+            .field("max_bytes", &self.max_bytes)
+            .finish_non_exhaustive()
+    }
+}
+
+/// What [`BlockOre`] keeps for one space: the engine the space's target
+/// wants, keyed under the space's salt. `Send + Sync`, so a space is
+/// shared across threads as it is.
+pub struct BlockOreSpace(Engine);
+
+enum Engine {
+    // Boxed: an engine holds AES key schedules and a nonce generator, and
+    // a space is opened once, so the pointer costs nothing per term.
+    Bit6(Box<OreAes128Bit6>),
+    Chained(Box<OreAes128Bit6Chained>),
+}
+
+impl std::fmt::Debug for BlockOreSpace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let engine = match &self.0 {
+            Engine::Bit6(_) => "Bit6",
+            Engine::Chained(_) => "Chained",
+        };
+        f.debug_tuple("BlockOreSpace").field(&engine).finish()
+    }
+}
+
+/// Which engine a target's terms are made by: Bit6 for a fixed width of
+/// up to [`MAX_BYTES`], chained for the rest.
+fn engine_for(target: OrderTarget) -> EngineKind {
+    match target.width() {
+        Some(width) if width <= MAX_BYTES => EngineKind::Bit6,
+        _ => EngineKind::Chained,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EngineKind {
+    Bit6,
+    Chained,
+}
+
+/// The engine a serialised term or query was made by, from its wire
+/// header. `None` for bytes with no v2 header, the legacy scheme's
+/// included.
+fn engine_of(bytes: &[u8]) -> Option<EngineKind> {
+    let ((version, scheme_id, _), _) = parse_header(bytes).ok()?;
+    if version != crate::scheme::bit2_w6::WIRE.version {
+        return None;
+    }
+    if scheme_id == crate::scheme::bit2_w6::WIRE.scheme_id {
+        Some(EngineKind::Bit6)
+    } else if scheme_id == crate::scheme::chained::SCHEME_ID {
+        Some(EngineKind::Chained)
+    } else {
+        None
+    }
 }
 
 impl OrderScheme for BlockOre {
     const NAME: &'static str = "block-ore";
-    type Term = BlockOreTerm;
+    type Term = Term;
     type Error = OreError;
+    type Space = BlockOreSpace;
+
+    /// Key the engine the target's width wants under `salt`. A `Text`
+    /// space pads under the scheme's policy; a `Bytes` space never pads;
+    /// both keep the scheme's ceiling.
+    fn open(&self, target: OrderTarget, salt: &Context<'_>) -> Result<BlockOreSpace, OreError> {
+        let key = self.key()?;
+        let engine = match engine_for(target) {
+            EngineKind::Bit6 => Engine::Bit6(Box::new(OreAes128Bit6::init_with_salt(key, salt)?)),
+            EngineKind::Chained => {
+                let padding = if target == OrderTarget::Text {
+                    self.text_padding
+                } else {
+                    Padding::None
+                };
+                let options = Options::default()
+                    .with_salt(salt)
+                    .with_padding(padding)
+                    .with_max_bytes(self.max_bytes);
+                Engine::Chained(Box::new(OreAes128Bit6Chained::init_with(key, options)?))
+            }
+        };
+        Ok(BlockOreSpace(engine))
+    }
 
     fn encrypt_plaintext(
         &self,
+        space: &BlockOreSpace,
         plaintext: &OrderPlaintext,
-        salt: &Context<'_>,
-    ) -> Result<BlockOreTerm, OrderError<OreError>> {
-        // The widths vitaminc's targets have. Stable Rust cannot pick `N`
-        // from a runtime value, so each is named; one above the block cap
-        // (16) is refused with the variable-length kinds.
-        let width = match plaintext.width() {
-            Some(w @ (1 | 2 | 4 | 8 | 12 | 14)) => w,
-            _ => return Err(OrderError::unsupported::<Self>(plaintext)),
-        };
-        let cipher = self.cipher(salt)?;
-        let bytes = plaintext.bytes().risky_ref().as_slice();
-        let term = match width {
-            1 => fixed::<1>(&cipher, bytes)?,
-            2 => fixed::<2>(&cipher, bytes)?,
-            4 => fixed::<4>(&cipher, bytes)?,
-            8 => fixed::<8>(&cipher, bytes)?,
-            12 => fixed::<12>(&cipher, bytes)?,
-            _ => fixed::<14>(&cipher, bytes)?,
-        };
-        Ok(BlockOreTerm(term))
+    ) -> Result<Term, OreError> {
+        match &space.0 {
+            Engine::Bit6(engine) => engine.encrypt_plaintext(plaintext),
+            Engine::Chained(engine) => engine.encrypt_plaintext(plaintext),
+        }
     }
 
-    /// The scheme's comparison. `None` for a term that is not a
-    /// well-formed `OreAes128ChaCha20` ciphertext. Two well-formed
-    /// terms of different targets or contexts compare as noise, which the
-    /// scheme cannot tell; a caller keeps such terms apart.
-    fn compare(a: &BlockOreTerm, b: &BlockOreTerm) -> Option<Ordering> {
-        OreAes128ChaCha20::compare_raw_slices(&a.0, &b.0)
+    /// The engine's comparison, chosen by the terms' wire headers. `None`
+    /// for a term that is not a well-formed v2 ciphertext, or two terms
+    /// of different engines, which no space makes. Two well-formed terms
+    /// of different targets or contexts under one engine compare as
+    /// noise, which the scheme cannot tell; a space keeps its terms
+    /// together.
+    fn compare(a: &Term, b: &Term) -> Option<Ordering> {
+        match (engine_of(a.as_bytes()), engine_of(b.as_bytes())) {
+            (Some(EngineKind::Bit6), Some(EngineKind::Bit6)) => {
+                OreAes128Bit6::compare_raw_slices(a.as_bytes(), b.as_bytes())
+            }
+            (Some(EngineKind::Chained), Some(EngineKind::Chained)) => {
+                OreAes128Bit6Chained::compare_raw_slices(a.as_bytes(), b.as_bytes())
+            }
+            _ => None,
+        }
     }
 }
+
+impl OrderQuery for BlockOre {
+    type Query = Query;
+
+    fn encrypt_query(
+        &self,
+        space: &BlockOreSpace,
+        plaintext: &OrderPlaintext,
+    ) -> Result<Query, OreError> {
+        match &space.0 {
+            Engine::Bit6(engine) => engine.encrypt_query_plaintext(plaintext),
+            Engine::Chained(engine) => engine.encrypt_query_plaintext(plaintext),
+        }
+    }
+
+    /// The order of the queried value against the stored one, through the
+    /// engine the two wire headers name; `None` as [`OrderScheme::compare`]
+    /// is `None`.
+    fn compare_query(query: &Query, term: &Term) -> Option<Ordering> {
+        match (engine_of(query.as_bytes()), engine_of(term.as_bytes())) {
+            (Some(EngineKind::Bit6), Some(EngineKind::Bit6)) => {
+                OreAes128Bit6::compare_left_to_full(query.as_bytes(), term.as_bytes())
+            }
+            (Some(EngineKind::Chained), Some(EngineKind::Chained)) => {
+                OreAes128Bit6Chained::compare_left_to_full(query.as_bytes(), term.as_bytes())
+            }
+            _ => None,
+        }
+    }
+}
+
+vitaminc_ore::supports_every_target!(BlockOre);
 
 impl OrderKeyInit for BlockOre {
     type Key = Protected<[u8; 32]>;
@@ -262,192 +315,17 @@ impl OrderKeyInit for BlockOre {
 
     fn new(key: Self::Key) -> Self {
         Self {
-            prf: HmacSha256Prf::new(key),
+            key: ore_key(&HmacSha256Prf::new(key)),
+            text_padding: Padding::default(),
+            max_bytes: DEFAULT_MAX_STR_BYTES,
         }
     }
 
     fn try_from_bytes(key: Protected<Vec<u8>>) -> Result<Self, WeakKeyError> {
         Ok(Self {
-            prf: HmacSha256Prf::try_from_bytes(key)?,
-        })
-    }
-}
-
-/// The ORE v2 six-bit block ORE scheme as a vitaminc order scheme, the
-/// one to prefer for new fixed-width data.
-///
-/// Takes every fixed-width target of at most ten bytes (its fourteen
-/// six-bit blocks), so the integers to 64 bits, `f64` and dates.
-/// Refuses timestamps (12 bytes), decimals (14), the 16-byte kinds, text
-/// and bytes as [`OrderError::Unsupported`].
-///
-/// Keyed by [`OreAes128Bit6ChaCha20::init_with_salt`] under the term's
-/// salt, from an ORE key derived once when the scheme is made.
-pub struct Bit6BlockOre {
-    key: Option<Zeroizing<[u8; 16]>>,
-}
-
-/// A [`Bit6BlockOre`] term: the serialised ciphertext. Compared by the
-/// scheme's comparator, [`OrderScheme::compare`], rather than byte by
-/// byte, and only with terms of its own target and context.
-#[derive(Debug, Clone)]
-pub struct Bit6BlockOreTerm(Vec<u8>);
-
-impl AsRef<[u8]> for Bit6BlockOreTerm {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-impl OrderScheme for Bit6BlockOre {
-    const NAME: &'static str = "block-ore-bit6";
-    type Term = Bit6BlockOreTerm;
-    type Error = OreError;
-
-    fn encrypt_plaintext(
-        &self,
-        plaintext: &OrderPlaintext,
-        salt: &Context<'_>,
-    ) -> Result<Bit6BlockOreTerm, OrderError<OreError>> {
-        match plaintext.width() {
-            Some(1..=10) => {}
-            _ => return Err(OrderError::unsupported::<Self>(plaintext)),
-        }
-        let key = ore_key_or_refuse(&self.key)?;
-        let cipher = OreAes128Bit6ChaCha20::init_with_salt(key, salt.as_bytes())
-            .map_err(OrderError::Backend)?;
-        cipher
-            .encrypt_bytes(plaintext.bytes().risky_ref())
-            .map(Bit6BlockOreTerm)
-            .map_err(OrderError::Backend)
-    }
-
-    /// The scheme's comparison. `None` for a term that is not a
-    /// well-formed `OreAes128Bit6ChaCha20` ciphertext. Two well-formed
-    /// terms of different targets or contexts compare as noise, which the
-    /// scheme cannot tell; a caller keeps such terms apart.
-    fn compare(a: &Bit6BlockOreTerm, b: &Bit6BlockOreTerm) -> Option<Ordering> {
-        OreAes128Bit6ChaCha20::compare_raw_slices(&a.0, &b.0)
-    }
-}
-
-impl OrderKeyInit for Bit6BlockOre {
-    type Key = Protected<[u8; 32]>;
-    type KeyError = WeakKeyError;
-
-    fn new(key: Self::Key) -> Self {
-        Self {
-            key: ore_key(&HmacSha256Prf::new(key), BIT6_KEY),
-        }
-    }
-
-    fn try_from_bytes(key: Protected<Vec<u8>>) -> Result<Self, WeakKeyError> {
-        Ok(Self {
-            key: ore_key(&HmacSha256Prf::try_from_bytes(key)?, BIT6_KEY),
-        })
-    }
-}
-
-/// The chained, variable-length block ORE scheme as a vitaminc order
-/// scheme: every target, text and bytes included, at six bits per block.
-///
-/// Text and bytes go in behind [`VARIABLE_WIDTH_MARKER`],
-/// one byte that counts towards the length below. Text is padded under the
-/// default policy ([`Padding::default`]), so a text ciphertext reveals the
-/// length bucket, and text that ends in NUL is refused
-/// ([`OreError::TrailingNul`]).
-/// Bytes are not padded, since padding would refuse every value that ends
-/// in a zero byte, so a bytes ciphertext reveals the exact length. Nor are
-/// fixed-width targets, whose length is the target's and public already.
-/// A comparison reveals the common-prefix length; see
-/// [`crate::scheme::chained`].
-///
-/// Text and bytes are refused past 1023 bytes, as
-/// `OrderError::Backend(`[`OreError::TooLong`]`)`: the scheme's default
-/// ceiling ([`DEFAULT_MAX_STR_BYTES`](crate::scheme::chained::DEFAULT_MAX_STR_BYTES),
-/// 1024) counts the marker byte. The
-/// ceiling bounds what one value can cost: a 1023-byte value is already a
-/// term of about 34 KB.
-///
-/// Keyed by [`OreAes128Bit6ChainedChaCha20::init_with`] with the term's
-/// salt in its [`Options`], from an ORE key derived once when the scheme
-/// is made.
-pub struct ChainedBlockOre {
-    key: Option<Zeroizing<[u8; 16]>>,
-}
-
-/// A [`ChainedBlockOre`] term: the serialised ciphertext. Compared by the
-/// scheme's comparator, [`OrderScheme::compare`], and only with terms
-/// of its own target and context.
-#[derive(Debug, Clone)]
-pub struct ChainedBlockOreTerm(Vec<u8>);
-
-impl AsRef<[u8]> for ChainedBlockOreTerm {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-impl ChainedBlockOre {
-    /// The scheme keyed for the terms of `target` under `salt`.
-    fn cipher(
-        &self,
-        target: OrderTarget,
-        salt: &Context<'_>,
-    ) -> Result<OreAes128Bit6ChainedChaCha20, OrderError<OreError>> {
-        let key = ore_key_or_refuse(&self.key)?;
-        // Terms that compare together share their target, so the policy is
-        // the same for all of them, and terms made under different
-        // policies never meet in a comparison.
-        let options = match target {
-            OrderTarget::Text => Options::default(),
-            _ => Options::default().with_padding(Padding::None),
-        };
-        OreAes128Bit6ChainedChaCha20::init_with(key, options.with_salt(salt.as_bytes()))
-            .map_err(OrderError::Backend)
-    }
-}
-
-impl OrderScheme for ChainedBlockOre {
-    const NAME: &'static str = "chained-block-ore";
-    type Term = ChainedBlockOreTerm;
-    type Error = OreError;
-
-    fn encrypt_plaintext(
-        &self,
-        plaintext: &OrderPlaintext,
-        salt: &Context<'_>,
-    ) -> Result<ChainedBlockOreTerm, OrderError<OreError>> {
-        let cipher = self.cipher(plaintext.target(), salt)?;
-        let term = with_input(plaintext, |input| cipher.encrypt_bytes(input))
-            .map_err(OrderError::Backend)?;
-        Ok(ChainedBlockOreTerm(term.to_bytes()))
-    }
-
-    /// The scheme's comparison. `None` for a term that is not a
-    /// well-formed `OreAes128Bit6ChainedChaCha20` ciphertext,
-    /// or for two terms padded under different policies (text against
-    /// bytes). Two well-formed
-    /// terms of different targets or contexts compare as noise, which the
-    /// scheme cannot tell; a caller keeps such terms apart.
-    fn compare(a: &ChainedBlockOreTerm, b: &ChainedBlockOreTerm) -> Option<Ordering> {
-        OreAes128Bit6ChainedChaCha20::compare_raw_slices(&a.0, &b.0)
-    }
-}
-
-impl OrderKeyInit for ChainedBlockOre {
-    type Key = Protected<[u8; 32]>;
-    type KeyError = WeakKeyError;
-
-    fn new(key: Self::Key) -> Self {
-        Self {
-            key: ore_key(&HmacSha256Prf::new(key), CHAINED_KEY),
-        }
-    }
-
-    fn try_from_bytes(key: Protected<Vec<u8>>) -> Result<Self, WeakKeyError> {
-        Ok(Self {
-            key: ore_key(&HmacSha256Prf::try_from_bytes(key)?, CHAINED_KEY),
+            key: ore_key(&HmacSha256Prf::try_from_bytes(key)?),
+            text_padding: Padding::default(),
+            max_bytes: DEFAULT_MAX_STR_BYTES,
         })
     }
 }
@@ -455,10 +333,9 @@ impl OrderKeyInit for ChainedBlockOre {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vitaminc_ore::{
-        domain, order, Float, Int, Logical, NormalizeError, OrderEncrypt, OrderTarget, Physical,
-        Raw, TimeUnit,
-    };
+    use crate::scheme::decompose::num_blocks_6bit;
+    use vitaminc_ore::target::{Bytes, Date, Decimal, Text, I32, I64, U128};
+    use vitaminc_ore::{test_support, OrderEncrypt, OrderError, OrderTerm, QueryTerm};
 
     use OrderTarget as T;
 
@@ -466,593 +343,388 @@ mod tests {
         Protected::new([7; 32])
     }
 
-    /// `a` below `b` as `target`s, and `a` twice compares equal.
-    fn ordered<S: OrderScheme>(
-        scheme: &S,
-        target: OrderTarget,
-        ty: Option<Logical>,
-        a: Physical<'_>,
-        b: Physical<'_>,
-    ) {
-        let space = scheme.column(target, ());
-        let (x, y) = (order(target, ty, a).unwrap(), order(target, ty, b).unwrap());
-        let (left, right) = (
-            space.encrypt_term(&x).unwrap(),
-            space.encrypt_term(&y).unwrap(),
-        );
-        assert_eq!(
-            space.compare(&left, &right),
-            Some(Ordering::Less),
-            "{}",
-            x.domain()
-        );
-        assert_eq!(
-            space.compare(&right, &left),
-            Some(Ordering::Greater),
-            "{}",
-            x.domain()
-        );
-        assert_eq!(
-            space.compare(&left, &space.encrypt_term(&x).unwrap()),
-            Some(Ordering::Equal),
-            "{}",
-            x.domain()
-        );
+    fn other_key() -> Protected<[u8; 32]> {
+        Protected::new([8; 32])
     }
 
-    /// `target` refused by `scheme` by its domain.
-    fn refused<S: OrderScheme>(scheme: &S, target: OrderTarget, value: Raw<'_>) {
-        let name = S::NAME;
-        assert!(
-            matches!(
-                scheme.column(target, ()).encrypt(value),
-                Err(OrderError::Unsupported { scheme, domain: d }) if scheme == name && d == target.domain()
-            ),
-            "{} {:?}",
-            name,
-            target
-        );
+    fn scheme() -> BlockOre {
+        BlockOre::new(key())
     }
 
+    /// The engine named by a term's or query's header.
+    fn engine(bytes: &[u8]) -> EngineKind {
+        engine_of(bytes).expect("a v2 header")
+    }
+
+    /// The checks vitaminc-ore asks of a real scheme: every target it
+    /// takes orders, keys and salts separate, nothing is empty, and the
+    /// query side agrees with the term side.
     #[test]
-    fn block_ore_orders_every_fixed_width_target_at_its_width() {
-        use Physical::{Float as F, Int as I};
-        let block = BlockOre::new(key());
-        ordered(&block, T::I8, None, I(Int::I8(-1)), I(Int::I8(1)));
-        ordered(&block, T::U8, None, I(Int::U8(0)), I(Int::U8(255)));
-        ordered(
-            &block,
+    fn the_scheme_keeps_the_order_scheme_contract() {
+        test_support::conformance(&scheme(), &BlockOre::new(other_key()));
+        test_support::query_conformance(&scheme(), &BlockOre::new(other_key()));
+        test_support::static_target::<BlockOre, I32>();
+        test_support::static_target::<BlockOre, Text>();
+        test_support::static_target::<BlockOre, U128>();
+    }
+
+    /// A space's target picks the engine, by width: up to ten bytes is
+    /// Bit6, the rest chained. The caller never names one.
+    #[test]
+    fn spaces_are_routed_to_an_engine_by_width() {
+        let s = scheme();
+        let bit6 = [
             T::I16,
-            None,
-            I(Int::I16(i16::MIN)),
-            I(Int::I16(i16::MAX)),
-        );
-        ordered(&block, T::U16, None, I(Int::U16(0)), I(Int::U16(u16::MAX)));
-        ordered(
-            &block,
+            T::U16,
             T::I32,
-            None,
-            I(Int::I32(i32::MIN)),
-            I(Int::I32(i32::MAX)),
-        );
-        ordered(&block, T::U32, None, I(Int::U32(0)), I(Int::U32(u32::MAX)));
-        ordered(
-            &block,
+            T::U32,
             T::I64,
-            None,
-            I(Int::I64(i64::MIN)),
-            I(Int::I64(i64::MAX)),
-        );
-        ordered(&block, T::U64, None, I(Int::U64(0)), I(Int::U64(u64::MAX)));
-        ordered(
-            &block,
+            T::U64,
             T::F64,
-            None,
-            F(Float::F32(-1.5)),
-            F(Float::F32(f32::NAN)),
-        );
-        ordered(
-            &block,
-            T::F64,
-            None,
-            F(Float::F64(f64::NEG_INFINITY)),
-            F(Float::F64(0.0)),
-        );
-        ordered(
-            &block,
             T::Date,
-            Some(Logical::Date),
-            I(Int::I32(-1)),
-            I(Int::I32(19_000)),
-        );
-        ordered(
-            &block,
-            T::Timestamp,
-            Some(Logical::Timestamp(TimeUnit::Nanos)),
-            I(Int::I64(-1)),
-            I(Int::I64(0)),
-        );
-        ordered(
-            &block,
-            T::Decimal,
-            Some(Logical::Decimal { scale: 2 }),
-            I(Int::I64(-150)),
-            I(Int::I64(150)),
-        );
-        // One block per byte of the target: an `i32` term is the
-        // fixed-4 ciphertext, even for a value that arrived as an `i8`.
-        let term = block.column(T::I32, ()).encrypt(1i8).unwrap();
-        assert_eq!(
-            term.as_ref().len(),
-            <crate::CipherText<OreAes128ChaCha20, 4> as OreOutput>::size()
-        );
-    }
-
-    #[test]
-    fn block_ore_refuses_variable_length_and_sixteen_byte_targets_by_name() {
-        let block = BlockOre::new(key());
-        refused(&block, T::Text, Raw(None, Physical::Text("abcd")));
-        refused(
-            &block,
-            T::Bytes,
-            Raw(None, Physical::Bytes(&[1, 2, 3, 4][..])),
-        );
-        refused(&block, T::I128, Raw(None, Physical::Int(Int::I8(1))));
-        refused(&block, T::U128, Raw(None, Physical::Int(Int::U8(1))));
-        refused(
-            &block,
-            T::Uuid,
-            Raw(Some(Logical::Uuid), Physical::Bytes(&[0; 16][..])),
-        );
-    }
-
-    #[test]
-    fn chained_orders_every_target_including_text_and_bytes() {
-        use Physical::{Bytes, Int as I, Text};
-        let chained = ChainedBlockOre::new(key());
-        ordered(&chained, T::I32, None, I(Int::I32(-7)), I(Int::I32(7)));
-        ordered(
-            &chained,
-            T::I128,
-            None,
-            I(Int::I128(i128::MIN)),
-            I(Int::I128(i128::MAX)),
-        );
-        ordered(
-            &chained,
-            T::U128,
-            None,
-            I(Int::U128(0)),
-            I(Int::U128(u128::MAX)),
-        );
-        ordered(
-            &chained,
-            T::Uuid,
-            Some(Logical::Uuid),
-            Bytes(&[0; 16][..]),
-            Bytes(&[1; 16][..]),
-        );
-        ordered(&chained, T::Text, None, Text("apple"), Text("Banana"));
-        ordered(&chained, T::Text, None, Text("École"), Text("ecolf"));
-        ordered(&chained, T::Bytes, None, Bytes(&[][..]), Bytes(&[0][..]));
-        ordered(
-            &chained,
-            T::Bytes,
-            None,
-            Bytes(&[1][..]),
-            Bytes(&[1, 0][..]),
-        );
-        // Text that folds together is one term.
-        let names = chained.column(T::Text, ());
-        assert_eq!(
-            names.compare(
-                &names.encrypt("Straße").unwrap(),
-                &names.encrypt("strasse").unwrap()
-            ),
-            Some(Ordering::Equal)
-        );
-    }
-
-    /// The JavaScript host hands each BigInt over at the narrowest width
-    /// that holds it. Under one target they all take its width, so
-    /// fixed-width block ORE compares them.
-    #[test]
-    fn narrowest_width_integers_compare_under_one_fixed_width_target() {
-        let bit6 = Bit6BlockOre::new(key());
-        let space = bit6.column(T::I32, ("orders", "total"));
-        let (hundred, two_hundred, three_hundred) = (
-            space
-                .encrypt(Raw(None, Physical::Int(Int::I8(100))))
-                .unwrap(),
-            space
-                .encrypt(Raw(None, Physical::Int(Int::U8(200))))
-                .unwrap(),
-            space
-                .encrypt(Raw(None, Physical::Int(Int::I16(300))))
-                .unwrap(),
-        );
-        assert_eq!(space.compare(&hundred, &two_hundred), Some(Ordering::Less));
-        assert_eq!(
-            space.compare(&two_hundred, &three_hundred),
-            Some(Ordering::Less)
-        );
-        assert_eq!(
-            space.compare(
-                &hundred,
-                &space
-                    .encrypt(Raw(None, Physical::Int(Int::U64(100))))
-                    .unwrap()
-            ),
-            Some(Ordering::Equal)
-        );
-        // A value the target cannot hold is refused before the scheme.
-        assert!(matches!(
-            space.encrypt(1i64 << 40),
-            Err(OrderError::Term(NormalizeError::OutOfRange))
-        ));
-    }
-
-    #[test]
-    fn terms_compare_only_within_one_scheme_key_target_and_context() {
-        let tenant = |n: u64| ("tenant", n);
-        let block = BlockOre::new(key());
-        // Terms of two contexts have no order between them, so this compares
-        // their bytes: another context, key or target gives other bytes.
-        let under = |n: u64| block.column(T::I8, tenant(n)).encrypt(0i8).unwrap();
-        assert_ne!(under(1).as_ref(), under(2).as_ref());
-        assert_ne!(
-            under(1).as_ref(),
-            BlockOre::new(Protected::new([8; 32]))
-                .column(T::I8, tenant(1))
-                .encrypt(0i8)
-                .unwrap()
-                .as_ref()
-        );
-        // The same bytes under another target: a different key, so not equal.
-        let as_u8 = block.column(T::U8, ()).encrypt(0x80i16).unwrap();
-        let as_i8 = block.column(T::I8, ()).encrypt(0i8).unwrap();
-        assert_eq!(
-            order(T::I8, None, Physical::Int(Int::I8(0)))
-                .unwrap()
-                .bytes()
-                .risky_ref(),
-            order(T::U8, None, Physical::Int(Int::U8(0x80)))
-                .unwrap()
-                .bytes()
-                .risky_ref()
-        );
-        assert_ne!(as_u8.as_ref(), as_i8.as_ref());
-        let chained = ChainedBlockOre::new(key());
-        assert_ne!(
-            chained
-                .column(T::I8, tenant(1))
-                .encrypt(0i8)
-                .unwrap()
-                .as_ref(),
-            chained
-                .column(T::I8, tenant(2))
-                .encrypt(0i8)
-                .unwrap()
-                .as_ref()
-        );
-    }
-
-    #[test]
-    fn a_scheme_is_keyed_like_a_prf() {
-        let from_bytes = BlockOre::try_from_bytes(Protected::new(vec![7; 32])).unwrap();
-        let term = |s: &BlockOre| s.column(T::I8, ()).encrypt(1i8).unwrap();
-        assert_eq!(
-            BlockOre::compare(&term(&from_bytes), &term(&BlockOre::new(key()))),
-            Some(Ordering::Equal)
-        );
-        assert!(BlockOre::try_from_bytes(Protected::new(vec![7; 8])).is_err());
-        assert!(ChainedBlockOre::try_from_bytes(Protected::new(vec![7; 8])).is_err());
-    }
-
-    #[test]
-    fn a_value_with_no_term_is_refused() {
-        let block = BlockOre::new(key());
-        assert!(matches!(
-            block.column(T::I8, ()).encrypt(true),
-            Err(OrderError::Term(NormalizeError::NoDomain))
-        ));
-        assert!(matches!(
-            block.column(T::I32, ()).encrypt("42"),
-            Err(OrderError::Term(NormalizeError::Mismatch))
-        ));
-    }
-
-    #[test]
-    fn terms_of_two_widths_have_no_order() {
-        let block = BlockOre::new(key());
-        let one = block.column(T::I8, ()).encrypt(1i8).unwrap();
-        let four = block.column(T::I32, ()).encrypt(1i8).unwrap();
-        assert_eq!(BlockOre::compare(&one, &four), None);
-        assert_eq!(BlockOre::compare(&four, &one), None);
-        let bit6 = Bit6BlockOre::new(key());
-        let one = bit6.column(T::I8, ()).encrypt(1i8).unwrap();
-        let four = bit6.column(T::I32, ()).encrypt(1i8).unwrap();
-        assert_eq!(Bit6BlockOre::compare(&one, &four), None);
-    }
-
-    #[test]
-    fn chained_text_and_bytes_terms_have_no_order() {
-        // Text is padded and bytes are not, so the comparator refuses the
-        // pair rather than ordering their headers.
-        let chained = ChainedBlockOre::new(key());
-        let text = chained.column(T::Text, "col").encrypt("z").unwrap();
-        let bytes = chained
-            .column(T::Bytes, "col")
-            .encrypt(Raw(None, Physical::Bytes(&[1; 20])))
-            .unwrap();
-        assert_eq!(ChainedBlockOre::compare(&text, &bytes), None);
-        assert_eq!(ChainedBlockOre::compare(&bytes, &text), None);
-    }
-
-    #[test]
-    fn bit6_orders_every_target_up_to_ten_bytes_and_refuses_the_rest_by_name() {
-        use Physical::{Float as F, Int as I};
-        let bit6 = Bit6BlockOre::new(key());
-        ordered(&bit6, T::I8, None, I(Int::I8(-1)), I(Int::I8(1)));
-        ordered(&bit6, T::U16, None, I(Int::U16(0)), I(Int::U16(u16::MAX)));
-        ordered(
-            &bit6,
-            T::I32,
-            None,
-            I(Int::I32(i32::MIN)),
-            I(Int::I32(i32::MAX)),
-        );
-        ordered(
-            &bit6,
-            T::I64,
-            None,
-            I(Int::I64(i64::MIN)),
-            I(Int::I64(i64::MAX)),
-        );
-        ordered(&bit6, T::U64, None, I(Int::U64(0)), I(Int::U64(u64::MAX)));
-        ordered(
-            &bit6,
-            T::F64,
-            None,
-            F(Float::F32(-1.5)),
-            F(Float::F32(f32::NAN)),
-        );
-        ordered(
-            &bit6,
-            T::F64,
-            None,
-            F(Float::F64(f64::NEG_INFINITY)),
-            F(Float::F64(0.0)),
-        );
-        ordered(
-            &bit6,
-            T::Date,
-            Some(Logical::Date),
-            I(Int::I32(-1)),
-            I(Int::I32(19_000)),
-        );
-        refused(
-            &bit6,
-            T::Timestamp,
-            Raw(
-                Some(Logical::Timestamp(TimeUnit::Nanos)),
-                Physical::Int(Int::I64(0)),
-            ),
-        );
-        refused(
-            &bit6,
-            T::Decimal,
-            Raw(
-                Some(Logical::Decimal { scale: 2 }),
-                Physical::Int(Int::I64(150)),
-            ),
-        );
-        refused(&bit6, T::I128, Raw(None, Physical::Int(Int::I128(1))));
-        refused(&bit6, T::Text, Raw(None, Physical::Text("abcd")));
-        refused(&bit6, T::Bytes, Raw(None, Physical::Bytes(&[1, 2][..])));
-        assert_eq!(domain::INT32, T::I32.domain());
-        // Bound to key, context and target like the other schemes.
-        assert_ne!(
-            bit6.column(T::I8, ("tenant", 1u64))
-                .encrypt(0i8)
-                .unwrap()
-                .as_ref(),
-            bit6.column(T::I8, ("tenant", 2u64))
-                .encrypt(0i8)
-                .unwrap()
-                .as_ref()
-        );
-        assert_ne!(
-            bit6.column(T::I8, ()).encrypt(0i8).unwrap().as_ref(),
-            bit6.column(T::U8, ()).encrypt(0x80i16).unwrap().as_ref()
-        );
-        assert!(Bit6BlockOre::try_from_bytes(Protected::new(vec![7; 8])).is_err());
-    }
-
-    #[test]
-    fn chained_pads_text_but_not_bytes() {
-        let chained = ChainedBlockOre::new(key());
-        let text = chained.column(T::Text, "col");
-        let (a, b) = (
-            text.encrypt("a").unwrap(),
-            text.encrypt("abcdefgh").unwrap(),
-        );
-        assert_eq!(
-            a.as_ref().len(),
-            b.as_ref().len(),
-            "text of one bucket encrypts to one length"
-        );
-        assert!(
-            matches!(
-                text.encrypt("a\0"),
-                Err(OrderError::Backend(OreError::TrailingNul))
-            ),
-            "padded text that ends in NUL is refused"
-        );
-
-        let bytes = chained.column(T::Bytes, "col");
-        let under = |v: &[u8]| bytes.encrypt(Raw(None, Physical::Bytes(v))).unwrap();
-        assert!(
-            under(&[1]).as_ref().len() < under(&[1; 8]).as_ref().len(),
-            "bytes are not padded"
-        );
-        assert_eq!(
-            bytes.compare(&under(&[1]), &under(&[1, 0])),
-            Some(Ordering::Less),
-            "a trailing zero byte is kept"
-        );
-    }
-
-    /// The v2 schemes key a term with ore-rs's salt stage under the salt
-    /// vitaminc derives, from an ORE key derived once from the scheme key:
-    /// the same plaintext through `init_with_salt` / `init_with` directly
-    /// compares `Equal`.
-    #[test]
-    fn v2_terms_are_keyed_through_the_ore_salt_stage() {
-        let ore_key_for = |encoding| ore_key(&HmacSha256Prf::new(key()), encoding).unwrap();
-        let x = order(T::I32, None, Physical::Int(Int::I32(42))).unwrap();
-
-        let bit6_scheme = Bit6BlockOre::new(key());
-        let bit6 = bit6_scheme.column(T::I32, ("orders", "total"));
-        let term = bit6.encrypt_term(&x).unwrap();
-        let direct =
-            OreAes128Bit6ChaCha20::init_with_salt(&ore_key_for(BIT6_KEY), bit6.salt().as_bytes())
-                .unwrap()
-                .encrypt_bytes(x.bytes().risky_ref())
-                .unwrap();
-        assert_eq!(
-            OreAes128Bit6ChaCha20::compare_raw_slices(term.as_ref(), &direct),
-            Some(Ordering::Equal)
-        );
-
-        let chained_scheme = ChainedBlockOre::new(key());
-        let chained = chained_scheme.column(T::I32, ("orders", "total"));
-        let term = chained.encrypt_term(&x).unwrap();
-        let options = Options::default()
-            .with_padding(Padding::None)
-            .with_salt(chained.salt().as_bytes());
-        let direct = OreAes128Bit6ChainedChaCha20::init_with(&ore_key_for(CHAINED_KEY), options)
-            .unwrap()
-            .encrypt_bytes(x.bytes().risky_ref())
-            .unwrap()
-            .to_bytes();
-        assert_eq!(
-            OreAes128Bit6ChainedChaCha20::compare_raw_slices(term.as_ref(), &direct),
-            Some(Ordering::Equal)
-        );
-    }
-
-    /// The deterministic left halves of two v2 terms, pinned: a change to
-    /// the ORE key derivation, the salt vitaminc derives or the salt stage
-    /// changes every stored term and must fail here. (The right halves
-    /// carry a random nonce.)
-    #[test]
-    fn v2_term_left_halves_are_pinned() {
-        let x = order(T::I32, None, Physical::Int(Int::I32(42))).unwrap();
-        // Header, six `xt` bytes and six 16-byte `f` blocks.
-        let bit6_scheme = Bit6BlockOre::new(key());
-        let bit6 = bit6_scheme.column(T::I32, ("orders", "total"));
-        let term = bit6.encrypt_term(&x).unwrap();
-        let bit6_left = hex::encode(&term.as_ref()[..4 + 6 + 6 * 16]);
-        let chained_scheme = ChainedBlockOre::new(key());
-        let chained = chained_scheme.column(T::I32, ("orders", "total"));
-        let term = chained.encrypt_term(&x).unwrap();
-        let chained_left = hex::encode(&term.as_ref()[..7 + 6 + 6 * 16]);
-        assert_eq!(bit6_left, PINNED_BIT6_LEFT);
-        assert_eq!(chained_left, PINNED_CHAINED_LEFT);
-    }
-
-    const PINNED_BIT6_LEFT: &str = "02020006043037243a2740c5e5e509f4921d05c4d854c63ef638be957f784126069fbdbe37cbf2961c494d0e8d71074cfa6a76c6f94686720215142725611ee4cbe4240b500c2cde0b00a5121107f52e6d1317b7550a381394a581a7b617711b443a88c0889a6f3a07ee";
-    const PINNED_CHAINED_LEFT: &str = "020300060000003511332a1f10f65025a6c69fd98c42894b3c40affbaae54679e6d004e6a9905d5a8c1faadbd5b86396f03779830295aa7bb6b186e934f580c50cbf5c050b3b20705091e00d196cda6f7fb402d5ef5e60a2c8434698a03e4e25ffc204162fbaefee3b998b94fd";
-
-    /// Text and bytes up to 1023 bytes encrypt, and 1024 is refused as
-    /// `TooLong`: the scheme's 1024-byte default ceiling counts the
-    /// marker byte (review of #115).
-    #[test]
-    fn chained_refuses_text_and_bytes_past_1023_bytes() {
-        let chained = ChainedBlockOre::new(key());
-        let bytes = chained.column(T::Bytes, ());
-        let long = vec![b'a'; 1024];
-        assert!(bytes
-            .encrypt(Raw(None, Physical::Bytes(&long[..1023])))
-            .is_ok());
-        assert!(matches!(
-            bytes.encrypt(Raw(None, Physical::Bytes(&long))),
-            Err(OrderError::Backend(OreError::TooLong))
-        ));
-        let text = chained.column(T::Text, ());
-        let long = "a".repeat(1024);
-        assert!(text.encrypt(&long[..1023]).is_ok());
-        assert!(matches!(
-            text.encrypt(long.as_str()),
-            Err(OrderError::Backend(OreError::TooLong))
-        ));
-    }
-
-    /// The stored format of text and bytes: the encryption of the marker
-    /// byte `0x01`, then the value. The expected inputs are written out
-    /// rather than built from the plaintext, so this fails if the marker
-    /// is ever added twice: for example by this crate and by a vitaminc
-    /// release whose own encoding starts with it. An empty bytes value
-    /// therefore makes a keyed block, not a ciphertext of none.
-    #[test]
-    fn chained_encrypts_text_and_bytes_behind_the_marker() {
-        let chained = ChainedBlockOre::new(key());
-        let cases: [(OrderTarget, Physical<'_>, &[u8]); 4] = [
-            (T::Bytes, Physical::Bytes(&[][..]), &[0x01]),
-            (T::Text, Physical::Text(""), &[0x01]),
-            (T::Bytes, Physical::Bytes(&[0xAB][..]), &[0x01, 0xAB]),
-            (T::Text, Physical::Text("a"), &[0x01, b'a']),
         ];
-        for (target, value, input) in cases {
-            let space = chained.column(target, "col");
-            let term = space
-                .encrypt_term(&order(target, None, value).unwrap())
-                .unwrap();
-            let cipher = chained.cipher(target, space.salt()).unwrap();
-            let direct =
-                |input: &[u8]| ChainedBlockOreTerm(cipher.encrypt_bytes(input).unwrap().to_bytes());
-            assert_eq!(
-                space.compare(&term, &direct(input)),
-                Some(Ordering::Equal),
-                "{target:?}: the marker once, then the value"
+        let chained = [
+            T::I128,
+            T::U128,
+            T::Uuid,
+            T::Timestamp,
+            T::Decimal,
+            T::Text,
+            T::Bytes,
+        ];
+        for t in bit6 {
+            assert_eq!(engine_for(t), EngineKind::Bit6, "{t:?}");
+            s.target(t).context("c").open().expect("block ore");
+        }
+        for t in chained {
+            assert_eq!(engine_for(t), EngineKind::Chained, "{t:?}");
+            s.target(t).context("c").open().expect("block ore");
+        }
+        for t in OrderTarget::ALL {
+            assert!(
+                bit6.contains(t) || chained.contains(t),
+                "{:?} is unrouted",
+                t
             );
-            assert_eq!(
-                term.as_ref().len(),
-                direct(input).as_ref().len(),
-                "{target:?}"
-            );
-            // Unpadded bytes are where an empty value made no block at
-            // all; padded text is already one bucket long.
-            if input.len() == 1 && target == T::Bytes {
-                assert!(
-                    term.as_ref().len() > direct(&[]).as_ref().len(),
-                    "an empty bytes value still makes a keyed block"
+        }
+
+        let i64s = s.target(I64).context("c");
+        let term = i64s.encrypt(42i64).expect("block ore");
+        assert_eq!(engine(term.as_bytes()), EngineKind::Bit6);
+        assert_eq!(term.as_bytes().len(), 295);
+        let query = i64s.encrypt_query(42i64).expect("block ore");
+        assert_eq!(engine(query.as_bytes()), EngineKind::Bit6);
+
+        let wide = s.target(U128).context("c");
+        let term = wide.encrypt(42u128).expect("block ore");
+        assert_eq!(engine(term.as_bytes()), EngineKind::Chained);
+        assert_eq!(term.as_bytes().len(), 7 + 25 * 22 + 16);
+    }
+
+    /// Terms compare within a space as the values do, through both
+    /// comparators, and a query is deterministic where a term is not.
+    #[test]
+    fn terms_and_queries_compare_within_a_space() {
+        let s = scheme();
+        let prices = s.target(Decimal).context(("orders", "total"));
+        let values = [
+            rust_decimal::Decimal::MIN,
+            rust_decimal::Decimal::new(-150, 2),
+            rust_decimal::Decimal::ZERO,
+            rust_decimal::Decimal::new(150, 2),
+            rust_decimal::Decimal::MAX,
+        ];
+        let terms: Vec<OrderTerm<Term, Decimal>> = values
+            .iter()
+            .map(|v| prices.encrypt(*v).expect("block ore"))
+            .collect();
+        let queries: Vec<QueryTerm<Query, Decimal>> = values
+            .iter()
+            .map(|v| prices.encrypt_query(*v).expect("block ore"))
+            .collect();
+        for (i, a) in terms.iter().enumerate() {
+            for (j, b) in terms.iter().enumerate() {
+                assert_eq!(prices.compare(a, b), Some(i.cmp(&j)), "{i} vs {j}");
+                assert_eq!(
+                    prices.compare_query(&queries[i], b),
+                    Some(i.cmp(&j)),
+                    "query {i} vs {j}"
                 );
             }
+            assert_eq!(
+                queries[i],
+                prices.encrypt_query(values[i]).expect("block ore")
+            );
+            assert_ne!(
+                a.as_bytes(),
+                prices.encrypt(values[i]).expect("block ore").as_bytes()
+            );
         }
+
+        let dates = s.target(Date).context("d");
+        let day = |d: i32| chrono::NaiveDate::from_num_days_from_ce_opt(d).expect("a date");
+        let (a, b) = (
+            dates.encrypt(day(19_000)).expect("block ore"),
+            dates.encrypt(day(19_001)).expect("block ore"),
+        );
+        assert_eq!(dates.compare(&a, &b), Some(Ordering::Less));
     }
 
-    quickcheck! {
-        fn bit6_order_is_integer_order(a: i64, b: i32) -> bool {
-            let bit6 = Bit6BlockOre::new(key());
-            let space = bit6.column(T::I64, "col");
-            space.compare(&space.encrypt(a).unwrap(), &space.encrypt(b).unwrap()) == Some(a.cmp(&i64::from(b)))
-        }
+    /// A comparison dispatches on the wire header: two engines' terms
+    /// never meet, and bytes with no v2 header are not terms at all.
+    #[test]
+    fn comparisons_dispatch_on_the_header_and_refuse_a_mix() {
+        let s = scheme();
+        let narrow = s
+            .target(T::I64)
+            .context("c")
+            .encrypt_checked(1i64)
+            .expect("block ore");
+        let wide = s
+            .target(T::U128)
+            .context("c")
+            .encrypt_checked(1u128)
+            .expect("block ore");
+        let narrow_query = s
+            .target(T::I64)
+            .context("c")
+            .encrypt_query_checked(1i64)
+            .expect("block ore");
+        assert_eq!(BlockOre::compare(narrow.raw(), wide.raw()), None);
+        assert_eq!(BlockOre::compare(wide.raw(), narrow.raw()), None);
+        assert_eq!(
+            BlockOre::compare_query(narrow_query.raw(), wide.raw()),
+            None
+        );
+        assert_eq!(
+            BlockOre::compare(narrow.raw(), narrow.raw()),
+            Some(Ordering::Equal)
+        );
+        assert_eq!(
+            BlockOre::compare_query(narrow_query.raw(), narrow.raw()),
+            Some(Ordering::Equal)
+        );
+        let headerless = Term::from_bytes(vec![0u8; 16]);
+        assert_eq!(BlockOre::compare(&headerless, narrow.raw()), None);
+        assert_eq!(BlockOre::compare(narrow.raw(), &headerless), None);
+        let mut other_version = narrow.raw().clone().into_bytes();
+        other_version[0] = 0x03;
+        assert_eq!(
+            BlockOre::compare(&Term::from_bytes(other_version), narrow.raw()),
+            None
+        );
     }
 
-    quickcheck! {
-        fn block_order_is_integer_order(a: i64, b: i64) -> bool {
-            let block = BlockOre::new(key());
-            let space = block.column(T::I64, "col");
-            space.compare(&space.encrypt(a).unwrap(), &space.encrypt(b).unwrap()) == Some(a.cmp(&b))
-        }
+    /// Text is padded under the scheme's policy and bytes are not, and
+    /// both are refused past the ceiling, which counts vitaminc's marker.
+    #[test]
+    fn text_is_padded_and_bytes_are_not() {
+        let s = scheme();
+        let text = s.target(Text).context("c");
+        let bytes = s.target(Bytes).context("c");
+        let text_len = |v: &str| text.encrypt_checked(v).expect("block ore").as_bytes().len();
+        let bytes_len = |v: &[u8]| bytes.encrypt(v).expect("block ore").as_bytes().len();
+        let chained_len = |n: usize| 7 + 25 * num_blocks_6bit(n) + 16;
+        // Text: the 16-byte floor, then powers of two, counting the marker.
+        assert_eq!(text_len(""), chained_len(16));
+        assert_eq!(text_len("alice"), chained_len(16));
+        assert_eq!(text_len(&"a".repeat(15)), chained_len(16));
+        assert_eq!(text_len(&"a".repeat(16)), chained_len(32));
+        // Bytes: the exact length, marker included; a trailing NUL is fine.
+        assert_eq!(bytes_len(b""), chained_len(1));
+        assert_eq!(bytes_len(b"alice"), chained_len(6));
+        assert!(bytes.encrypt(&b"x\0"[..]).is_ok());
+        assert!(matches!(
+            text.encrypt_checked("x\0"),
+            Err(OrderError::Backend(OreError::TrailingNul))
+        ));
 
-        fn chained_order_is_byte_order(a: Vec<u8>, b: Vec<u8>) -> bool {
-            let chained = ChainedBlockOre::new(key());
-            let space = chained.column(T::Bytes, "col");
-            let under = |v: &[u8]| space.encrypt(Raw(None, Physical::Bytes(v))).unwrap();
-            space.compare(&under(&a), &under(&b)) == Some(a.cmp(&b))
+        let unpadded = BlockOre::new(key()).with_text_padding(Padding::None);
+        assert_eq!(unpadded.text_padding(), Padding::None);
+        let text = unpadded.target(Text).context("c");
+        assert_eq!(
+            text.encrypt_checked("alice")
+                .expect("block ore")
+                .as_bytes()
+                .len(),
+            chained_len(6)
+        );
+
+        let small = BlockOre::new(key()).with_max_bytes(8);
+        assert_eq!(small.max_bytes(), 8);
+        let text = small.target(Text).context("c");
+        let bytes = small.target(Bytes).context("c");
+        assert!(text.encrypt_checked("1234567").is_ok());
+        assert!(matches!(
+            text.encrypt_checked("12345678"),
+            Err(OrderError::Backend(OreError::TooLong))
+        ));
+        assert!(bytes.encrypt(&[0u8; 7][..]).is_ok());
+        assert!(matches!(
+            bytes.encrypt(&[0u8; 8][..]),
+            Err(OreError::TooLong)
+        ));
+        // Fixed-width spaces are not subject to the ceiling.
+        assert!(small.target(U128).context("c").encrypt(u128::MAX).is_ok());
+    }
+
+    /// The default ceiling is 1024 bytes with the marker, so 1023 of value.
+    #[test]
+    fn text_and_bytes_are_refused_past_1023_bytes() {
+        let s = scheme();
+        let text = s.target(Text).context("c");
+        let bytes = s.target(Bytes).context("c");
+        assert!(text.encrypt_checked("a".repeat(1023).as_str()).is_ok());
+        assert!(matches!(
+            text.encrypt_checked("a".repeat(1024).as_str()),
+            Err(OrderError::Backend(OreError::TooLong))
+        ));
+        assert!(bytes.encrypt(&vec![1u8; 1023][..]).is_ok());
+        assert!(matches!(
+            bytes.encrypt(&vec![1u8; 1024][..]),
+            Err(OreError::TooLong)
+        ));
+    }
+
+    /// Terms of two spaces never compare `Equal`: another target, another
+    /// context or another key is another salt, through the engines' own
+    /// salt stage.
+    #[test]
+    fn terms_compare_only_within_one_scheme_key_target_and_context() {
+        let s = scheme();
+        let a = s
+            .target(T::I32)
+            .context("c")
+            .encrypt_checked(1i32)
+            .expect("block ore");
+        let other_target = s
+            .target(T::U32)
+            .context("c")
+            .encrypt_checked(1u32)
+            .expect("block ore");
+        let other_context = s
+            .target(T::I32)
+            .context("d")
+            .encrypt_checked(1i32)
+            .expect("block ore");
+        let other_key = BlockOre::new(other_key())
+            .target(T::I32)
+            .context("c")
+            .encrypt_checked(1i32)
+            .expect("block ore");
+        for other in [&other_target, &other_context, &other_key] {
+            assert_ne!(
+                BlockOre::compare(a.raw(), other.raw()),
+                Some(Ordering::Equal)
+            );
         }
+        let same = s
+            .target(T::I32)
+            .context("c")
+            .encrypt_checked(1i32)
+            .expect("block ore");
+        assert_eq!(
+            BlockOre::compare(a.raw(), same.raw()),
+            Some(Ordering::Equal)
+        );
+    }
+
+    /// The bytes of a query under a fixed key and context are pinned, so
+    /// the key derivation (HMAC under [`ORE_KEY`], then the engines' salt
+    /// stage under the space's salt) cannot drift without this failing.
+    #[test]
+    fn queries_under_a_fixed_key_are_pinned() {
+        let s = scheme();
+        let narrow = s
+            .target(I32)
+            .context("pinned")
+            .encrypt_query(1i32)
+            .expect("block ore");
+        let wide = s
+            .target(U128)
+            .context("pinned")
+            .encrypt_query(1u128)
+            .expect("block ore");
+        assert_eq!(hex::encode(narrow.as_bytes()), PINNED_BIT6_QUERY);
+        assert_eq!(hex::encode(wide.as_bytes()), PINNED_CHAINED_QUERY);
+    }
+
+    const PINNED_BIT6_QUERY: &str = "0202000634253e3a0f361d11a1e27e55c72c1525ac3ffe1a36a3bbb1bb643141e98603df6b5a25da12f46901b6b637bb7aed66d4d4a76be3ce72496bc48fa83d17112c74f7a61caa32d176ae7eeb5471898519f199ae79a74418ca5b9717455df9637516f3fe3a60b4de";
+    const PINNED_CHAINED_QUERY: &str = "0203001600000033112033270b3037360909143b3315002330121f171068031d6c3431c9e1c1daf685de3fb173bb12f9c71ea7c9f565e9cb85fc2cc3646b890ce0b376aba6a79411da2b86ca300c8b4ba04b50c8740751b104772292236a5dc099d4fe537cadcdc048d70da884a4220976c3337777023933f38b33280b9ca99619da619597f5ee558913b5a1ce3a02a91c2c550c2488c6ba9ac71017bb1598978b2a991d82bbfeed0155b8fc616cf7f4c58a191b85d42d74383089ae8a9a2d930ca7495b3c8b9c4282e01cbacbbe98aa38d6ade89c6288479cf2ae0ecfd1abda089bf13b91b3506967dc6b4b2acdf366442f8c3c39df57b1a1be6745a445c79c24a71a2a7a175e06d2f67e375b08b6f5c854d132cc954d447dc6abfd05da818a58fa1852b8fc936633aced31052f4caf9a5373d238f7ba3fd6f38d147caaab184ffb50dc125d447e1ca3153321eb76ec4e6414e6e3ec566a2992add3ee02f5d0a68123b708c25fe675521ea600188475076ff3de8effb700c603df81b7";
+
+    /// A short key is refused as a PRF refuses it; a scheme that could not
+    /// derive its key refuses every space rather than panic.
+    #[test]
+    fn a_scheme_is_keyed_like_a_prf() {
+        assert!(BlockOre::try_from_bytes(Protected::new(vec![7u8; 8])).is_err());
+        let from_bytes = BlockOre::try_from_bytes(Protected::new(vec![7u8; 32])).expect("32 bytes");
+        let a = scheme()
+            .target(I32)
+            .context("c")
+            .encrypt_query(1i32)
+            .expect("block ore");
+        let b = from_bytes
+            .target(I32)
+            .context("c")
+            .encrypt_query(1i32)
+            .expect("block ore");
+        assert_eq!(a, b, "the same key material keys the same scheme");
+
+        let keyless = BlockOre {
+            key: None,
+            text_padding: Padding::default(),
+            max_bytes: DEFAULT_MAX_STR_BYTES,
+        };
+        assert!(matches!(
+            keyless.target(I32).context("c").open(),
+            Err(OreError::InitFailed)
+        ));
+        assert!(matches!(
+            keyless.target(I32).context("c").encrypt(1i32),
+            Err(OreError::InitFailed)
+        ));
+    }
+
+    /// A space is `Send + Sync` and opens its engine once; the scheme and
+    /// its space never show key material.
+    #[test]
+    fn a_space_is_shared_across_threads_and_debugs_without_the_key() {
+        fn is_send_sync<X: Send + Sync>(_: &X) {}
+        let s = scheme();
+        is_send_sync(&s);
+        let space = s.target(I64).context("c");
+        is_send_sync(&space);
+        space.open().expect("block ore");
+        let shared = &space;
+        let terms: Vec<_> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..4i64)
+                .map(|i| scope.spawn(move || shared.encrypt(i).expect("block ore")))
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().expect("a thread"))
+                .collect()
+        });
+        for pair in terms.windows(2) {
+            assert_eq!(space.compare(&pair[0], &pair[1]), Some(Ordering::Less));
+        }
+        let shown = format!("{s:?} {space:?}");
+        assert!(!shown.contains("key"), "{}", shown);
+        assert!(shown.contains("BlockOre"), "{}", shown);
+    }
+
+    /// A value with no order term as the space's target is refused by
+    /// vitaminc before the scheme sees it.
+    #[test]
+    fn a_value_with_no_term_is_refused() {
+        let s = scheme();
+        assert!(matches!(
+            s.target(T::I32).context("c").encrypt_checked(true),
+            Err(OrderError::Term(_))
+        ));
+        assert!(matches!(
+            s.target(Date).context("c").encrypt_checked("not a date"),
+            Err(OrderError::Term(_))
+        ));
     }
 }

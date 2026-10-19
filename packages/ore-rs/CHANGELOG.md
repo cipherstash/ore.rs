@@ -4,6 +4,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+**vitaminc is the front door.** ore-rs no longer has a typed API of its own: the typed
+way in is `vitaminc-ore`'s `OrderSpace` chain, and ore-rs implements its `OrderScheme`
+and `OrderQuery` traits. The design and its reasons are in
+`docs/plans/2026-10-19-ore-0-10-vitaminc-front-door.md`. **No stored ciphertext changes:**
+the Bit6, chained and legacy wire formats are the frozen 0.9.0 formats, and the
+compatibility vectors now go in through the public path, so they pin that too. The
+`vitaminc` feature of 0.9 was unreleased, so nothing stored depends on the adapters it
+had.
+
+### Changed
+
+- **`vitaminc` is a dependency, not a feature.** `vitaminc::BlockOre` is the one scheme:
+  it implements `OrderScheme` and `OrderQuery` for every target, and routes a space to
+  the Bit6 engine (up to ten bytes: `I16` to `U64`, `F64`, `Date`) or the chained engine
+  (the rest, text and bytes included) when the space is opened. Text is padded under
+  `BlockOre::with_text_padding`, bytes are not, and both are refused past
+  `BlockOre::with_max_bytes`. `compare` and `compare_query` dispatch on the wire header.
+- **The schemes take sealed plaintexts only.** `OreScheme`, sealed, replaces the
+  `OreCipher` and `OreEncrypt` traits: `encrypt_plaintext` and `encrypt_query_plaintext`
+  over `vitaminc_ore::OrderPlaintext`, giving `Term` and `Query` (serialised bytes), and
+  `compare_raw_slices` and `compare_left_to_full` over bytes on all three schemes. The
+  legacy scheme gains the query comparator; Bit6 gains it from #120.
+- **Keys and salts are vitaminc's types.** `init(Protected<[u8; 16]>)`,
+  `init_with_salt(key, &Context)`, `Options::with_salt(&Context)`; the legacy scheme's
+  `init(Protected<[u8; 16]>, Protected<[u8; 16]>)`. A 0.9 salt of raw bytes is
+  `Context::from_encoded(bytes)` and keys the same ciphertexts.
+- **One type per scheme.** The `R: Rng + SeedableRng` generic and the `*ChaCha20`
+  aliases are gone: `OreAes128Bit6`, `OreAes128Bit6Chained` and `OreAes128` are concrete,
+  draw nonces from a `vitaminc_random::SafeRand` behind a mutex, and are `Send + Sync`.
+  `init_seeded`, behind the `test-support` feature, pins a nonce stream for tests.
+- **MSRV is 1.88**, vitaminc's floor.
+- `OreError::RandError` is `OreError::Random(vitaminc_random::RandomError)`, and
+  `OreError::VariableLength` is new: text or bytes on a fixed-width scheme.
+
+### Removed
+
+- The `OreEncrypt` trait and every per-type implementation, `encrypt_str`,
+  `encrypt_left_str`, `encrypt_fixed` and `encrypt_left_fixed`. Typed values enter through
+  vitaminc's `FitsIn` table.
+- `CipherText<S, N>`, `Left<S, N>`, `Right<S, N>`, `ChainedCipherText<N>`, `ChainedLeft<N>`,
+  `VarCipherText`, `VarLeft`, `OreOutput`, `WireHeader` and `PlainText<N>` from the public
+  API. A term's plaintext type lives on vitaminc's `OrderTerm<_, T>` (closes #127).
+- The `chrono` and `decimal` features and the `orderable-bytes` dependency: vitaminc owns
+  the encodings, ported byte for byte.
+- The 8-bit plaintext types (`bool`, `u8`, `i8`), which vitaminc has no target for: 256
+  values make an order term a frequency table.
+- `vitaminc::Bit6BlockOre`, `vitaminc::ChainedBlockOre`, the legacy adapter and
+  `vitaminc::VARIABLE_WIDTH_MARKER` (vitaminc's encodings carry the marker now).
+
 ## [0.9.0] - 2026-10-19
 
 The first release of the ORE v2 schemes. **The Bit6 (`scheme::bit2_w6`) and chained

@@ -21,5 +21,14 @@ path = "../ore-rs"
 # `ct-bench` exposes the private PRP builder for the isolated bench.
 features = ["ct-bench"]
 
+# The sealed plaintexts the schemes take, from the same branch as the crate.
+[dependencies.vitaminc-ore]
+git = "https://github.com/cipherstash/vitaminc"
+branch = "feat/ore-order-query"
+
+[dependencies.vitaminc-protected]
+git = "https://github.com/cipherstash/vitaminc"
+branch = "feat/ore-order-query"
+
 [workspace]
 resolver = "2"
