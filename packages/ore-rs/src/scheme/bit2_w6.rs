@@ -11,10 +11,12 @@
 //! The packed prefix caps `N` at 14 (`prefix ≤ 13 ‖ value ‖ index` plus
 //! the block count in byte 15 must fit one AES block; seeds also use byte
 //! 14 for the block index), which covers all
-//! primitives up to 64 bits. `Decimal` stays on the legacy scheme until the
-//! chained-prefix construction lands (plan §5). `u128`/`i128` (22 blocks)
-//! fit neither this scheme nor the legacy one (15 bytes at most); they are
-//! encrypted with [`crate::scheme::chained`], which has no length cap.
+//! primitives up to 64 bits. `Decimal` (14 bytes) and `DateTime<Utc>`
+//! (12 bytes) exceed this limit; use
+//! [`crate::scheme::chained::OreAes128Bit6Chained::encrypt_fixed`] for them.
+//! `u128`/`i128` (22 blocks) fit neither this scheme nor the legacy one
+//! (15 bytes at most); their [`crate::OreEncrypt`] implementations use
+//! [`crate::scheme::chained`].
 //!
 //! **Status: wire format frozen as of 0.9.0.** `tests/compat_w6_vectors.rs`
 //! pins the bytes; a change that alters them breaks every stored Bit6
