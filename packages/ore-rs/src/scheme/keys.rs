@@ -17,7 +17,7 @@
 //! with the legacy scheme never publishes a v2 root key.
 //!
 //! The salt is any byte string the caller uses to name what the key is for:
-//! a column, a tenant, a plaintext type. Ciphertexts under different salts
+//! a data set, a tenant, a plaintext type. Ciphertexts under different salts
 //! share no key material. Nothing on the wire records the salt, so the
 //! comparators cannot detect a mismatch: two ciphertexts under different
 //! salts compare to a confident, meaningless answer. The caller keeps the

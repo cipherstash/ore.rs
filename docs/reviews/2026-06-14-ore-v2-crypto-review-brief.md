@@ -624,8 +624,9 @@ cost is unchanged. Code: `scheme/keys.rs`.
 3. **Nothing on the wire.** The salt is not recorded in the ciphertext;
    cross-salt comparisons return a confident, meaningless result, `Equal`
    included (zero-block values compare `Equal` under any salts), so no result
-   can confirm matching salts. Accepted as the column model's job
-   (vitaminc / EQL), documented on both constructors.
+   can confirm matching salts. Accepted as the caller's job
+   (vitaminc / EQL keep the salt with the data), documented on both
+   constructors.
 4. **What this does not do.** No per-type separation inside one salt: under
    one key and salt, `0u64` and `i64::MIN` still encrypt identically. The
    earlier revision of #114 added a per-type subkey and a header type tag;

@@ -362,7 +362,7 @@ impl Options {
     }
 
     /// The salt the key is derived under: a name for what the key is for
-    /// (a column, a tenant, a plaintext type). Ciphertexts under different
+    /// (a data set, a tenant, a plaintext type). Ciphertexts under different
     /// salts share no key material; nothing on the wire records the salt,
     /// so a mismatched pair compares to a confident, meaningless result,
     /// `Equal` included. The default is empty. See
@@ -1470,7 +1470,7 @@ mod tests {
     }
 
     /// `init` is the empty salt; another salt gives unrelated ciphertexts,
-    /// and the same salt reproduces them. The two column salts have equal
+    /// and the same salt reproduces them. The two salts have equal
     /// lengths, so the length prefix alone cannot separate them.
     #[test]
     fn salt_separates_keys() {

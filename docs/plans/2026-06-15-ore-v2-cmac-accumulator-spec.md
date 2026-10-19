@@ -86,7 +86,7 @@ but the root label, so the scheme learns nothing about any other use of the
 key. No legacy PRF input equals the root label: legacy PRF₁ inputs end in a
 block index `0..=14` and legacy PRF₂ inputs end in `0x00`, and the label ends
 in `t` (`0x74`). The salt is the caller's name for what the key is for (a
-column, a tenant, a plaintext type; `init(key)` is the empty salt); it is
+data set, a tenant, a plaintext type; `init(key)` is the empty salt); it is
 absorbed as full CMAC blocks behind a length prefix, so the encoding is
 injective and `k_salt` is a CMAC tag over a prefix-free message. Ciphertexts
 under different salts share no key material. Bit6 uses the same three stages

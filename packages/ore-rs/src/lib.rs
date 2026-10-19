@@ -25,7 +25,7 @@
 //!
 //! To initialize the Cipher, you must decide on the scheme you want to use. Each scheme has its
 //! own constructor. The v2 schemes ([`scheme::bit2_w6`], [`scheme::chained`]) take one 16-byte
-//! key and an optional salt that names what the key is for (a column, say); the legacy scheme
+//! key and an optional salt that names what the key is for (a data set or a tenant, say); the legacy scheme
 //! ([`scheme::bit2`]) keeps its frozen two-key `init(k1, k2)`.
 //!
 //! ```rust

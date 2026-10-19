@@ -253,7 +253,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
     }
 
     /// Initialise the cipher from one 16-byte key and a salt naming what
-    /// the key is for (a column, a tenant, a plaintext type). PRF₁ and
+    /// the key is for (a data set, a tenant, a plaintext type). PRF₁ and
     /// PRF₂ are keyed by `AES_{k_salt}(label)` with
     /// `k_salt = CMAC_{AES_key(ROOT_LABEL)}(salt)`; see the crate-private
     /// `scheme::keys` for the stages and their argument.
@@ -573,7 +573,7 @@ mod tests {
     }
 
     /// `init` is the empty salt; another salt gives unrelated ciphertexts,
-    /// and the same salt reproduces them. The two column salts have equal
+    /// and the same salt reproduces them. The two salts have equal
     /// lengths, so the length prefix alone cannot separate them.
     #[test]
     fn salt_separates_keys() {
