@@ -64,10 +64,10 @@ subtle-ng = "2.5.0"
 zeroize = { version = "1.5.7", features = ["zeroize_derive"] }
 thiserror = "1.0.38"
 # vitaminc 0.6 is the first release with the `OrderScheme` trait.
-vitaminc-ore = { version = "0.6.0", optional = true }
-vitaminc-hmac = { version = "0.6.0", optional = true }
-vitaminc-prf = { version = "0.6.0", optional = true }
-vitaminc-protected = { version = "0.6.0", optional = true }
+vitaminc-ore = { version = "0.6.1", optional = true }
+vitaminc-hmac = { version = "0.6.1", optional = true }
+vitaminc-prf = { version = "0.6.1", optional = true }
+vitaminc-protected = { version = "0.6.1", optional = true }
 
 # `cfg(kani)` gates the Kani proof harnesses (compiled only by `cargo kani`).
 [lints.rust]

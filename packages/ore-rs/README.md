@@ -56,7 +56,7 @@ schemes bind it with `init_with_salt`, under an ORE key derived once from
 the scheme key with HMAC-SHA256 when the scheme is made; the legacy scheme
 takes no salt, so it derives its two keys for every term with HMAC-SHA256
 under the salt. The feature is off by default, changes nothing in the
-typed API above, and needs Rust 1.88 and vitaminc 0.6.
+typed API above, and needs Rust 1.88 and vitaminc 0.6.1.
 
 ## Need help?
 
