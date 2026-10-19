@@ -529,7 +529,7 @@ mod encrypt_impls {
     // be listed as supported without being exercised (issue #105).
     macro_rules! impl_ore_encrypt_bit6 {
         ($type:ty, $blocks_const:ident, $tests:ident, $lo:expr, $hi:expr) => {
-            /// Block count for this type at 6-bit width.
+            #[doc = concat!("Block count for `", stringify!($type), "` at 6-bit width.")]
             const $blocks_const: usize =
                 num_blocks_6bit(<$type as FixedOrderableBytes>::ENCODED_LEN);
             // The packed prefix caps the block count; types beyond it
@@ -569,6 +569,9 @@ mod encrypt_impls {
                 use crate::{OreCipher, OreOutput};
                 use std::cmp::Ordering;
 
+                // The length-mismatch check below uses four blocks.
+                const _: () = assert!($blocks_const != 4);
+
                 #[test]
                 fn round_trip_order_and_equality() {
                     let ore = OreAes128Bit6ChaCha20::init(&[0x11; 16]).unwrap();
@@ -603,34 +606,35 @@ mod encrypt_impls {
                     assert_ne!(lo_bytes, lo_ct2.to_bytes());
                     assert_eq!(cmp(&lo_bytes, &lo_ct2.to_bytes()), Some(Ordering::Equal));
                     assert_eq!(lo_ct.cmp(&hi_ct), Ordering::Less);
+                    // The left ciphertext is deterministic: a query matches
+                    // the left half of every full ciphertext of the value.
+                    assert_eq!(lo_left.to_bytes(), lo_ct.left.to_bytes());
+                    assert_eq!(lo_left.to_bytes(), lo_ct2.left.to_bytes());
+
+                    // Well-formed ciphertexts of a different length must be
+                    // rejected by both the typed parsers and the comparator.
+                    let other = ore.encrypt(&[0u8; 4]).unwrap();
+                    let other_bytes = other.to_bytes();
+                    assert!(
+                        CipherText::<OreAes128Bit6ChaCha20, $blocks_const>::from_slice(
+                            &other_bytes
+                        )
+                        .is_err()
+                    );
+                    assert!(Left::<OreAes128Bit6ChaCha20, $blocks_const>::from_slice(
+                        &other.left.to_bytes()
+                    )
+                    .is_err());
+                    assert_eq!(cmp(&lo_bytes, &other_bytes), None);
+                    assert_eq!(cmp(&other_bytes, &lo_bytes), None);
                 }
             }
         };
     }
 
-    impl_ore_encrypt_bit6!(bool, BOOL_BLOCKS, bool_tests, false, true);
-    impl_ore_encrypt_bit6!(u8, U8_BLOCKS, u8_tests, 0u8, u8::MAX);
-    impl_ore_encrypt_bit6!(i8, I8_BLOCKS, i8_tests, i8::MIN, i8::MAX);
-    impl_ore_encrypt_bit6!(u16, U16_BLOCKS, u16_tests, 0u16, u16::MAX);
-    impl_ore_encrypt_bit6!(i16, I16_BLOCKS, i16_tests, i16::MIN, i16::MAX);
-    impl_ore_encrypt_bit6!(u32, U32_BLOCKS, u32_tests, 0u32, u32::MAX);
-    impl_ore_encrypt_bit6!(i32, I32_BLOCKS, i32_tests, i32::MIN, i32::MAX);
-    impl_ore_encrypt_bit6!(u64, U64_BLOCKS, u64_tests, 0u64, u64::MAX);
-    impl_ore_encrypt_bit6!(i64, I64_BLOCKS, i64_tests, i64::MIN, i64::MAX);
-    // `u128`/`i128` (22 blocks) exceed `MAX_BLOCKS` and are provided by
-    // `scheme::chained` instead (issue #105).
-    impl_ore_encrypt_bit6!(char, CHAR_BLOCKS, char_tests, '\0', char::MAX);
-    impl_ore_encrypt_bit6!(f32, F32_BLOCKS, f32_tests, f32::MIN, f32::MAX);
-    impl_ore_encrypt_bit6!(f64, F64_BLOCKS, f64_tests, f64::MIN, f64::MAX);
-
-    #[cfg(feature = "chrono")]
-    impl_ore_encrypt_bit6!(
-        ::chrono::NaiveDate,
-        NAIVE_DATE_BLOCKS,
-        naive_date_tests,
-        ::chrono::NaiveDate::MIN,
-        ::chrono::NaiveDate::MAX
-    );
+    // `u128`/`i128` (22 blocks), `Decimal` and `DateTime<Utc>` exceed
+    // `MAX_BLOCKS` and are provided by `scheme::chained` instead (issue #105).
+    for_each_bit6_type!(impl_ore_encrypt_bit6);
 }
 
 #[cfg(test)]

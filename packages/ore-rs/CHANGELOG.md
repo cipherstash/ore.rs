@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `OreEncrypt` for every fixed-width type on both v2 schemes (#124):
+  - `OreAes128Bit6` adds `chrono::NaiveDate` (6 blocks) with the `chrono` feature.
+  - `OreAes128Bit6Chained` adds `bool`, `u8`–`u64`, `i8`–`i64`, `char`, `f32` and `f64`,
+    plus `rust_decimal::Decimal` with the `decimal` feature, and `chrono::NaiveDate` and
+    `chrono::DateTime<Utc>` with the `chrono` feature. Each returns `ChainedCipherText<N>`
+    / `ChainedLeft<N>`, and its block count is a public constant in `scheme::chained`
+    (`BOOL_BLOCKS` through `DATETIME_UTC_BLOCKS`).
+  - The chained ciphertexts are byte-for-byte what `encrypt_fixed` / `encrypt_left_fixed`
+    already produced for these types. No wire format changes.
+  - The block count does not identify the plaintext type: for example, `u32`, `i32`,
+    `char`, `f32` and `NaiveDate` all produce `ChainedCipherText<6>`. Use a separate key
+    or salt for each type.
+
 ## [0.9.0] - 2026-10-19
 
 The first release of the ORE v2 schemes. **The Bit6 (`scheme::bit2_w6`) and chained

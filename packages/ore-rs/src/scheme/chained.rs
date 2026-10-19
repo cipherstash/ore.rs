@@ -79,8 +79,9 @@
 //! [`ChainedLeft`](crate::scheme::chained::ChainedLeft), carry the block count in the type: their parsers and
 //! comparators take only that count, so a `u128` ciphertext is never put
 //! into the shorter-sorts-first order with a ciphertext of another length.
-//! The count is a length guard, not a type guard: a 16-byte string and an
-//! `i128` are 22 blocks too, and under one key an equal encoding gives an
+//! The count is a length guard, not a type guard: most types share their
+//! count (`u32`, `i32`, `char`, `f32` and `NaiveDate` are all 6 blocks; a
+//! 16-byte string and an `i128` are 22), and under one key an equal encoding gives an
 //! equal ciphertext (`0u128`, `i128::MIN`, sixteen NUL bytes). Use one key
 //! per kind of value. A fixed-length value is not padded (every value of the type
 //! has the same length, so there is nothing to hide) and is not subject to
@@ -1144,6 +1145,10 @@ macro_rules! impl_ore_encrypt_chained {
         mod $tests {
             use super::*;
 
+            // The length-mismatch check below uses a 3-byte value, which
+            // encodes as four blocks.
+            const _: () = assert!($blocks_const != 4);
+
             #[test]
             fn round_trip_order_and_equality() {
                 let ore = OreAes128Bit6ChainedChaCha20::init(&[0x11; 16]).unwrap();
@@ -1199,7 +1204,6 @@ macro_rules! impl_ore_encrypt_chained {
                 // rejected by both the typed parsers and comparators.
                 let other = ore.encrypt_fixed(&[0u8; 3]).unwrap().to_bytes();
                 let other_left = ore.encrypt_left_fixed(&[0u8; 3]).unwrap().to_bytes();
-                assert_ne!($blocks_const, 4); // Three bytes encode as four blocks.
                 assert!(ChainedCipherText::<$blocks_const>::from_slice(&other).is_err());
                 assert!(ChainedLeft::<$blocks_const>::from_slice(&other_left).is_err());
                 assert_eq!(cmp(&lo_bytes, &other), None);
@@ -1219,46 +1223,11 @@ macro_rules! impl_ore_encrypt_chained {
                     None
                 );
             }
-
-            #[test]
-            fn typed_outputs_match_fixed_path() {
-                let typed = OreAes128Bit6ChainedChaCha20::init_with_salt(
-                    &[0x11; 16], b"fixed-values"
-                ).unwrap();
-                let untyped = OreAes128Bit6ChainedChaCha20::init_with_salt(
-                    &[0x11; 16], b"fixed-values"
-                ).unwrap();
-                // Equal nonce streams let us compare the complete wire format.
-                *typed.rng.borrow_mut() = ChaCha20Rng::from_seed([7; 32]);
-                *untyped.rng.borrow_mut() = ChaCha20Rng::from_seed([7; 32]);
-                for value in [$lo, $hi] {
-                    let value: $type = value;
-                    assert_eq!(
-                        value.encrypt(&typed).unwrap().to_bytes(),
-                        untyped.encrypt_fixed(&value).unwrap().to_bytes()
-                    );
-                    assert_eq!(
-                        value.encrypt_left(&typed).unwrap().to_bytes(),
-                        untyped.encrypt_left_fixed(&value).unwrap().to_bytes()
-                    );
-                }
-            }
         }
     };
 }
 
-impl_ore_encrypt_chained!(bool, BOOL_BLOCKS, bool_tests, false, true);
-impl_ore_encrypt_chained!(u8, U8_BLOCKS, u8_tests, 0u8, u8::MAX);
-impl_ore_encrypt_chained!(i8, I8_BLOCKS, i8_tests, i8::MIN, i8::MAX);
-impl_ore_encrypt_chained!(u16, U16_BLOCKS, u16_tests, 0u16, u16::MAX);
-impl_ore_encrypt_chained!(i16, I16_BLOCKS, i16_tests, i16::MIN, i16::MAX);
-impl_ore_encrypt_chained!(u32, U32_BLOCKS, u32_tests, 0u32, u32::MAX);
-impl_ore_encrypt_chained!(i32, I32_BLOCKS, i32_tests, i32::MIN, i32::MAX);
-impl_ore_encrypt_chained!(u64, U64_BLOCKS, u64_tests, 0u64, u64::MAX);
-impl_ore_encrypt_chained!(i64, I64_BLOCKS, i64_tests, i64::MIN, i64::MAX);
-impl_ore_encrypt_chained!(char, CHAR_BLOCKS, char_tests, '\0', char::MAX);
-impl_ore_encrypt_chained!(f32, F32_BLOCKS, f32_tests, f32::MIN, f32::MAX);
-impl_ore_encrypt_chained!(f64, F64_BLOCKS, f64_tests, f64::MIN, f64::MAX);
+for_each_bit6_type!(impl_ore_encrypt_chained);
 
 // `u128`/`i128` are 22 blocks, past the 14-block packed prefix of
 // `OreAes128Bit6` and the 15-byte limit of the legacy scheme; the chained
@@ -1273,14 +1242,6 @@ impl_ore_encrypt_chained!(
     decimal_tests,
     rust_decimal::Decimal::MIN,
     rust_decimal::Decimal::MAX
-);
-#[cfg(feature = "chrono")]
-impl_ore_encrypt_chained!(
-    ::chrono::NaiveDate,
-    NAIVE_DATE_BLOCKS,
-    naive_date_tests,
-    ::chrono::NaiveDate::MIN,
-    ::chrono::NaiveDate::MAX
 );
 #[cfg(feature = "chrono")]
 impl_ore_encrypt_chained!(

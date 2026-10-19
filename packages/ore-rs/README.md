@@ -219,7 +219,17 @@ let ct = ore.encrypt_str("alice@example.com").unwrap();
 
 The chained scheme's `OreEncrypt` implementations return `ChainedCipherText<N>` or `ChainedLeft<N>`, where `N` is the block count. For example, `u128` and `i128` use 22 blocks, decimals use 19, timestamps use 16 and dates use 6. Their parsers and comparators require exactly that count.
 
-The block count does not identify the plaintext type: both integer types and a 16-byte string use 22 blocks. Use a separate key or salt for each type, as described in [Keys and salts](#keys-and-salts).
+The block count does not identify the plaintext type. Most types share their count with others, and a ciphertext of one compares against the others without error:
+
+| Blocks | Types |
+|---|---|
+| 2 | `bool`, `u8`, `i8` |
+| 3 | `u16`, `i16` |
+| 6 | `u32`, `i32`, `char`, `f32`, `NaiveDate` |
+| 11 | `u64`, `i64`, `f64` |
+| 22 | `u128`, `i128` |
+
+A string encrypted with `Padding::None` has the block count of its length, so it can share any of these counts. Use a separate key or salt for each type, as described in [Keys and salts](#keys-and-salts).
 
 Use `encrypt_fixed` for other fixed-length types from `orderable-bytes`.
 
