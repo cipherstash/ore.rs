@@ -51,6 +51,22 @@ fn agree<const N: usize>(a: &[u8], b: &[u8]) {
     );
 }
 
+/// When `a` parses as a left ciphertext and `b` as a full one, the raw and
+/// typed left-to-full comparators must agree (#120).
+fn agree_left<const N: usize>(a: &[u8], b: &[u8]) {
+    let (Ok(left), Ok(full)) = (
+        Left::<OreAes128Bit6ChaCha20, N>::from_slice(a),
+        CipherText::<OreAes128Bit6ChaCha20, N>::from_slice(b),
+    ) else {
+        return;
+    };
+    assert_eq!(
+        OreAes128Bit6ChaCha20::compare_left_to_full(a, b),
+        Some(left.compare_to_full(&full)),
+        "raw and typed left-to-full comparators disagree"
+    );
+}
+
 /// `a` with its first `header` bytes kept and `b` written over the rest.
 /// Random pairs almost never both parse; this pair has `a`'s length and
 /// header, so when `a` parses it usually does too.
@@ -70,7 +86,11 @@ fuzz_target!(|pair: (&[u8], &[u8])| {
     for (x, y) in [(a, b), (a, &b2[..]), (&b2[..], a)] {
         agree::<11>(x, y);
         agree::<6>(x, y);
+        agree_left::<11>(x, y);
+        agree_left::<6>(x, y);
     }
     let _ = OreAes128Bit6ChaCha20::compare_raw_slices(a, b);
     let _ = OreAes128Bit6ChaCha20::compare_raw_slices(b, a);
+    let _ = OreAes128Bit6ChaCha20::compare_left_to_full(a, b);
+    let _ = OreAes128Bit6ChaCha20::compare_left_to_full(b, a);
 });

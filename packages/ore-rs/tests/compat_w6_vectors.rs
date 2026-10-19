@@ -342,6 +342,29 @@ fn parsers_reject_out_of_domain_symbols() {
     assert!(CipherText::<OreAes128Bit6ChaCha20, 11>::from_slice(&edge).is_ok());
 }
 
+/// The pinned left ciphertext of 456 against every pinned full `u64`,
+/// raw and typed (#120).
+#[test]
+fn left_to_full_on_pinned_bytes() {
+    let left = pinned(LEFT_U64_456);
+    let typed_left = Left::<OreAes128Bit6ChaCha20, 11>::from_slice(&left).unwrap();
+    for (value, full) in FULL_U64 {
+        let full = pinned(full);
+        let want = 456u64.cmp(value);
+        assert_eq!(
+            OreAes128Bit6ChaCha20::compare_left_to_full(&left, &full),
+            Some(want),
+            "raw, against {value}"
+        );
+        let typed_full = CipherText::<OreAes128Bit6ChaCha20, 11>::from_slice(&full).unwrap();
+        assert_eq!(
+            typed_left.compare_to_full(&typed_full),
+            want,
+            "typed, against {value}"
+        );
+    }
+}
+
 #[test]
 fn raw_comparator_rejects_out_of_domain_symbols() {
     let good = pinned(FULL_U64[0].1);
