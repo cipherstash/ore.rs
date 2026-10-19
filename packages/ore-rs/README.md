@@ -15,8 +15,9 @@ Reference documentation is on [docs.rs/ore-rs](https://docs.rs/ore-rs).
 | Scheme | When to use it |
 |---|---|
 | `OreAes128Bit6` ([`scheme::bit2_w6`](https://docs.rs/ore-rs/latest/ore_rs/scheme/bit2_w6/index.html)) | The recommended choice for new fixed-width data: booleans, integers up to 64 bits, characters and floats. |
-| `OreAes128Bit6Chained` ([`scheme::chained`](https://docs.rs/ore-rs/latest/ore_rs/scheme/chained/index.html)) | Strings, other variable-length data and 128-bit integers. |
-| `OreAes128` ([`scheme::bit2`](https://docs.rs/ore-rs/latest/ore_rs/scheme/bit2/index.html)) | Existing data encrypted with the legacy scheme, or `Decimal` and `chrono` types. |
+| `OreAes128Bit6Chained` ([`scheme::chained`](https://docs.rs/ore-rs/latest/ore_rs/scheme/chained/index.html)) | Strings, other variable-length data and 128-bit integers. Also supports `Decimal` and `chrono` types through `encrypt_fixed`. |
+
+The [legacy `OreAes128` scheme](#the-legacy-scheme-oreaes128) remains available for compatibility with existing ciphertexts. It is not recommended for new data.
 
 Bit6 and chained are the v2 schemes. Both use 6-bit blocks. Their ciphertext formats are frozen as of 0.9.0, with compatibility tests to check that stored ciphertexts remain readable across releases. The [legacy format](#the-legacy-scheme-oreaes128) is also frozen.
 
@@ -99,15 +100,17 @@ Use `to_bytes` to serialise a ciphertext and `from_slice` to parse it, specifyin
 
 ## Plaintext types
 
-The following types implement `OreEncrypt`:
+The following types implement `OreEncrypt`, which provides `value.encrypt(&cipher)` and `value.encrypt_left(&cipher)`:
 
 | Scheme | Types |
 |---|---|
 | `OreAes128Bit6` | `bool`, `u8`–`u64`, `i8`–`i64`, `char`, `f32`, `f64` |
 | `OreAes128Bit6Chained` | `u128`, `i128` |
-| `OreAes128` | The Bit6 types, plus `rust_decimal::Decimal` with the `decimal` feature, and `chrono::NaiveDate` and `chrono::DateTime<Utc>` with the `chrono` feature |
+| `OreAes128` (legacy) | The Bit6 types, plus `rust_decimal::Decimal` with the `decimal` feature, and `chrono::NaiveDate` and `chrono::DateTime<Utc>` with the `chrono` feature |
 
-The chained scheme also provides `encrypt_str` for strings and `encrypt_fixed` for other fixed-length types.
+The chained scheme also provides `encrypt_str` for strings and `encrypt_fixed` for other fixed-length types. This includes `rust_decimal::Decimal` with the `decimal` feature, and `chrono::NaiveDate` and `chrono::DateTime<Utc>` with the `chrono` feature. Use `cipher.encrypt_fixed(&value)` for a full ciphertext or `cipher.encrypt_left_fixed(&value)` for a query.
+
+These three types do not yet implement `OreEncrypt` for either v2 scheme. Decimal and timestamp encodings are 14 and 12 bytes respectively, exceeding Bit6's 10-byte limit. `NaiveDate` uses 4 bytes and would fit, but its Bit6 implementation is still missing. Use the chained scheme's `encrypt_fixed` method for all three today.
 
 The plaintext encodings come from the sibling [`orderable-bytes`](https://crates.io/crates/orderable-bytes) crate.
 
@@ -213,7 +216,7 @@ To report a security issue, see [SECURITY.md](https://github.com/cipherstash/ore
 
 ## The legacy scheme: `OreAes128`
 
-`OreAes128` (`scheme::bit2`) uses 8-bit blocks and was the only scheme available before 0.9. Use it when working with existing legacy ciphertexts, or for the `OreEncrypt` implementations on `Decimal` and `chrono` types. Its format remains frozen so existing ciphertexts stay readable.
+`OreAes128` (`scheme::bit2`) uses 8-bit blocks and was the only scheme available before 0.9. It remains available for compatibility with existing legacy ciphertexts, but is not recommended for new data. Its format remains frozen so existing ciphertexts stay readable. For new decimal and chrono values, use the chained scheme's `encrypt_fixed` method as described in [Plaintext types](#plaintext-types).
 
 ```rust
 use ore_rs::scheme::bit2::OreAes128ChaCha20;
