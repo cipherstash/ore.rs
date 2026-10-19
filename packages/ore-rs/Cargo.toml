@@ -40,8 +40,8 @@ ct-bench = []
 # vitaminc order index can encrypt its sealed order plaintexts here (ADR
 # 0002 in cipherstash/stack: vitaminc at the bottom, scheme crates
 # implement the trait). Off by default: cipherstash-client takes no
-# vitaminc dependency. Needs Rust 1.88, vitaminc's floor, above this
-# crate's own; CI tests it in its own job.
+# vitaminc dependency. Needs Rust 1.88, vitaminc's floor; CI builds every
+# job on 1.88, and lints the crate with the feature off as well as on.
 vitaminc = ["dep:vitaminc-ore", "dep:vitaminc-hmac", "dep:vitaminc-prf", "dep:vitaminc-protected"]
 # Adds the two heaviest Kani harnesses: exhaustive-length `ct_select_byte`
 # (about 9 minutes) and SWAR-builder equivalence (about 15 minutes on an M4,

@@ -50,6 +50,13 @@ jobs:
       - name: clippy
         run: cargo clippy --no-deps --all-targets --all-features  -- -D warnings
 
+      # The steps here build with `--all-features`; this one builds ore-rs
+      # with none, so code behind `cfg(feature = "vitaminc")` (or any other
+      # feature) cannot leave an unused import that only the default build
+      # sees.
+      - name: clippy (no features)
+        run: cargo clippy --no-deps -p ore-rs --all-targets -- -D warnings
+
       - name: format
         run: cargo fmt -- --check
 
