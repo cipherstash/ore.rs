@@ -30,19 +30,15 @@
 //! between scalar and vector paths is pinned by tests below; equivalence
 //! against the per-bit reference is pinned in `prp.rs`.
 
-use super::AesBlock;
+use super::{AesBlock, Packed};
+use core::convert::TryFrom;
 
 /// XOR the indicator mask for `x` over `table` into `out`:
 /// `out[j/8] ^= ((table[j] > x) as u8) << (j%8)`.
 #[inline]
-pub(crate) fn gt_mask_xor_256(table: &[u8; 256], x: u8, out: &mut [u8]) {
-    // A real assert, so every backend sees the same contract in release: the
-    // scalar path would otherwise silently truncate, and the vector paths
-    // would panic only on a short slice.
-    assert_eq!(out.len(), 32);
-
+pub(crate) fn gt_mask_xor_256(table: &[u8; 256], x: u8, out: &mut [u8; 32]) {
     #[cfg(target_arch = "aarch64")]
-    // SAFETY: NEON is baseline on aarch64; `out` length asserted above.
+    // SAFETY: NEON is baseline on aarch64; the lengths are in the types.
     unsafe {
         neon::gt_mask_xor_256(table, x, out)
     }
@@ -53,7 +49,7 @@ pub(crate) fn gt_mask_xor_256(table: &[u8; 256], x: u8, out: &mut [u8]) {
     {
         #[cfg(target_arch = "x86_64")]
         if is_x86_feature_detected!("avx2") {
-            // SAFETY: AVX2 presence just checked; `out` length asserted above.
+            // SAFETY: AVX2 presence just checked; the lengths are in the types.
             unsafe { avx2::gt_mask_xor_256(table, x, out) };
             return;
         }
@@ -66,13 +62,9 @@ pub(crate) fn gt_mask_xor_256(table: &[u8; 256], x: u8, out: &mut [u8]) {
 /// AVX2 gains little at this size (two 32-lane compares vs the scalar
 /// loop's ~9 ns); only NEON is dispatched.
 #[inline]
-pub(crate) fn gt_mask_xor_64(table: &[u8; 64], x: u8, out: &mut [u8]) {
-    // A real assert, as for `gt_mask_xor_256`: the same contract on every
-    // backend in release.
-    assert_eq!(out.len(), 8);
-
+pub(crate) fn gt_mask_xor_64(table: &[u8; 64], x: u8, out: &mut [u8; 8]) {
     #[cfg(target_arch = "aarch64")]
-    // SAFETY: NEON is baseline on aarch64; `out` length asserted above.
+    // SAFETY: NEON is baseline on aarch64; the lengths are in the types.
     unsafe {
         neon::gt_mask_xor_64(table, x, out)
     }
@@ -81,19 +73,29 @@ pub(crate) fn gt_mask_xor_64(table: &[u8; 64], x: u8, out: &mut [u8]) {
     scalar::gt_mask_xor(table, x, out);
 }
 
-/// Pack the LSB of byte 0 of each of 256 AES blocks into `out`:
-/// `out[j/8] |= (blocks[j][0] & 1) << (j%8)` over zeroed positions
-/// (callers pass `out` slots they own; bits are assigned, not accumulated).
+/// Pack the LSB of byte 0 of each block into `out`: bit `j` of `out` is
+/// `blocks[j][0] & 1` (bits are assigned, not accumulated). The 256-block
+/// case (Bit8's per-block RO output) has a vectorised gather; other sizes
+/// use the scalar pack. `D` must be `8 * B`, checked at compile time.
 #[inline]
-pub(crate) fn lsb_mask_256(blocks: &[AesBlock], out: &mut [u8]) {
-    // Real asserts (not debug_assert): the NEON path gathers `blocks` via raw
-    // pointers assuming exactly 256 blocks, so a shorter slice would read out
-    // of bounds (UB) in a release build without this check.
-    assert_eq!(blocks.len(), 256);
-    assert_eq!(out.len(), 32);
+pub(crate) fn lsb_mask<const D: usize, const B: usize>(blocks: &[AesBlock; D], out: &mut [u8; B]) {
+    // Decided by `D` and `B` alone, so the untaken arm is compiled out.
+    if let (Ok(blocks), Ok(out)) = (
+        <&[AesBlock; 256]>::try_from(blocks.as_slice()),
+        <&mut [u8; 32]>::try_from(out.as_mut_slice()),
+    ) {
+        lsb_mask_256(blocks, out);
+        return;
+    }
+    scalar::lsb_mask(blocks, out);
+}
 
+/// [`lsb_mask`] for 256 blocks.
+#[inline]
+pub(crate) fn lsb_mask_256(blocks: &[AesBlock; 256], out: &mut [u8; 32]) {
     #[cfg(target_arch = "aarch64")]
-    // SAFETY: NEON is baseline on aarch64; lengths asserted above.
+    // SAFETY: NEON is baseline on aarch64; the NEON path gathers `blocks`
+    // through raw pointers, which the array type keeps to 256 blocks.
     unsafe {
         neon::lsb_mask_256(blocks, out)
     }
@@ -103,10 +105,9 @@ pub(crate) fn lsb_mask_256(blocks: &[AesBlock], out: &mut [u8]) {
 }
 
 pub(crate) mod scalar {
-    use super::AesBlock;
+    use super::{AesBlock, Packed};
 
-    /// Length-generic scalar indicator pack: `table.len()` must be a
-    /// multiple of 8 and equal to `out.len() * 8`.
+    /// Scalar indicator pack: `D` must be `8 * B`, checked at compile time.
     ///
     /// Used by the non-aarch64 dispatchers and as the test oracle; on
     /// aarch64 the lib always reaches NEON, so outside `cfg(test)` it is
@@ -114,7 +115,13 @@ pub(crate) mod scalar {
     /// from being dead code without an `allow`. (`lsb_mask` below stays
     /// always compiled: `hash.rs` calls it directly for non-256 inputs.)
     #[cfg(any(not(target_arch = "aarch64"), test))]
-    pub(crate) fn gt_mask_xor(table: &[u8], x: u8, out: &mut [u8]) {
+    #[allow(clippy::let_unit_value)]
+    pub(crate) fn gt_mask_xor<const D: usize, const B: usize>(
+        table: &[u8; D],
+        x: u8,
+        out: &mut [u8; B],
+    ) {
+        let () = Packed::<D, B>::OK;
         for (slot, chunk) in out.iter_mut().zip(table.chunks_exact(8)) {
             let mut byte = 0u8;
             for (bit, &p) in chunk.iter().enumerate() {
@@ -124,14 +131,13 @@ pub(crate) mod scalar {
         }
     }
 
-    /// Length-generic scalar LSB pack: `blocks.len()` must be a multiple
-    /// of 8 and equal to `out.len() * 8`.
-    pub(crate) fn lsb_mask(blocks: &[AesBlock], out: &mut [u8]) {
-        assert_eq!(
-            out.len() * 8,
-            blocks.len(),
-            "lsb_mask: out.len() * 8 must equal blocks.len()"
-        );
+    /// Scalar LSB pack: `D` must be `8 * B`, checked at compile time.
+    #[allow(clippy::let_unit_value)]
+    pub(crate) fn lsb_mask<const D: usize, const B: usize>(
+        blocks: &[AesBlock; D],
+        out: &mut [u8; B],
+    ) {
+        let () = Packed::<D, B>::OK;
         for (slot, chunk) in out.iter_mut().zip(blocks.chunks_exact(8)) {
             let mut byte = 0u8;
             for (bit, block) in chunk.iter().enumerate() {
@@ -160,7 +166,7 @@ mod neon {
     }
 
     #[target_feature(enable = "neon")]
-    pub(super) unsafe fn gt_mask_xor_256(table: &[u8; 256], x: u8, out: &mut [u8]) {
+    pub(super) unsafe fn gt_mask_xor_256(table: &[u8; 256], x: u8, out: &mut [u8; 32]) {
         let xv = vdupq_n_u8(x);
         for i in 0..16 {
             let t = vld1q_u8(table.as_ptr().add(i * 16));
@@ -171,7 +177,7 @@ mod neon {
     }
 
     #[target_feature(enable = "neon")]
-    pub(super) unsafe fn gt_mask_xor_64(table: &[u8; 64], x: u8, out: &mut [u8]) {
+    pub(super) unsafe fn gt_mask_xor_64(table: &[u8; 64], x: u8, out: &mut [u8; 8]) {
         let xv = vdupq_n_u8(x);
         for i in 0..4 {
             let t = vld1q_u8(table.as_ptr().add(i * 16));
@@ -210,7 +216,7 @@ mod neon {
     }
 
     #[target_feature(enable = "neon")]
-    pub(super) unsafe fn lsb_mask_256(blocks: &[AesBlock], out: &mut [u8]) {
+    pub(super) unsafe fn lsb_mask_256(blocks: &[AesBlock; 256], out: &mut [u8; 32]) {
         let p = blocks.as_ptr() as *const u8;
         let one = vdupq_n_u8(1);
         for i in 0..16 {
@@ -229,7 +235,7 @@ mod avx2 {
     /// AVX2 has only *signed* byte compares; XOR-ing 0x80 into both sides
     /// maps unsigned `>` onto signed `>`.
     #[target_feature(enable = "avx2")]
-    pub(super) unsafe fn gt_mask_xor_256(table: &[u8; 256], x: u8, out: &mut [u8]) {
+    pub(super) unsafe fn gt_mask_xor_256(table: &[u8; 256], x: u8, out: &mut [u8; 32]) {
         let bias = _mm256_set1_epi8(i8::MIN);
         let xv = _mm256_xor_si256(_mm256_set1_epi8(x as i8), bias);
         for i in 0..8 {
@@ -291,21 +297,6 @@ mod tests {
             scalar::gt_mask_xor(&table, x, &mut b);
             assert_eq!(a, b);
         }
-    }
-
-    #[test]
-    #[should_panic(expected = "lsb_mask: out.len() * 8 must equal blocks.len()")]
-    fn scalar_lsb_mask_rejects_a_short_output() {
-        let blocks = [AesBlock::default(); 64];
-        let mut out = [0u8; 7];
-        scalar::lsb_mask(&blocks, &mut out);
-    }
-
-    #[test]
-    #[should_panic]
-    fn gt_mask_xor_256_rejects_a_short_output() {
-        let mut out = [0u8; 31];
-        gt_mask_xor_256(&[0u8; 256], 0, &mut out);
     }
 
     #[test]

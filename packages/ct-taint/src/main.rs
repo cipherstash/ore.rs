@@ -117,11 +117,8 @@ fn checksum(bytes: &[u8]) -> u64 {
     })
 }
 
-fn keys() -> ([u8; 16], [u8; 16]) {
-    (
-        hex!("000102030405060708090a0b0c0d0e0f"),
-        hex!("d0d1d2d3d4d5d6d7d8d9dadbdcdddedf"),
-    )
+fn key() -> [u8; 16] {
+    hex!("000102030405060708090a0b0c0d0e0f")
 }
 
 /// `x` with its bytes marked undefined.
@@ -135,10 +132,9 @@ fn tainted<T: Copy>(mut x: T) -> T {
 }
 
 fn bit6() -> OreAes128Bit6ChaCha20 {
-    let (mut k1, mut k2) = keys();
-    taint(&mut k1);
-    taint(&mut k2);
-    OreCipher::init(&k1, &k2).expect("init")
+    let mut k = key();
+    taint(&mut k);
+    OreAes128Bit6ChaCha20::init(&k).expect("init")
 }
 
 /// Full Bit6 encryption of a tainted `x` through `OreEncrypt`, which runs the
@@ -210,9 +206,9 @@ fn tainted_str(buf: &mut [u8; 17]) -> &str {
 /// The chained cipher with the default string padding, so the string modes
 /// cover the padding path, including the trailing-NUL check.
 fn chained() -> OreAes128Bit6ChainedChaCha20 {
-    let (mut k1, _) = keys();
-    taint(&mut k1);
-    OreAes128Bit6Chained::init(&k1).expect("init")
+    let mut k = key();
+    taint(&mut k);
+    OreAes128Bit6Chained::init(&k).expect("init")
 }
 
 fn chained_full() -> Vec<u8> {

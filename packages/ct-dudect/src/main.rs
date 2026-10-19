@@ -25,9 +25,6 @@ use std::hint::black_box;
 const K1: [u8; 16] = [
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
 ];
-const K2: [u8; 16] = [
-    0xd0, 0xd1, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9, 0xda, 0xdb, 0xdc, 0xdd, 0xde, 0xdf,
-];
 
 /// Inputs per class, precomputed so the measured region is the call alone.
 /// `CT_DUDECT_POOL` overrides it: a pool of a few entries keeps every input
@@ -81,7 +78,7 @@ fn data_independent_timing() {
 
 fn bit6() -> OreAes128Bit6ChaCha20 {
     data_independent_timing();
-    OreCipher::init(&K1, &K2).unwrap()
+    OreAes128Bit6ChaCha20::init(&K1).unwrap()
 }
 
 /// The chained cipher under `padding`. A harness that places the differing

@@ -100,9 +100,9 @@ macro_rules! impl_knuth_shuffle_prp {
                 oblivious_lookup(&self.permutation, input)
             }
 
-            fn indicator_mask_xor(&self, data: Symbol<$domain>, out: &mut [u8]) {
-                debug_assert_eq!(out.len() * 8, $domain);
+            type Mask = [u8; $domain / 8];
 
+            fn indicator_mask_xor(&self, data: Symbol<$domain>, out: &mut Self::Mask) {
                 // `invert(j)` is `self.permutation[j]` (see `invert`
                 // above), so the mask is one pass over the table: a
                 // bytewise `> data` compare packed to bits — vectorised
@@ -187,14 +187,14 @@ macro_rules! impl_lemire_fy_prp {
 
         impl LemireFyPrp<$domain> {
             /// Build the permutation directly from a precomputed draw stream
-            /// (shape (ii)): `stream` must be at least `($domain - 1) * 8`
-            /// bytes, consumed as `$domain - 1` little-endian u64 draws and
-            /// Lemire-reduced. The chained scheme feeds the CMAC accumulator's
+            /// (shape (ii)): `$domain - 1` little-endian u64 draws, each
+            /// Lemire-reduced (see [`oblivious::STREAM_BYTES`] for the
+            /// stream's length). The chained scheme feeds the CMAC accumulator's
             /// `PRP_STREAM` branch here, avoiding a per-block AES key schedule;
             /// [`Prp::new`] feeds it an AES-CTR keystream. Either way the
             /// tables come from the oblivious builder ([`oblivious::build`]),
             /// so no address depends on the stream.
-            pub(crate) fn from_stream(stream: &[u8]) -> PrpResult<Self> {
+            pub(crate) fn from_stream(stream: &[u8; oblivious::STREAM_BYTES]) -> Self {
                 // Fisher–Yates with Lemire-reduced wide draws: draw `d`
                 // (8 bytes) drives step `$domain - 1 - d`. Fixed trip count,
                 // branch-free index reduction, and no secret-dependent
@@ -210,19 +210,19 @@ macro_rules! impl_lemire_fy_prp {
             /// so they time this same function. `build` is a generic
             /// parameter, not a function pointer, so the scheme path is
             /// monomorphised and the builder still inlines.
-            pub(crate) fn from_stream_with<F>(stream: &[u8], build: F) -> PrpResult<Self>
+            pub(crate) fn from_stream_with<F>(
+                stream: &[u8; oblivious::STREAM_BYTES],
+                build: F,
+            ) -> Self
             where
-                F: FnOnce(&[u8], &mut [u8; $domain], &mut [u8; $domain]),
+                F: FnOnce(&[u8; oblivious::STREAM_BYTES], &mut [u8; $domain], &mut [u8; $domain]),
             {
-                if stream.len() < ($domain - 1) * 8 {
-                    return Err(PrpError);
-                }
                 let mut perm = Self {
                     permutation: [0u8; $domain],
                     inverse: [0u8; $domain],
                 };
                 build(stream, &mut perm.permutation, &mut perm.inverse);
-                Ok(perm)
+                perm
             }
         }
 
@@ -244,12 +244,14 @@ macro_rules! impl_lemire_fy_prp {
                 }
                 cipher.encrypt_blocks(&mut blocks);
 
-                let mut stream = [0u8; $stream_blocks * 16];
+                // A whole stream by type: `$stream_blocks` blocks must be
+                // `oblivious::STREAM_BYTES`, or this does not compile.
+                let mut stream: [u8; oblivious::STREAM_BYTES] = [0u8; $stream_blocks * 16];
                 for (i, b) in blocks.iter().enumerate() {
                     stream[i * 16..(i + 1) * 16].copy_from_slice(b);
                 }
 
-                let perm = Self::from_stream(&stream)?;
+                let perm = Self::from_stream(&stream);
 
                 // The keystream determined the permutation — wipe it.
                 stream.zeroize();
@@ -268,8 +270,9 @@ macro_rules! impl_lemire_fy_prp {
                 oblivious_lookup(&self.permutation, input)
             }
 
-            fn indicator_mask_xor(&self, data: Symbol<$domain>, out: &mut [u8]) {
-                debug_assert_eq!(out.len() * 8, $domain);
+            type Mask = [u8; $domain / 8];
+
+            fn indicator_mask_xor(&self, data: Symbol<$domain>, out: &mut Self::Mask) {
                 $gt_mask(&self.permutation, data.get(), out);
             }
         }
@@ -377,22 +380,6 @@ mod tests {
         assert!((0..64u8).any(|v| a.permute(sym64(v)) != c.permute(sym64(v))));
     }
 
-    /// `from_stream` rejects every stream shorter than 63 * 8 bytes and
-    /// accepts the first full length. Exhaustive over the 504 short lengths;
-    /// this was a Kani harness, which took 335 s to prove the same thing.
-    #[test]
-    fn fy_from_stream_rejects_every_short_stream() {
-        let buf = [0u8; 63 * 8];
-        for len in 0..buf.len() {
-            assert!(
-                LemireFyPrp::<64>::from_stream(&buf[..len]).is_err(),
-                "len {}",
-                len
-            );
-        }
-        assert!(LemireFyPrp::<64>::from_stream(&buf).is_ok());
-    }
-
     #[test]
     fn fy_rejects_short_key() {
         assert!(<LemireFyPrp<64> as Prp<Symbol<64>>>::new(&[0u8; 8]).is_err());
@@ -472,7 +459,7 @@ mod kani_proofs {
     #[kani::proof]
     #[kani::unwind(64)]
     fn lemire_draw_in_range() {
-        let stream: [u8; 63 * 8] = kani::any();
+        let stream: [u8; oblivious::STREAM_BYTES] = kani::any();
         for i in 1..64 {
             let d = 63 - i;
             let mut draw = [0u8; 8];

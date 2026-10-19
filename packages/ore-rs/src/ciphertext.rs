@@ -25,11 +25,10 @@ pub struct WireHeader {
 pub(crate) const WIRE_HEADER_LEN: usize = 4;
 
 impl WireHeader {
-    pub(crate) fn write(&self, num_blocks: usize, out: &mut Vec<u8>) {
-        debug_assert!(num_blocks <= u16::MAX as usize);
+    pub(crate) fn write(&self, num_blocks: u16, out: &mut Vec<u8>) {
         out.push(self.version);
         out.push(self.scheme_id);
-        out.extend_from_slice(&(num_blocks as u16).to_be_bytes());
+        out.extend_from_slice(&num_blocks.to_be_bytes());
     }
 
     /// Validate `data`'s header against `self` and an expected block count,
@@ -44,6 +43,24 @@ impl WireHeader {
             return Err(ParseError);
         }
         Ok(body)
+    }
+}
+
+/// A const block count `N` as the header's `u16`. An `N` the header cannot
+/// hold is a compile error, so the cast below never truncates.
+struct WireCount<const N: usize>;
+
+impl<const N: usize> WireCount<N> {
+    const FITS: () = assert!(
+        N <= u16::MAX as usize,
+        "WireCount: too many blocks for the wire header"
+    );
+
+    #[inline]
+    #[allow(clippy::let_unit_value)]
+    fn get() -> u16 {
+        let () = Self::FITS;
+        N as u16
     }
 }
 
@@ -191,7 +208,7 @@ impl<S: OreCipher, const N: usize> OreOutput for Left<S, N> {
     fn to_bytes(&self) -> Vec<u8> {
         let mut vec = Vec::with_capacity(Self::size());
         if let Some(header) = S::WIRE_HEADER {
-            header.write(N, &mut vec);
+            header.write(WireCount::<N>::get(), &mut vec);
         }
         self.write_body(&mut vec);
         vec
@@ -250,7 +267,7 @@ impl<S: OreCipher, const N: usize> OreOutput for Right<S, N> {
     fn to_bytes(&self) -> Vec<u8> {
         let mut vec = Vec::with_capacity(Self::size());
         if let Some(header) = S::WIRE_HEADER {
-            header.write(N, &mut vec);
+            header.write(WireCount::<N>::get(), &mut vec);
         }
         self.write_body(&mut vec);
         vec
@@ -276,7 +293,7 @@ impl<S: OreCipher, const N: usize> OreOutput for CipherText<S, N> {
     fn to_bytes(&self) -> Vec<u8> {
         let mut vec = Vec::with_capacity(Self::size());
         if let Some(header) = S::WIRE_HEADER {
-            header.write(N, &mut vec);
+            header.write(WireCount::<N>::get(), &mut vec);
         }
         self.left.write_body(&mut vec);
         self.right.write_body(&mut vec);

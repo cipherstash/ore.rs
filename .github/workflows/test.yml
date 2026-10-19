@@ -42,16 +42,28 @@ jobs:
             target/
           key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: setup rust 1.78
-        uses: dtolnay/rust-toolchain@1.78.0
+      - name: setup rust 1.88
+        uses: dtolnay/rust-toolchain@1.88.0
         with:
           components: clippy, rustfmt
 
       - name: clippy
         run: cargo clippy --no-deps --all-targets --all-features  -- -D warnings
 
+      # The steps here build with `--all-features`; this one builds ore-rs
+      # with none, so code behind `cfg(feature = "vitaminc")` (or any other
+      # feature) cannot leave an unused import that only the default build
+      # sees.
+      - name: clippy (no features)
+        run: cargo clippy --no-deps -p ore-rs --all-targets -- -D warnings
+
       - name: format
         run: cargo fmt -- --check
+
+      # Clippy denies the panic lints in library code; it has none for
+      # `assert!` / `debug_assert!`, so this covers them.
+      - name: no runtime asserts
+        run: python3 scripts/no-runtime-asserts.py
 
       # Broken or private intra-doc links fail here rather than on docs.rs.
       - name: docs
@@ -84,8 +96,8 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: setup rust 1.78
-        uses: dtolnay/rust-toolchain@1.78.0
+      - name: setup rust 1.88
+        uses: dtolnay/rust-toolchain@1.88.0
 
       - name: "Benchmark"
         run: cargo bench

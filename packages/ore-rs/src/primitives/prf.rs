@@ -1,11 +1,20 @@
 use crate::primitives::{AesBlock, Prf, PrfKey};
 use aes::cipher::{BlockEncrypt, KeyInit};
-use aes::Aes128;
+use aes::Aes128Enc;
 use zeroize::ZeroizeOnDrop;
 
-#[derive(Debug, ZeroizeOnDrop)]
+#[derive(ZeroizeOnDrop)]
 pub struct Aes128Prf {
-    cipher: Aes128,
+    cipher: Aes128Enc,
+}
+
+// Opaque Debug: never render key material. `Aes128Enc`'s own Debug is opaque
+// today, but a derive would depend on that staying true across `aes`
+// upgrades, so spell it out (as `OreAes128` does).
+impl std::fmt::Debug for Aes128Prf {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Aes128Prf").finish_non_exhaustive()
+    }
 }
 
 /*
@@ -15,7 +24,7 @@ pub struct Aes128Prf {
 impl Prf for Aes128Prf {
     fn new(key: &PrfKey) -> Self {
         //let key_array = GenericArray::from_slice(key);
-        let cipher = Aes128::new(key);
+        let cipher = Aes128Enc::new(key);
         Self { cipher }
     }
 

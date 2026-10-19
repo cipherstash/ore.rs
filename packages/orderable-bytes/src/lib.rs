@@ -1,4 +1,19 @@
 #![deny(missing_docs)]
+// Library code does not panic: it returns an error or carries the invariant
+// in a type. Tests may. Clippy has no lint for `assert!`;
+// `scripts/no-runtime-asserts.py` covers that in CI.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::unreachable,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::panic_in_result_fn
+    )
+)]
 //! Canonical, order-preserving byte encodings for plaintext types.
 //!
 //! Each supported type implements [`OrderableBytes`], which maps a
@@ -216,7 +231,8 @@ impl<T: OrderableBytes + ?Sized> private::Sealed for &T {}
 
 /// A reference encodes exactly as the value it points to.
 impl<T: OrderableBytes + ?Sized> OrderableBytes for &T {
-    type Bytes<'a> = T::Bytes<'a>
+    type Bytes<'a>
+        = T::Bytes<'a>
     where
         Self: 'a;
 

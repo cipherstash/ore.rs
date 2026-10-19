@@ -100,7 +100,6 @@ pub(crate) fn ct_select_byte(block: &[u8], idx: usize) -> u8 {
 #[inline]
 pub(crate) fn ct_assign_bytes(dst: &mut [u8], src: &[u8], choice: subtle_ng::Choice) {
     use subtle_ng::ConditionallySelectable;
-    debug_assert_eq!(dst.len(), src.len());
     for (d, s) in dst.iter_mut().zip(src) {
         d.conditional_assign(s, choice);
     }
@@ -170,7 +169,8 @@ impl<const R: usize> FirstDiff<R> {
     /// `xt` either.
     #[inline]
     pub(crate) fn resolve<H: Hash>(&self, hasher: &H) -> u8 {
-        debug_assert!(usize::from(self.xt) < R * 8);
+        // `xt` is a parsed, in-domain symbol. Were it not, the oblivious
+        // select below would read no byte and give 0, not go out of bounds.
         let byte = ct_select_byte(&self.right, usize::from(self.xt / 8));
         ct_bit(byte, self.xt % 8) ^ hasher.hash(&self.f)
     }
@@ -183,16 +183,20 @@ pub trait RightBitVec {
     /// scheme; the legacy comparator calls the inherent method.)
     #[allow(dead_code)]
     fn get_bit(&self, bit: usize) -> u8;
+    /// The raw bitvector, `[u8; DOMAIN / 8]`.
+    type Bits;
     /// The raw bitvector bytes, LSB-first within each byte (the same bit
     /// order as `RightBlock32::set_bit`), for bulk mask construction.
-    fn as_mut_bytes(&mut self) -> &mut [u8];
+    fn as_mut_bits(&mut self) -> &mut Self::Bits;
 }
 
 impl RightBitVec for RightBlock32 {
+    type Bits = [u8; 32];
+
     fn get_bit(&self, bit: usize) -> u8 {
         RightBlock32::get_bit(self, bit)
     }
-    fn as_mut_bytes(&mut self) -> &mut [u8] {
+    fn as_mut_bits(&mut self) -> &mut [u8; 32] {
         self.bytes_mut()
     }
 }
@@ -209,10 +213,20 @@ pub trait BlockWidth: sealed::Sealed + 'static {
     type RightBlock: CipherTextBlock + RightBitVec;
     /// A block value: a [`Symbol`] of the `DOMAIN`-element domain.
     type Symbol: Copy;
-    /// PRP over the block domain.
-    type Prp: Prp<Self::Symbol>;
+    /// PRP over the block domain. Its indicator mask is a right block's
+    /// bitvector.
+    type Prp: Prp<Self::Symbol, Mask = <Self::RightBlock as RightBitVec>::Bits>;
     /// Buffer holding `DOMAIN` random-oracle keys.
     type RoKeyBuf: AesBlockBuf;
+
+    /// Hash the `DOMAIN` random-oracle keys in `ro` (in place, trashing
+    /// them) into `out`, one bit per key: [`Hash::hash_all_into`] at this
+    /// width's sizes, which the types fix.
+    fn hash_into<H: Hash>(
+        hasher: &H,
+        ro: &mut Self::RoKeyBuf,
+        out: &mut <Self::RightBlock as RightBitVec>::Bits,
+    );
 }
 
 /// The 8-bit block width used by the legacy [`crate::scheme::bit2`] scheme:
@@ -226,6 +240,10 @@ impl BlockWidth for Bit8 {
     type Symbol = Symbol<256>;
     type Prp = crate::primitives::prp::KnuthShufflePRP<u8, 256>;
     type RoKeyBuf = [AesBlock; 256];
+
+    fn hash_into<H: Hash>(hasher: &H, ro: &mut [AesBlock; 256], out: &mut [u8; 32]) {
+        hasher.hash_all_into(ro, out);
+    }
 }
 
 /// The 6-bit block width used by [`crate::scheme::bit2_w6`]: six plaintext
@@ -238,11 +256,15 @@ impl BlockWidth for Bit6 {
     const BITS: usize = 6;
     type RightBlock = RightBlock8;
     // Fixed-draw Fisher–Yates, not the rejection-sampled Knuth shuffle:
-    // Bit6's wire format is not frozen, so it adopts the constant-time,
-    // ~9×-faster PRP construction. See `LemireFyPrp`.
+    // Bit6's wire format was not yet frozen when it adopted this
+    // constant-time, ~9×-faster PRP construction. See `LemireFyPrp`.
     type Prp = crate::primitives::prp::LemireFyPrp<64>;
     type Symbol = Symbol<64>;
     type RoKeyBuf = [AesBlock; 64];
+
+    fn hash_into<H: Hash>(hasher: &H, ro: &mut [AesBlock; 64], out: &mut [u8; 8]) {
+        hasher.hash_all_into(ro, out);
+    }
 }
 
 #[cfg(kani)]

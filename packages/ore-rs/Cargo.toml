@@ -1,6 +1,6 @@
 [package]
 name = "ore-rs"
-version = "0.9.0-rc.1"
+version = "0.9.0"
 authors = [
     "Dan Draper <dan@cipherstash.com>",
     "James Sadler <james@cipherstash.com>",
@@ -12,6 +12,12 @@ documentation = "https://docs.rs/ore-rs"
 description = "Order-revealing encryption library used by the CipherStash searchable encryption platform"
 license-file = "../../LICENCE"
 readme = "README.md"
+
+# docs.rs builds default features only; these show the chrono and decimal
+# impls and the vitaminc adapter. (`ct-bench` and the Kani features are not
+# public API.)
+[package.metadata.docs.rs]
+features = ["chrono", "decimal", "vitaminc"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dev-dependencies]
@@ -36,6 +42,13 @@ decimal = ["dep:rust_decimal", "orderable-bytes/decimal"]
 # public API: a feature rather than a `cfg` so it never trips
 # `unexpected_cfgs`, and never enabled by a dependant.
 ct-bench = []
+# Implements vitaminc-ore's `OrderScheme` for the block ORE schemes, so a
+# vitaminc order index can encrypt its sealed order plaintexts here (ADR
+# 0002 in cipherstash/stack: vitaminc at the bottom, scheme crates
+# implement the trait). Off by default: cipherstash-client takes no
+# vitaminc dependency. Needs Rust 1.88, vitaminc's floor; CI builds every
+# job on 1.88, and lints the crate with the feature off as well as on.
+vitaminc = ["dep:vitaminc-ore", "dep:vitaminc-hmac", "dep:vitaminc-prf", "dep:vitaminc-protected"]
 # Adds the two heaviest Kani harnesses: exhaustive-length `ct_select_byte`
 # (about 9 minutes) and SWAR-builder equivalence (about 15 minutes on an M4,
 # too heavy for GitHub's runners). CI runs `cargo kani` without it; run
@@ -56,6 +69,11 @@ hex = "0.4.3"
 subtle-ng = "2.5.0"
 zeroize = { version = "1.5.7", features = ["zeroize_derive"] }
 thiserror = "1.0.38"
+# vitaminc 0.6 is the first release with the `OrderScheme` trait.
+vitaminc-ore = { version = "0.6.1", optional = true }
+vitaminc-hmac = { version = "0.6.1", optional = true }
+vitaminc-prf = { version = "0.6.1", optional = true }
+vitaminc-protected = { version = "0.6.1", optional = true }
 
 # `cfg(kani)` gates the Kani proof harnesses (compiled only by `cargo kani`).
 [lints.rust]

@@ -8,8 +8,7 @@
 pub mod bit2;
 
 /// 6-bit-block variant of [`bit2`]: 4x less AES work per block and 4x
-/// smaller right blocks. Wire format v2 (headered). Not yet frozen —
-/// pending crypto review of the Z2 hash (v2 plan, section 6).
+/// smaller right blocks. Wire format v2 (headered), frozen as of 0.9.0.
 pub mod bit2_w6;
 
 /// Variable-length / chained-prefix scheme (6-bit blocks): lifts the packed
@@ -17,6 +16,8 @@ pub mod bit2_w6;
 /// format v2 (scheme id 0x03). See
 /// `docs/plans/2026-06-15-ore-v2-cmac-accumulator-spec.md`.
 pub mod chained;
+
+pub(crate) mod keys;
 
 pub(crate) mod decompose;
 pub(crate) mod width;

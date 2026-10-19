@@ -6,6 +6,10 @@
 //! arbitrary-length plaintexts — strings in particular. Design:
 //! `docs/plans/2026-06-15-ore-v2-cmac-accumulator-spec.md` (the A2 gate).
 //!
+//! **Status: wire format (scheme id `0x03`) frozen as of 0.9.0.**
+//! `tests/compat_chained_vectors.rs` pins the bytes, padded and unpadded; a
+//! change that alters them breaks every stored chained ciphertext.
+//!
 //! Per block `n` (prefix `x[0..n-1]`, accumulator state `S_n`):
 //! - **PRP** `π_n` (shape ii): keystream = `STREAM_BLOCKS` CMAC tags on the
 //!   `PRP_STREAM` branch → `LemireFyPrp::from_stream` (no per-block key
@@ -50,7 +54,8 @@
 //! The header also carries the padding policy, and the comparators return
 //! `None` for two ciphertexts made under different policies: an unpadded
 //! `"abc"` and a padded `"abc"` have different blocks, and would compare
-//! unequal. A column's stored values and its queries must use one policy.
+//! unequal. Stored values and the queries that compare with them must use
+//! one policy.
 //!
 //! A cipher also has a longest string it encrypts
 //! ([`Options::with_max_bytes`](crate::scheme::chained::Options::with_max_bytes),
@@ -68,6 +73,35 @@
 //! zero symbols, since a trailing zero symbol is a real value there, so they
 //! are not offered as an API (#110).
 //!
+//! **Fixed-length types.** `u128` and `i128` (22 blocks) are too wide for
+//! the packed prefix of `OreAes128Bit6` and for the legacy scheme, so their
+//! [`crate::OreEncrypt`] impls live here. The outputs, [`crate::scheme::chained::ChainedCipherText`] and
+//! [`crate::scheme::chained::ChainedLeft`], carry the block count in the type: their parsers and
+//! comparators take only that count, so a `u128` ciphertext is never put
+//! into the shorter-sorts-first order with a ciphertext of another length.
+//! The count is a length guard, not a type guard: a 16-byte string and an
+//! `i128` are 22 blocks too, and under one key an equal encoding gives an
+//! equal ciphertext (`0u128`, `i128::MIN`, sixteen NUL bytes). Use one key
+//! per kind of value. A fixed-length value is not padded (every value of the type
+//! has the same length, so there is nothing to hide) and is not subject to
+//! the cipher's string ceiling; its ciphertext is tagged
+//! [`Padding::None`](crate::scheme::chained::Padding::None), and the typed
+//! parsers accept no other tag.
+//!
+//! ```rust
+//! use ore_rs::scheme::chained::{ChainedCipherText, OreAes128Bit6ChainedChaCha20, U128_BLOCKS};
+//! use ore_rs::{OreEncrypt, OreOutput};
+//! use std::cmp::Ordering;
+//!
+//! let ore = OreAes128Bit6ChainedChaCha20::init(&[0u8; 16]).unwrap();
+//! let a = 1u128.encrypt(&ore).unwrap().to_bytes();
+//! let b = u128::MAX.encrypt(&ore).unwrap().to_bytes();
+//! assert_eq!(
+//!     ChainedCipherText::<U128_BLOCKS>::compare_raw_slices(&a, &b),
+//!     Some(Ordering::Less)
+//! );
+//! ```
+//!
 //! **Stored rows compare offline.** A full ciphertext carries its
 //! deterministic left half (`xt`, `f`), so anyone holding two stored full
 //! ciphertexts can run `compare_raw_slices` with no
@@ -77,24 +111,24 @@
 
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use subtle_ng::{Choice, ConditionallySelectable, ConstantTimeEq};
 use zeroize::{Zeroize, Zeroizing};
 
-use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
-use aes::Aes128Enc;
+use orderable_bytes::FixedOrderableBytes;
 
-use crate::ciphertext::{parse_header, ParseError, WireHeader, WIRE_HEADER_LEN};
+use crate::ciphertext::{parse_header, OreOutput, ParseError, WireHeader, WIRE_HEADER_LEN};
 use crate::primitives::cmac::{final_block, prefix_block, Branch, CmacAccumulator, WIDTH_BIT6};
 use crate::primitives::hash::FixedPiZ2Hash;
 use crate::primitives::prp::LemireFyPrp;
 use crate::primitives::{stack, AesBlock, Hash, HashKey, Prp};
 use crate::scheme::decompose::{num_blocks_6bit, Blocks6};
+use crate::scheme::keys;
 use crate::scheme::width::FirstDiff;
-use crate::OreError;
+use crate::{OreEncrypt, OreError};
 
 const VERSION: u8 = 0x02;
 const SCHEME_ID: u8 = 0x03;
@@ -114,7 +148,15 @@ const PADDING_LEN: usize = 3;
 const HEADER_LEN: usize = WIRE_HEADER_LEN + PADDING_LEN;
 const NONCE_LEN: usize = 16;
 
-/// Domain-separation label for deriving the accumulator key (spec §3).
+/// The only input the caller's key is evaluated on (spec §3): ends in
+/// `'t'` (`0x74`), outside every legacy PRF input's byte 15. See
+/// `scheme::keys`.
+const ROOT_LABEL: [u8; 16] = *b"ORE.v2.chainroot";
+const _: () = assert!(
+    ROOT_LABEL[15] > 14,
+    "root label collides with a legacy PRF input"
+);
+/// Label for the accumulator key under the salted key (spec §3).
 const ACC_KEY_LABEL: [u8; 16] = *b"ORE.v2.chain.acc";
 
 /// Serialised length of a full ciphertext with `count` blocks.
@@ -155,16 +197,16 @@ fn right_at(s: &[u8], count: usize, i: usize) -> &[u8] {
 /// ciphertext reveals a length bucket rather than the exact length (see the
 /// module docs).
 ///
-/// Lengths are in UTF-8 bytes. The policy belongs to a column: its stored
-/// values and its queries must use the same one, and changing it means
-/// re-encrypting the column. The comparators refuse to compare ciphertexts
+/// Lengths are in UTF-8 bytes. The policy belongs with the key: stored
+/// values and the queries that compare with them must use the same one,
+/// and changing it means re-encrypting the stored values. The comparators refuse to compare ciphertexts
 /// made under different policies.
 ///
 /// Padding hides the exact length in the ciphertext only: the time the
 /// encryptor takes still depends on the exact length of the string.
 ///
 /// More policies may follow (a growth ratio between buckets, boundaries
-/// fitted to a column), so the enum is non-exhaustive.
+/// fitted to the data), so the enum is non-exhaustive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Padding {
@@ -282,30 +324,35 @@ impl Padding {
 /// padding.
 pub const DEFAULT_MAX_STR_BYTES: usize = 1024;
 
-/// Per-cipher settings for the string encryptors, passed to
-/// [`OreAes128Bit6Chained::init_with`]. They belong to a column, like the
-/// key: its stored values and its queries use the same ones.
+/// Per-cipher settings, passed to [`OreAes128Bit6Chained::init_with`]:
+/// the salt the key is derived under, and the string encryptors' padding
+/// policy and ceiling. Like the key, they belong to the values that are
+/// compared together: stored values and the queries that compare with them
+/// use the same ones.
 ///
 /// ```rust
 /// use ore_rs::scheme::chained::{OreAes128Bit6ChainedChaCha20, Options, Padding};
 ///
 /// let options = Options::default()
+///     .with_salt(b"users.email")
 ///     .with_padding(Padding::PowerOfTwo { min_bytes: 32 })
 ///     .with_max_bytes(256);
 /// let ore = OreAes128Bit6ChainedChaCha20::init_with(&[0u8; 16], options).unwrap();
 /// assert!(ore.encrypt_str(&"a".repeat(256)).is_ok());
 /// assert!(ore.encrypt_str(&"a".repeat(257)).is_err());
 /// ```
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Options {
+    salt: Vec<u8>,
     padding: Padding,
     max_bytes: usize,
 }
 
 impl Default for Options {
-    /// [`Padding::default`] and [`DEFAULT_MAX_STR_BYTES`].
+    /// An empty salt, [`Padding::default`] and [`DEFAULT_MAX_STR_BYTES`].
     fn default() -> Self {
         Self {
+            salt: Vec::new(),
             padding: Padding::default(),
             max_bytes: DEFAULT_MAX_STR_BYTES,
         }
@@ -318,6 +365,19 @@ impl Options {
         Self::default()
     }
 
+    /// The salt the key is derived under: a name for what the key is for
+    /// (a data set, a tenant, a plaintext type). Ciphertexts under different
+    /// salts share no key material; nothing on the wire records the salt,
+    /// so a mismatched pair compares to a confident, meaningless result,
+    /// `Equal` included. The default is empty. See
+    /// [`OreAes128Bit6Chained::init_with`].
+    pub fn with_salt(self, salt: &[u8]) -> Self {
+        Self {
+            salt: salt.to_vec(),
+            ..self
+        }
+    }
+
     /// The padding policy the string encryptors apply.
     pub fn with_padding(self, padding: Padding) -> Self {
         Self { padding, ..self }
@@ -325,12 +385,17 @@ impl Options {
 
     /// The longest string, in UTF-8 bytes, the cipher encrypts; a longer
     /// one returns [`OreError::TooLong`]. Bounds what one input can cost in
-    /// ciphertext size and encryption time, and how many length buckets a
-    /// column can show. Under [`Padding::Fixed`] the fixed length is also a
+    /// ciphertext size and encryption time, and how many length buckets the
+    /// ciphertexts can show. Under [`Padding::Fixed`] the fixed length is also a
     /// ceiling, and the lower of the two applies. `init_with` refuses a
     /// ceiling of 0 or one that pads past [`MAX_STR_BYTES`].
     pub fn with_max_bytes(self, max_bytes: usize) -> Self {
         Self { max_bytes, ..self }
+    }
+
+    /// The salt; see [`Self::with_salt`].
+    pub fn salt(&self) -> &[u8] {
+        &self.salt
     }
 
     /// The padding policy.
@@ -406,6 +471,31 @@ impl VarLeft {
     pub fn padding(&self) -> Padding {
         self.padding
     }
+
+    /// Parse the bytes produced by [`Self::to_bytes`].
+    pub fn from_slice(data: &[u8]) -> Result<Self, ParseError> {
+        let (count, padding) = parse_chained_header(data).ok_or(ParseError)?;
+        if data.len() != left_len(count) {
+            return Err(ParseError);
+        }
+        if !symbols_in_domain(data, count) {
+            return Err(ParseError);
+        }
+        Ok(parse_left_view(data, count, padding))
+    }
+}
+
+/// Read `xt` and `f` out of a validated left view (a `VarLeft` or the
+/// prefix of a full ciphertext) of `count` blocks, tagged `padding`.
+fn parse_left_view(data: &[u8], count: usize, padding: Padding) -> VarLeft {
+    let xt = data[HEADER_LEN..HEADER_LEN + count].to_vec();
+    let mut f = Vec::with_capacity(count);
+    for n in 0..count {
+        let mut fb = [0u8; F_LEN];
+        fb.copy_from_slice(f_at(data, count, n));
+        f.push(fb);
+    }
+    VarLeft { xt, f, padding }
 }
 
 impl VarCipherText {
@@ -441,13 +531,7 @@ impl VarCipherText {
         if !symbols_in_domain(data, count) {
             return Err(ParseError);
         }
-        let xt = data[HEADER_LEN..HEADER_LEN + count].to_vec();
-        let mut f = Vec::with_capacity(count);
-        for n in 0..count {
-            let mut fb = [0u8; F_LEN];
-            fb.copy_from_slice(f_at(data, count, n));
-            f.push(fb);
-        }
+        let left = parse_left_view(data, count, padding);
         let mut nonce = [0u8; NONCE_LEN];
         nonce.copy_from_slice(nonce_at(data, count));
         let mut blocks = Vec::with_capacity(count);
@@ -457,15 +541,20 @@ impl VarCipherText {
             blocks.push(rb);
         }
         Ok(VarCipherText {
-            left: VarLeft { xt, f, padding },
+            left,
             right: VarRight { nonce, blocks },
         })
     }
 }
 
 /// Write the wire header: version, scheme id, block count, padding policy.
+///
+/// Every ciphertext has at most `u16::MAX` blocks: encryption refuses more
+/// ([`OreError::TooManyBlocks`]) and parsing reads the count from a `u16`.
+/// Were a longer one made, the saturated count would not match its body, so
+/// every parser would refuse the bytes.
 fn write_header(count: usize, padding: Padding, out: &mut Vec<u8>) {
-    WIRE.write(count, out);
+    WIRE.write(u16::try_from(count).unwrap_or(u16::MAX), out);
     out.extend_from_slice(&padding.to_wire());
 }
 
@@ -494,7 +583,8 @@ fn parse_pair(a: &[u8], b: &[u8]) -> Option<(usize, usize)> {
 pub struct OreAes128Bit6Chained<R: Rng + SeedableRng> {
     /// Dedicated CMAC accumulator key (subsumes the fixed-N `prf1`/`prf2`).
     k_acc: [u8; 16],
-    /// Applied by the string encryptors.
+    /// The salt the key was derived under, and the string encryptors'
+    /// padding policy and ceiling.
     options: Options,
     rng: RefCell<R>,
 }
@@ -503,27 +593,42 @@ pub struct OreAes128Bit6Chained<R: Rng + SeedableRng> {
 pub type OreAes128Bit6ChainedChaCha20 = OreAes128Bit6Chained<ChaCha20Rng>;
 
 impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
-    /// Initialise from a single 16-byte key. Unlike the fixed-N schemes (which
-    /// key two PRFs), the chained scheme is **single-key by design**: the CMAC
-    /// accumulator derives every per-block secret from one key via branch tags
-    /// (spec §3), so there is no second key. The accumulator key is `k1` run
-    /// through a labelled AES call for domain separation.
-    ///
-    /// Strings are padded with the default policy, powers of two with a
-    /// 16-byte floor, and may be at most [`DEFAULT_MAX_STR_BYTES`] long
-    /// ([`Options::default`]).
-    pub fn init(k1: &[u8; 16]) -> Result<Self, OreError> {
-        Self::init_with(k1, Options::default())
+    /// Initialise from one 16-byte key with the default [`Options`]: an
+    /// empty salt, strings padded with powers of two from a 16-byte floor,
+    /// and at most [`DEFAULT_MAX_STR_BYTES`] long.
+    pub fn init(key: &[u8; 16]) -> Result<Self, OreError> {
+        Self::init_with(key, Options::default())
     }
 
-    /// [`Self::init`] with the given [`Options`]. Returns
-    /// [`OreError::InitFailed`] for a ceiling of 0, or a policy that would
-    /// pad the empty string or the longest string past [`MAX_STR_BYTES`].
-    pub fn init_with(k1: &[u8; 16], options: Options) -> Result<Self, OreError> {
+    /// Initialise from one 16-byte key and a salt, with the other options
+    /// at their defaults: `init_with(key, Options::default().with_salt(salt))`.
+    /// The same constructor as [`OreAes128Bit6::init_with_salt`](crate::scheme::bit2_w6::OreAes128Bit6::init_with_salt).
+    pub fn init_with_salt(key: &[u8; 16], salt: &[u8]) -> Result<Self, OreError> {
+        Self::init_with(key, Options::default().with_salt(salt))
+    }
+
+    /// Initialise from one 16-byte key and the given [`Options`]: the salt
+    /// naming what the key is for, the string padding policy and the
+    /// string ceiling. Returns [`OreError::InitFailed`] for a ceiling of
+    /// 0, or a policy that would pad the empty string or the longest
+    /// string past [`MAX_STR_BYTES`].
+    ///
+    /// The CMAC accumulator derives every per-block secret from one key
+    /// via branch tags (spec §3), keyed by `AES_{k_salt}(ACC_KEY_LABEL)`
+    /// with `k_salt = CMAC_{AES_key(ROOT_LABEL)}(salt)`; see the
+    /// crate-private `scheme::keys` for the stages and their argument.
+    ///
+    /// Ciphertexts under different salts share no key material, but
+    /// nothing on the wire records the salt, so the comparators cannot
+    /// refuse a mismatched pair: they return a confident, meaningless
+    /// result, `Equal` included (the unpadded empty string has no blocks
+    /// and compares `Equal` under any salts), so no result confirms that
+    /// two salts match. Keep the salt with the identity of the stored
+    /// data, as you keep the key.
+    pub fn init_with(key: &[u8; 16], options: Options) -> Result<Self, OreError> {
         options.check()?;
-        let cipher = Aes128Enc::new(GenericArray::from_slice(k1));
-        let mut k_acc = ACC_KEY_LABEL;
-        cipher.encrypt_block(GenericArray::from_mut_slice(&mut k_acc));
+        let k_salt = keys::salted(&keys::root(key, &ROOT_LABEL), options.salt());
+        let k_acc = *keys::subkey(&k_salt, &ACC_KEY_LABEL);
         Ok(Self {
             k_acc,
             options,
@@ -532,8 +637,8 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     }
 
     /// The options this cipher was initialised with.
-    pub fn options(&self) -> Options {
-        self.options
+    pub fn options(&self) -> &Options {
+        &self.options
     }
 
     /// The padding policy the string encryptors apply.
@@ -542,7 +647,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     }
 
     /// Derive the per-block PRP from the accumulator's `PRP_STREAM` branch.
-    fn prp_at(&self, acc: &CmacAccumulator, n: u16) -> Result<LemireFyPrp<DOMAIN>, OreError> {
+    fn prp_at(&self, acc: &CmacAccumulator, n: u16) -> LemireFyPrp<DOMAIN> {
         let mut stream = [0u8; STREAM_BLOCKS * 16];
         for (c, chunk) in stream.chunks_mut(16).enumerate() {
             chunk.copy_from_slice(&acc.finalize(&final_block(
@@ -552,9 +657,9 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
                 WIDTH_BIT6,
             )));
         }
-        let prp = LemireFyPrp::<DOMAIN>::from_stream(&stream)?;
+        let prp = LemireFyPrp::<DOMAIN>::from_stream(&stream);
         stream.zeroize();
-        Ok(prp)
+        prp
     }
 
     /// Full Left+Right ciphertext for raw symbols `x` (one 6-bit symbol per
@@ -600,7 +705,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         for n in 0..count {
             let sym = x.symbol(n);
             let n16 = n as u16;
-            let prp = self.prp_at(&acc, n16)?;
+            let prp = self.prp_at(&acc, n16);
             let permuted = prp.permute(sym).get();
             xt.push(permuted);
 
@@ -669,7 +774,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
         for n in 0..count {
             let sym = x.symbol(n);
             let n16 = n as u16;
-            let prp = self.prp_at(&acc, n16)?;
+            let prp = self.prp_at(&acc, n16);
             let permuted = prp.permute(sym).get();
             xt.push(permuted);
             f.push(acc.finalize(&final_block(
@@ -708,6 +813,69 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     pub fn encrypt_left_str(&self, s: &str) -> Result<VarLeft, OreError> {
         stack::scrubbed(|| {
             self.encrypt_left_blocks(&str_to_blocks(s, &self.options)?, self.padding())
+        })
+    }
+
+    /// Encrypt a fixed-length value (`u128`, `i128`, `Decimal`, …) through
+    /// its order-preserving [`FixedOrderableBytes`] encoding. This is how
+    /// types too wide for the packed prefix of `OreAes128Bit6` (more than
+    /// 14 blocks) get a 6-bit-block ciphertext: the accumulator has no
+    /// length cap.
+    ///
+    /// Every value of one type encodes to the same number of bytes, so the
+    /// lexicographic comparators order these ciphertexts as the plaintexts.
+    /// The encoding is not padded (there is no length to hide) and the
+    /// cipher's [`Options`] do not apply: the ciphertext is tagged
+    /// [`Padding::None`], and the string ceiling is not checked.
+    /// The output is an untyped [`VarCipherText`]; the [`OreEncrypt`] impls
+    /// wrap it in [`ChainedCipherText`], which pins the block count so the
+    /// typed parsers and comparators refuse a ciphertext of another length
+    /// or a padded one. That is a length guard, not a type guard:
+    /// ciphertexts of two types with equal-length encodings (`u128` and
+    /// `i128`, or an unpadded 16-byte string) compare, and equal encodings
+    /// under one key give equal ciphertexts. Use one key per kind of value.
+    ///
+    /// A type whose encoding is longer than [`MAX_STR_BYTES`] returns
+    /// [`OreError::TooManyBlocks`] before the encoding is made (`[u8; N]`
+    /// is a `FixedOrderableBytes` for any `N`). The encoding is borrowed
+    /// where the type allows it, so a byte array is never copied onto the
+    /// stack.
+    pub fn encrypt_fixed<T: FixedOrderableBytes>(&self, x: &T) -> Result<VarCipherText, OreError> {
+        check_fixed_len::<T>()?;
+        // The borrowed encoding: a byte array is not copied, so a large one
+        // leaves no plaintext past the scrub's reach. A type that does
+        // build its encoding (an integer's 16 bytes) builds it in this
+        // frame, so it is made inside the scrub.
+        stack::scrubbed(|| {
+            let bytes = x.to_orderable_bytes();
+            self.encrypt_blocks(&bytes_to_blocks(bytes.as_ref())?, Padding::None)
+        })
+    }
+
+    /// Left-only ciphertext of a fixed-length value; see
+    /// [`Self::encrypt_fixed`].
+    pub fn encrypt_left_fixed<T: FixedOrderableBytes>(&self, x: &T) -> Result<VarLeft, OreError> {
+        check_fixed_len::<T>()?;
+        stack::scrubbed(|| {
+            let bytes = x.to_orderable_bytes();
+            self.encrypt_left_blocks(&bytes_to_blocks(bytes.as_ref())?, Padding::None)
+        })
+    }
+
+    /// Encrypt bytes already encoded so that byte order is value order
+    /// (MSB-first 6-bit blocks): [`Self::encrypt_str`] over bytes rather
+    /// than a string, padded and refused as it is. Crate-private on
+    /// purpose: the only encoded bytes this crate accepts from outside
+    /// arrive sealed, as a vitaminc `OrderPlaintext` through the `vitaminc`
+    /// module, so a caller cannot hand the scheme bytes that skipped the
+    /// encoding.
+    #[cfg(feature = "vitaminc")]
+    pub(crate) fn encrypt_bytes(&self, bytes: &[u8]) -> Result<VarCipherText, OreError> {
+        stack::scrubbed(|| {
+            self.encrypt_blocks(
+                &padded_bytes_to_blocks(bytes, &self.options)?,
+                self.padding(),
+            )
         })
     }
 
@@ -804,12 +972,248 @@ fn symbols_in_domain(view: &[u8], count: usize) -> bool {
     (0..count).all(|i| usize::from(xt_at(view, i)) < DOMAIN)
 }
 
+/// The block count of a serialised view whose header is this scheme's and
+/// whose padding tag is [`Padding::None`], the only tag the fixed-length
+/// path writes; `None` for any other header.
+fn unpadded_count(view: &[u8]) -> Option<usize> {
+    let (count, padding) = parse_chained_header(view)?;
+    (padding == Padding::None).then_some(count)
+}
+
+// ---------------------------------------------------------------------------
+// Fixed-length plaintexts: block-count-typed outputs and `OreEncrypt` impls.
+// ---------------------------------------------------------------------------
+
+/// Left half of a chained ciphertext for a fixed-length plaintext of exactly
+/// `BLOCKS` 6-bit blocks (a `u128` or `i128` is [`U128_BLOCKS`] = 22). The
+/// bytes are those of an unpadded [`VarLeft`] of that length — same wire
+/// format, same scheme id, tagged [`Padding::None`] — so the untyped
+/// comparators accept them. The type pins the block count:
+/// [`OreOutput::from_slice`] and the typed comparators on
+/// [`ChainedCipherText`] reject any other count, and any padded ciphertext,
+/// which keeps a fixed-length type's ciphertexts out of the lexicographic
+/// (shorter-first) ordering the scheme applies across lengths.
+#[derive(Clone, Debug)]
+pub struct ChainedLeft<const BLOCKS: usize>(VarLeft);
+
+/// Full chained ciphertext for a fixed-length plaintext of exactly `BLOCKS`
+/// 6-bit blocks; see [`ChainedLeft`].
+#[derive(Clone, Debug)]
+pub struct ChainedCipherText<const BLOCKS: usize>(VarCipherText);
+
+impl<const BLOCKS: usize> ChainedLeft<BLOCKS> {
+    /// The untyped ciphertext.
+    pub fn as_var(&self) -> &VarLeft {
+        &self.0
+    }
+
+    /// The untyped ciphertext.
+    pub fn into_var(self) -> VarLeft {
+        self.0
+    }
+}
+
+impl<const BLOCKS: usize> ChainedCipherText<BLOCKS> {
+    /// The untyped ciphertext.
+    pub fn as_var(&self) -> &VarCipherText {
+        &self.0
+    }
+
+    /// The untyped ciphertext.
+    pub fn into_var(self) -> VarCipherText {
+        self.0
+    }
+
+    /// Compare two serialised full ciphertexts of exactly `BLOCKS` blocks,
+    /// both unpadded. `None` if either is malformed, padded, or has another
+    /// block count, where [`OreAes128Bit6Chained::compare_raw_slices`]
+    /// would order them lexicographically. An unpadded 16-byte string is
+    /// also 22 blocks: the count is a guard against mixing types, not a
+    /// proof of the plaintext type.
+    pub fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering> {
+        if unpadded_count(a)? != BLOCKS || unpadded_count(b)? != BLOCKS {
+            return None;
+        }
+        OreAes128Bit6ChainedChaCha20::compare_raw_slices(a, b)
+    }
+
+    /// Compare a serialised [`ChainedLeft`] against a serialised full
+    /// ciphertext, both of exactly `BLOCKS` blocks; see
+    /// [`Self::compare_raw_slices`] and
+    /// [`OreAes128Bit6Chained::compare_left_to_full`].
+    pub fn compare_left_to_full(left: &[u8], full: &[u8]) -> Option<Ordering> {
+        if unpadded_count(left)? != BLOCKS || unpadded_count(full)? != BLOCKS {
+            return None;
+        }
+        OreAes128Bit6ChainedChaCha20::compare_left_to_full(left, full)
+    }
+}
+
+impl<const BLOCKS: usize> From<ChainedLeft<BLOCKS>> for VarLeft {
+    fn from(left: ChainedLeft<BLOCKS>) -> Self {
+        left.0
+    }
+}
+
+impl<const BLOCKS: usize> From<ChainedCipherText<BLOCKS>> for VarCipherText {
+    fn from(ct: ChainedCipherText<BLOCKS>) -> Self {
+        ct.0
+    }
+}
+
+/// Succeeds only for an unpadded ciphertext of exactly `BLOCKS` blocks.
+impl<const BLOCKS: usize> TryFrom<VarLeft> for ChainedLeft<BLOCKS> {
+    type Error = ParseError;
+    fn try_from(left: VarLeft) -> Result<Self, ParseError> {
+        if left.xt.len() != BLOCKS || left.padding != Padding::None {
+            return Err(ParseError);
+        }
+        Ok(Self(left))
+    }
+}
+
+/// Succeeds only for an unpadded ciphertext of exactly `BLOCKS` blocks.
+impl<const BLOCKS: usize> TryFrom<VarCipherText> for ChainedCipherText<BLOCKS> {
+    type Error = ParseError;
+    fn try_from(ct: VarCipherText) -> Result<Self, ParseError> {
+        if ct.left.xt.len() != BLOCKS || ct.left.padding != Padding::None {
+            return Err(ParseError);
+        }
+        Ok(Self(ct))
+    }
+}
+
+impl<const BLOCKS: usize> OreOutput for ChainedLeft<BLOCKS> {
+    fn size() -> usize {
+        left_len(BLOCKS)
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        self.0.to_bytes()
+    }
+
+    fn from_slice(data: &[u8]) -> Result<Self, ParseError> {
+        VarLeft::from_slice(data)?.try_into()
+    }
+}
+
+impl<const BLOCKS: usize> OreOutput for ChainedCipherText<BLOCKS> {
+    fn size() -> usize {
+        total_len(BLOCKS)
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        self.0.to_bytes()
+    }
+
+    fn from_slice(data: &[u8]) -> Result<Self, ParseError> {
+        VarCipherText::from_slice(data)?.try_into()
+    }
+}
+
+/// `OreEncrypt` for a fixed-length type on the chained scheme. Each
+/// invocation also emits a test that the type round-trips, orders `$lo`
+/// below `$hi`, and compares equal across nonces, so a type cannot be
+/// listed as supported without being exercised (issue #105).
+macro_rules! impl_ore_encrypt_chained {
+    ($type:ty, $blocks_const:ident, $tests:ident, $lo:expr, $hi:expr) => {
+        /// Block count of this type on the chained scheme (6-bit blocks).
+        pub const $blocks_const: usize =
+            num_blocks_6bit(<$type as FixedOrderableBytes>::ENCODED_LEN);
+
+        impl<R: Rng + SeedableRng> OreEncrypt<OreAes128Bit6Chained<R>> for $type {
+            type LeftOutput = ChainedLeft<$blocks_const>;
+            type FullOutput = ChainedCipherText<$blocks_const>;
+
+            fn encrypt_left(
+                &self,
+                cipher: &OreAes128Bit6Chained<R>,
+            ) -> Result<Self::LeftOutput, OreError> {
+                cipher.encrypt_left_fixed(self).map(ChainedLeft)
+            }
+
+            fn encrypt(
+                &self,
+                cipher: &OreAes128Bit6Chained<R>,
+            ) -> Result<Self::FullOutput, OreError> {
+                cipher.encrypt_fixed(self).map(ChainedCipherText)
+            }
+        }
+
+        #[cfg(test)]
+        mod $tests {
+            use super::*;
+
+            #[test]
+            fn round_trip_order_and_equality() {
+                let ore = OreAes128Bit6ChainedChaCha20::init(&[0x11; 16]).unwrap();
+                let (lo, hi): ($type, $type) = ($lo, $hi);
+                assert!(lo < hi);
+
+                let lo_ct = lo.encrypt(&ore).unwrap();
+                let hi_ct = hi.encrypt(&ore).unwrap();
+                let lo_left = lo.encrypt_left(&ore).unwrap();
+                let lo_ct2 = lo.encrypt(&ore).unwrap();
+
+                let lo_bytes = lo_ct.to_bytes();
+                let hi_bytes = hi_ct.to_bytes();
+                assert_eq!(lo_bytes.len(), ChainedCipherText::<$blocks_const>::size());
+                assert_eq!(
+                    lo_left.to_bytes().len(),
+                    ChainedLeft::<$blocks_const>::size()
+                );
+                assert_eq!(
+                    ChainedCipherText::<$blocks_const>::from_slice(&lo_bytes)
+                        .unwrap()
+                        .to_bytes(),
+                    lo_bytes
+                );
+                assert_eq!(
+                    ChainedLeft::<$blocks_const>::from_slice(&lo_left.to_bytes())
+                        .unwrap()
+                        .to_bytes(),
+                    lo_left.to_bytes()
+                );
+
+                let cmp = ChainedCipherText::<$blocks_const>::compare_raw_slices;
+                assert_eq!(cmp(&lo_bytes, &hi_bytes), Some(Ordering::Less));
+                assert_eq!(cmp(&hi_bytes, &lo_bytes), Some(Ordering::Greater));
+                assert_ne!(lo_bytes, lo_ct2.to_bytes());
+                assert_eq!(cmp(&lo_bytes, &lo_ct2.to_bytes()), Some(Ordering::Equal));
+                assert_eq!(
+                    ChainedCipherText::<$blocks_const>::compare_left_to_full(
+                        &lo_left.to_bytes(),
+                        &hi_bytes
+                    ),
+                    Some(Ordering::Less)
+                );
+            }
+        }
+    };
+}
+
+// `u128`/`i128` are 22 blocks, past the 14-block packed prefix of
+// `OreAes128Bit6` and the 15-byte limit of the legacy scheme; the chained
+// scheme is the only one that takes them.
+impl_ore_encrypt_chained!(u128, U128_BLOCKS, u128_tests, 0u128, u128::MAX);
+impl_ore_encrypt_chained!(i128, I128_BLOCKS, i128_tests, i128::MIN, i128::MAX);
+
 /// Longest string, in UTF-8 bytes, whose block count fits the wire format's
 /// `u16`: `⌈8n/6⌉ ≤ 65_535` gives `n ≤ 49_151`.
 pub const MAX_STR_BYTES: usize = u16::MAX as usize * 6 / 8;
 
 const _: () = assert!(num_blocks_6bit(MAX_STR_BYTES) <= u16::MAX as usize);
 const _: () = assert!(num_blocks_6bit(MAX_STR_BYTES + 1) > u16::MAX as usize);
+
+/// Refuse a fixed-length type whose encoding would not fit the wire format,
+/// before [`OreAes128Bit6Chained::encrypt_fixed`] copies the encoding onto
+/// the stack. Decided by the type, so it never depends on the value.
+fn check_fixed_len<T: FixedOrderableBytes>() -> Result<(), OreError> {
+    if T::ENCODED_LEN > MAX_STR_BYTES {
+        return Err(OreError::TooManyBlocks);
+    }
+    Ok(())
+}
 
 /// Check raw symbols for the tests' `encrypt_var` and `encrypt_left_var`,
 /// refusing more blocks than the wire format can number *before* scanning
@@ -827,7 +1231,14 @@ fn check_symbols(x: &[u8]) -> Result<Blocks6<&[u8]>, OreError> {
 /// allocating or decomposing it. The decomposition is the whole plaintext
 /// (it inverts), so the buffer is wiped when dropped.
 fn str_to_blocks(s: &str, options: &Options) -> Result<Blocks6<Zeroizing<Vec<u8>>>, OreError> {
-    let bytes = s.as_bytes();
+    padded_bytes_to_blocks(s.as_bytes(), options)
+}
+
+/// [`str_to_blocks`] over any bytes.
+fn padded_bytes_to_blocks(
+    bytes: &[u8],
+    options: &Options,
+) -> Result<Blocks6<Zeroizing<Vec<u8>>>, OreError> {
     if bytes.len() > MAX_STR_BYTES {
         return Err(OreError::TooManyBlocks);
     }
@@ -842,6 +1253,20 @@ fn str_to_blocks(s: &str, options: &Options) -> Result<Blocks6<Zeroizing<Vec<u8>
     Ok(Blocks6::decompose_padded(
         bytes,
         Zeroizing::new(vec![0u8; num_blocks_6bit(padded)]),
+    ))
+}
+
+/// Decompose `bytes` into 6-bit blocks, unpadded, refusing input too long
+/// for the wire format *before* allocating or decomposing it. The fixed-
+/// length path: the decomposition is the whole plaintext (it inverts), so
+/// the buffer is wiped when dropped.
+fn bytes_to_blocks(bytes: &[u8]) -> Result<Blocks6<Zeroizing<Vec<u8>>>, OreError> {
+    if bytes.len() > MAX_STR_BYTES {
+        return Err(OreError::TooManyBlocks);
+    }
+    Ok(Blocks6::decompose(
+        bytes,
+        Zeroizing::new(vec![0u8; num_blocks_6bit(bytes.len())]),
     ))
 }
 
@@ -1070,6 +1495,57 @@ mod tests {
                 .to_bytes(),
             unpadded.encrypt_left_str("alice").unwrap().to_bytes()
         );
+    }
+
+    /// `init` is the empty salt; another salt gives unrelated ciphertexts,
+    /// and the same salt reproduces them. The two salts have equal
+    /// lengths, so the length prefix alone cannot separate them.
+    #[test]
+    fn salt_separates_keys() {
+        type C = OreAes128Bit6ChainedChaCha20;
+        let key = [0x42u8; 16];
+        let plain = C::init(&key).unwrap();
+        let empty = C::init_with_salt(&key, &[]).unwrap();
+        let col_a = C::init_with_salt(&key, b"users.email").unwrap();
+        let col_a2 = C::init_with_salt(&key, b"users.email").unwrap();
+        let col_b = C::init_with_salt(&key, b"users.phone").unwrap();
+        let col_a_opts = C::init_with(&key, Options::default().with_salt(b"users.email")).unwrap();
+        assert_eq!(col_a.options().salt(), b"users.email");
+
+        let left = |c: &C| c.encrypt_left_str("alice").unwrap().to_bytes();
+        assert_eq!(left(&plain), left(&empty));
+        assert_eq!(left(&col_a), left(&col_a2));
+        assert_eq!(left(&col_a), left(&col_a_opts));
+        assert_ne!(left(&plain), left(&col_a));
+        assert_ne!(left(&col_a), left(&col_b));
+
+        let a = col_a.encrypt_str("alice").unwrap().to_bytes();
+        let b = col_b.encrypt_str("alice").unwrap().to_bytes();
+        assert_ne!(C::compare_raw_slices(&a, &b), Some(Ordering::Equal));
+        assert_eq!(
+            C::compare_raw_slices(&a, &col_a2.encrypt_str("alice").unwrap().to_bytes()),
+            Some(Ordering::Equal)
+        );
+        // Typed fixed-length values too.
+        assert_ne!(
+            7u128.encrypt_left(&col_a).unwrap().to_bytes(),
+            7u128.encrypt_left(&col_b).unwrap().to_bytes()
+        );
+    }
+
+    /// A cross-salt comparison can answer `Equal`: the unpadded empty
+    /// string has no blocks, so there is no key material to differ.
+    /// The docs therefore promise nothing about cross-salt results.
+    #[test]
+    fn cross_salt_empty_strings_compare_equal() {
+        type C = OreAes128Bit6ChainedChaCha20;
+        let key = [0x42u8; 16];
+        let options = Options::default().with_padding(Padding::None);
+        let a = C::init_with(&key, options.clone().with_salt(b"users.email")).unwrap();
+        let b = C::init_with(&key, options.with_salt(b"users.phone")).unwrap();
+        let a = a.encrypt_str("").unwrap().to_bytes();
+        let b = b.encrypt_str("").unwrap().to_bytes();
+        assert_eq!(C::compare_raw_slices(&a, &b), Some(Ordering::Equal));
     }
 
     #[test]
@@ -1538,7 +2014,7 @@ mod tests {
 
     /// A ciphertext whose tag names a policy that cannot produce its block
     /// count was made by no cipher, and is refused: rewriting an unpadded
-    /// ciphertext's tag does not smuggle it into a padded column.
+    /// ciphertext's tag does not smuggle it in among padded ciphertexts.
     #[test]
     fn parsers_reject_counts_the_policy_cannot_produce() {
         type C = OreAes128Bit6ChainedChaCha20;
@@ -1605,6 +2081,142 @@ mod tests {
         let long_b = "aaaaaaaaaaaaaaaaaaaaaaab";
         assert_eq!(cmp(&c, long_a, long_b), Ordering::Less);
         assert_eq!(cmp(&c, long_a, long_a), Ordering::Equal);
+    }
+
+    /// A typed (fixed-length) ciphertext is a 22-block `Var*` on the wire,
+    /// so the untyped comparators order it against anything; the typed
+    /// parsers and comparators take only the pinned block count.
+    #[test]
+    fn fixed_length_outputs_pin_the_block_count() {
+        let c = ore();
+        let n = 7u128.encrypt(&c).unwrap();
+        let n_left = 7u128.encrypt_left(&c).unwrap();
+        // Strings are unpadded here: a padded one carries another policy
+        // tag, which every comparator refuses before looking at the count.
+        let unpadded = ore_with(Padding::None);
+        // 5 bytes = 7 blocks.
+        let s = unpadded.encrypt_str("alice").unwrap();
+        // 16 bytes = 22 blocks; and the same string padded (to 16 bytes).
+        let s16 = unpadded.encrypt_str("0123456789abcdef").unwrap();
+        let s16_padded = c.encrypt_str("0123456789abcdef").unwrap();
+        assert_eq!(s16_padded.left.xt.len(), U128_BLOCKS);
+        assert_eq!(n.as_var().left.xt.len(), U128_BLOCKS);
+        assert_eq!(U128_BLOCKS, 22);
+        assert_eq!(I128_BLOCKS, 22);
+
+        // Same bytes as the untyped artefact of the same value.
+        assert_eq!(
+            VarCipherText::from_slice(&n.to_bytes()).unwrap().to_bytes(),
+            n.to_bytes()
+        );
+        assert_eq!(
+            VarLeft::from_slice(&n_left.to_bytes()).unwrap().to_bytes(),
+            n_left.to_bytes()
+        );
+
+        // Untyped: lexicographic across lengths. Typed: refused.
+        assert!(
+            OreAes128Bit6ChainedChaCha20::compare_raw_slices(&n.to_bytes(), &s.to_bytes())
+                .is_some()
+        );
+        let cmp = ChainedCipherText::<U128_BLOCKS>::compare_raw_slices;
+        assert_eq!(cmp(&n.to_bytes(), &s.to_bytes()), None);
+        assert_eq!(cmp(&s.to_bytes(), &n.to_bytes()), None);
+        assert_eq!(
+            ChainedCipherText::<U128_BLOCKS>::compare_left_to_full(
+                &n_left.to_bytes(),
+                &s.to_bytes()
+            ),
+            None
+        );
+        assert_eq!(
+            ChainedCipherText::<U128_BLOCKS>::compare_left_to_full(
+                &unpadded.encrypt_left_str("alice").unwrap().to_bytes(),
+                &n.to_bytes()
+            ),
+            None
+        );
+        // The count is the guard, not the type: an unpadded 16-byte string
+        // has 22 blocks too and passes. A padded one of 22 blocks does not.
+        assert!(cmp(&n.to_bytes(), &s16.to_bytes()).is_some());
+        assert_eq!(cmp(&n.to_bytes(), &s16_padded.to_bytes()), None);
+        assert!(ChainedCipherText::<U128_BLOCKS>::from_slice(&s16_padded.to_bytes()).is_err());
+        assert!(ChainedCipherText::<U128_BLOCKS>::try_from(s16_padded.clone()).is_err());
+        assert!(ChainedCipherText::<U128_BLOCKS>::from_slice(&s16.to_bytes()).is_ok());
+
+        // Typed parsers and conversions reject other counts.
+        assert!(ChainedCipherText::<U128_BLOCKS>::from_slice(&s.to_bytes()).is_err());
+        assert!(ChainedLeft::<U128_BLOCKS>::from_slice(
+            &unpadded.encrypt_left_str("alice").unwrap().to_bytes()
+        )
+        .is_err());
+        assert!(ChainedCipherText::<U128_BLOCKS>::try_from(s.clone()).is_err());
+        assert!(ChainedCipherText::<U128_BLOCKS>::try_from(n.clone().into_var()).is_ok());
+        assert!(ChainedCipherText::<23>::from_slice(&n.to_bytes()).is_err());
+        assert!(ChainedLeft::<23>::from_slice(&n_left.to_bytes()).is_err());
+    }
+
+    /// `encrypt_fixed` is what the `OreEncrypt` impls call: same bytes for
+    /// the left half, and the decomposition of the orderable encoding.
+    #[test]
+    fn encrypt_fixed_matches_the_typed_path() {
+        let c = ore();
+        let x = 0x0123_4567_89ab_cdef_u128 << 64 | 0xfedc_ba98_7654_3210;
+        assert_eq!(
+            c.encrypt_left_fixed(&x).unwrap().to_bytes(),
+            x.encrypt_left(&c).unwrap().to_bytes()
+        );
+        let blocks = bytes_to_blocks(&x.to_be_bytes()).unwrap();
+        assert_eq!(
+            c.encrypt_left_var(blocks.as_bytes()).unwrap().to_bytes(),
+            x.encrypt_left(&c).unwrap().to_bytes()
+        );
+        // Untyped output of the fixed path parses as the typed output.
+        let ct = c.encrypt_fixed(&x).unwrap();
+        assert!(ChainedCipherText::<U128_BLOCKS>::from_slice(&ct.to_bytes()).is_ok());
+    }
+
+    /// `[u8; N]` is a fixed-length type for any `N`: one past the wire
+    /// limit is refused by the type's length, before its encoding is
+    /// copied, and the largest that fits is accepted.
+    #[test]
+    fn fixed_types_past_the_wire_limit_are_refused_by_length() {
+        let c = ore();
+        let too_wide = Box::new([0u8; MAX_STR_BYTES + 1]);
+        assert!(matches!(
+            c.encrypt_fixed(&*too_wide),
+            Err(OreError::TooManyBlocks)
+        ));
+        assert!(matches!(
+            c.encrypt_left_fixed(&*too_wide),
+            Err(OreError::TooManyBlocks)
+        ));
+        assert!(matches!(check_fixed_len::<[u8; MAX_STR_BYTES]>(), Ok(())));
+        assert!(matches!(
+            check_fixed_len::<[u8; MAX_STR_BYTES + 1]>(),
+            Err(OreError::TooManyBlocks)
+        ));
+    }
+
+    #[test]
+    fn signed_128_orders_across_zero() {
+        let c = ore();
+        let vals = [i128::MIN, -1, 0, 1, i128::MAX];
+        let cts: Vec<Vec<u8>> = vals
+            .iter()
+            .map(|v| v.encrypt(&c).unwrap().to_bytes())
+            .collect();
+        for (i, a) in cts.iter().enumerate() {
+            for (j, b) in cts.iter().enumerate() {
+                assert_eq!(
+                    ChainedCipherText::<I128_BLOCKS>::compare_raw_slices(a, b),
+                    Some(vals[i].cmp(&vals[j])),
+                    "{} vs {}",
+                    vals[i],
+                    vals[j]
+                );
+            }
+        }
     }
 
     #[test]
@@ -1765,7 +2377,7 @@ mod tests {
                         && matches!(c.encrypt_str(s), Err(OreError::ExceedsPadding));
                 };
                 let mut extended = s.to_owned();
-                extended.extend(std::iter::repeat('\0').take(padded - s.len()));
+                extended.extend(std::iter::repeat_n('\0', padded - s.len()));
                 let left = c.encrypt_left_str(s).unwrap();
                 let a = left.to_bytes();
                 let b = unpadded.encrypt_left_str(&extended).unwrap().to_bytes();
@@ -1832,6 +2444,24 @@ mod tests {
             true
         }
 
+        /// Typed `u128` ciphertexts order as the integers, on both the full
+        /// and the left-query path.
+        fn prop_u128_order(a: u128, b: u128) -> bool {
+            let c = ore();
+            let (ca, cb) = (a.encrypt(&c).unwrap().to_bytes(), b.encrypt(&c).unwrap().to_bytes());
+            let la = a.encrypt_left(&c).unwrap().to_bytes();
+            ChainedCipherText::<U128_BLOCKS>::compare_raw_slices(&ca, &cb) == Some(a.cmp(&b))
+                && ChainedCipherText::<U128_BLOCKS>::compare_left_to_full(&la, &cb) == Some(a.cmp(&b))
+        }
+
+        fn prop_i128_order(a: i128, b: i128) -> bool {
+            let c = ore();
+            let (ca, cb) = (a.encrypt(&c).unwrap().to_bytes(), b.encrypt(&c).unwrap().to_bytes());
+            let la = a.encrypt_left(&c).unwrap().to_bytes();
+            ChainedCipherText::<I128_BLOCKS>::compare_raw_slices(&ca, &cb) == Some(a.cmp(&b))
+                && ChainedCipherText::<I128_BLOCKS>::compare_left_to_full(&la, &cb) == Some(a.cmp(&b))
+        }
+
         /// Two encryptions of one plaintext (fresh nonces each) compare Equal,
         /// and never produce identical bytes (the nonce streams differ).
         fn prop_equality_across_nonces(x: Vec<u8>) -> bool {
@@ -1877,7 +2507,7 @@ mod tests {
         let mut acc = CmacAccumulator::new(&ore.k_acc);
         let mut needles = Vec::new();
         for (n, &sym) in blocks.as_bytes().iter().enumerate() {
-            let prp = ore.prp_at(&acc, n as u16).unwrap();
+            let prp = ore.prp_at(&acc, n as u16);
             let symbols = (0..64).map(crate::primitives::Symbol::<64>::from_low_bits);
             needles.push(symbols.clone().map(|i| prp.permute(i).get()).collect());
             needles.push(symbols.map(|i| prp.invert(i).get()).collect());
@@ -1927,6 +2557,58 @@ mod tests {
                 core::hint::black_box(ore.encrypt_blocks(&blocks, ore.padding()).unwrap());
             },
         );
+    }
+
+    /// A byte array as large as the wire format allows, on the heap: the
+    /// fixed-length encryptors must borrow it. A copy on the stack would be
+    /// larger than the optimised scrub and leave plaintext in dead stack.
+    fn assert_no_fixed_plaintext(encrypt: fn(&OreAes128Bit6ChainedChaCha20, &[u8; MAX_STR_BYTES])) {
+        use crate::primitives::stack::{residue, SCRUB_BYTES};
+        fn plaintext() -> Box<[u8; MAX_STR_BYTES]> {
+            let v: Vec<u8> = (0..MAX_STR_BYTES).map(|i| (i * 37 + 11) as u8).collect();
+            v.into_boxed_slice().try_into().unwrap()
+        }
+        // Windows from the start, middle and end of the array; a copy
+        // that outgrew the scrub leaves at least its deepest part behind.
+        let p = plaintext();
+        let needles: Vec<Vec<u8>> = [0, MAX_STR_BYTES / 2, MAX_STR_BYTES - 64]
+            .iter()
+            .map(|&at| p[at..at + 64].to_vec())
+            .collect();
+
+        // Positive control: the owned encoding, made under the scrub,
+        // survives it when it is larger than the scrub (optimised builds).
+        if MAX_STR_BYTES > SCRUB_BYTES {
+            let dead = residue::after(|| {
+                let p = plaintext();
+                stack::scrubbed(|| {
+                    core::hint::black_box(p.to_fixed_orderable_bytes());
+                });
+            });
+            assert!(needles.iter().any(|n| residue::contains(&dead, n)));
+        }
+
+        let dead = residue::after(move || encrypt(&ore(), &plaintext()));
+        for needle in &needles {
+            assert!(
+                !residue::contains(&dead, needle),
+                "plaintext left in dead stack"
+            );
+        }
+    }
+
+    #[test]
+    fn encrypt_fixed_leaves_no_large_array_on_the_stack() {
+        assert_no_fixed_plaintext(|ore, x| {
+            core::hint::black_box(ore.encrypt_fixed(x).unwrap());
+        });
+    }
+
+    #[test]
+    fn encrypt_left_fixed_leaves_no_large_array_on_the_stack() {
+        assert_no_fixed_plaintext(|ore, x| {
+            core::hint::black_box(ore.encrypt_left_fixed(x).unwrap());
+        });
     }
 
     #[test]

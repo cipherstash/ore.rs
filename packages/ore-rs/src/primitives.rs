@@ -8,6 +8,19 @@ pub(crate) mod stack;
 use aes::cipher::{consts::U16, generic_array::GenericArray};
 use aes::Block;
 use thiserror::Error;
+use zeroize::ZeroizeOnDrop;
+
+// Every AES key schedule in the crate is an `aes::Aes128Enc`: the PRF, the Z2
+// hash, the PRP's PRNG, the CMAC accumulator, the per-block ciphers the PRPs
+// key locally and the v2 subkey derivation (`scheme::keys::aes_block`). Each is wiped on drop only because `Aes128Enc:
+// ZeroizeOnDrop`, which the `aes` crate gates behind its `zeroize` feature.
+// Assert it here, once, so the build fails fast if that feature is ever lost;
+// otherwise the key-schedule wipe would silently vanish while the types above
+// still (falsely) claimed `ZeroizeOnDrop` (ZA-0001).
+const _: fn() = || {
+    fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
+    assert_zeroize_on_drop::<aes::Aes128Enc>();
+};
 pub type AesBlock = Block;
 pub type PrfKey = GenericArray<u8, U16>;
 pub type HashKey = GenericArray<u8, U16>;
@@ -20,11 +33,26 @@ pub trait Prf {
 
 pub trait Hash {
     fn new(key: &HashKey) -> Self;
-    fn hash(&self, data: &[u8]) -> u8;
+    fn hash(&self, data: &[u8; 16]) -> u8;
     /// Hash every block in `input` (in place, trashing it) and pack the
     /// 1-bit outputs LSB-first into `out`: bit `j` of `out` is the hash of
-    /// `input[j]`. `out.len() * 8` must equal `input.len()`.
-    fn hash_all_into(&self, input: &mut [AesBlock], out: &mut [u8]);
+    /// `input[j]`. `D` must be `8 * B`, checked at compile time
+    /// ([`Packed`]).
+    fn hash_all_into<const D: usize, const B: usize>(
+        &self,
+        input: &mut [AesBlock; D],
+        out: &mut [u8; B],
+    );
+}
+
+/// `D` one-bit values packed LSB-first into `B` bytes. [`Self::OK`] is a
+/// compile-time check that they fit exactly; a function taking a
+/// `[_; D]` and a `[u8; B]` evaluates it, so a mismatched pair does not
+/// compile.
+pub(crate) struct Packed<const D: usize, const B: usize>;
+
+impl<const D: usize, const B: usize> Packed<D, B> {
+    pub(crate) const OK: () = assert!(D == 8 * B, "Packed: D values need exactly D / 8 bytes");
 }
 
 #[derive(Debug, Error)]
@@ -86,13 +114,15 @@ pub trait Prp<S>: Sized {
     #[allow(dead_code)]
     fn invert(&self, data: S) -> S;
 
+    /// The indicator mask: one bit per domain value, `[u8; DOMAIN / 8]`.
+    type Mask;
+
     /// XOR the indicator mask for `data` into `out`: bit `j` of the mask is
     /// `1` iff `invert(j) > data`. Bit order matches
-    /// `RightBlock32::set_bit` (LSB-first within each byte). `out.len() * 8`
-    /// must equal the permutation domain.
+    /// `RightBlock32::set_bit` (LSB-first within each byte).
     ///
     /// This is the bulk form of the per-`j` `invert`-and-compare loop the
     /// right-ciphertext encoder needs; implementations walk their inverse
     /// table linearly instead of doing `DOMAIN` indexed lookups.
-    fn indicator_mask_xor(&self, data: S, out: &mut [u8]);
+    fn indicator_mask_xor(&self, data: S, out: &mut Self::Mask);
 }

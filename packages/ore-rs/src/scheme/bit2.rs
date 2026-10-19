@@ -38,8 +38,9 @@ pub struct OreAes128<R: Rng + SeedableRng> {
     rng: RefCell<R>,
 }
 
-// Opaque Debug: never render key material. (`Aes128`'s own Debug is already
-// opaque, but spell it out so the guarantee can't regress.)
+// Opaque Debug: never render key material. (`Aes128Prf`, which holds each
+// key, already has an opaque Debug, but spell it out here too so the
+// guarantee can't regress.)
 impl<R: Rng + SeedableRng> std::fmt::Debug for OreAes128<R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OreAes128").finish_non_exhaustive()
@@ -99,13 +100,20 @@ pub(crate) fn encode_right_block<W: BlockWidth, H: Hash>(
     prp: &W::Prp,
     x: W::Symbol,
     hasher: &H,
-    ro_blocks: &mut [AesBlock],
+    ro_blocks: &mut W::RoKeyBuf,
 ) {
-    debug_assert_eq!(ro_blocks.len(), W::DOMAIN);
-    let out = block.as_mut_bytes();
-    hasher.hash_all_into(ro_blocks, out);
+    let out = block.as_mut_bits();
+    W::hash_into(hasher, ro_blocks, out);
     prp.indicator_mask_xor(x, out);
 }
+
+/// Maximum number of blocks (= plaintext bytes): the left-tag input packs
+/// `prefix ‖ xt ‖ index@N` into one 16-byte AES block, so `N ≤ 15`. A
+/// 16-byte plaintext (`u128`/`i128`) used to index past the block and panic
+/// (issue #105); `encrypt`/`encrypt_left` now return
+/// [`OreError::TooManyBlocks`], and the `OreEncrypt` impls refuse such types
+/// at compile time.
+pub const MAX_BLOCKS: usize = 15;
 
 impl<R: Rng + SeedableRng> OreAes128<R> {
     /// Fill `left` with the PRF₁ tag inputs and permuted values for `x`,
@@ -132,14 +140,12 @@ impl<R: Rng + SeedableRng> OreAes128<R> {
     }
 }
 
-impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
-    type LeftBlockType = LeftBlock16;
-    type RightBlockType = RightBlock32;
-
-    fn init(k1: &[u8; 16], k2: &[u8; 16]) -> Result<Self, OreError> {
-        // TODO: k1 and k2 should be Key types and we should have a set of traits to abstract the
-        // behaviour ro parsing/loading etc
-
+impl<R: Rng + SeedableRng> OreAes128<R> {
+    /// Initialise the cipher from two 16-byte keys: `k1` keys PRF₁ (the
+    /// per-block tags) and `k2` keys PRF₂ (the per-block PRP seeds),
+    /// directly. The wire format is frozen, so this stays two-key and
+    /// unsalted; the v2 schemes take one key and a salt.
+    pub fn init(k1: &[u8; 16], k2: &[u8; 16]) -> Result<Self, OreError> {
         let rng: R = SeedableRng::from_entropy();
 
         Ok(OreAes128 {
@@ -148,8 +154,16 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
             rng: RefCell::new(rng),
         })
     }
+}
+
+impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
+    type LeftBlockType = LeftBlock16;
+    type RightBlockType = RightBlock32;
 
     fn encrypt_left<const N: usize>(&self, x: &PlainText<N>) -> EncryptLeftResult<R, N> {
+        if N > MAX_BLOCKS {
+            return Err(OreError::TooManyBlocks);
+        }
         let mut output = Left::<Self, N>::init();
 
         let seeds = derive_prp_seeds(&self.prf2, x);
@@ -160,6 +174,9 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128<R> {
     }
 
     fn encrypt<const N: usize>(&self, x: &PlainText<N>) -> EncryptResult<R, N> {
+        if N > MAX_BLOCKS {
+            return Err(OreError::TooManyBlocks);
+        }
         let mut left = Left::<Self, N>::init();
         let mut right = Right::<Self, N>::init();
 
@@ -376,6 +393,23 @@ mod tests {
 
     type Ore = OreAes128ChaCha20;
 
+    /// A 16-byte plaintext does not fit the left-tag input (issue #105): an
+    /// error, not an out-of-bounds panic. 15 bytes is the most the scheme takes.
+    #[test]
+    fn sixteen_bytes_is_an_error_not_a_panic() {
+        let ore = init_ore();
+        assert!(matches!(
+            ore.encrypt(&[0u8; 16]),
+            Err(OreError::TooManyBlocks)
+        ));
+        assert!(matches!(
+            ore.encrypt_left(&[0u8; 16]),
+            Err(OreError::TooManyBlocks)
+        ));
+        assert!(ore.encrypt(&[0u8; 15]).is_ok());
+        assert!(ore.encrypt_left(&[0u8; 15]).is_ok());
+    }
+
     fn init_ore() -> Ore {
         let mut k1: [u8; 16] = Default::default();
         let mut k2: [u8; 16] = Default::default();
@@ -385,7 +419,7 @@ mod tests {
         rng.fill(&mut k1);
         rng.fill(&mut k2);
 
-        OreCipher::init(&k1, &k2).unwrap()
+        OreAes128ChaCha20::init(&k1, &k2).unwrap()
     }
 
     /// The legacy wire has no header, so the comparator infers the block
@@ -648,8 +682,8 @@ mod tests {
             49, 50, 51, 52, 53, 54, 55, 56, 57, 48, 97, 98, 99, 100, 101, 102,
         ];
 
-        let ore1: OreAes128ChaCha20 = OreCipher::init(&k1, &k2).unwrap();
-        let ore2: OreAes128ChaCha20 = OreCipher::init(&k3, &k2).unwrap();
+        let ore1: OreAes128ChaCha20 = OreAes128ChaCha20::init(&k1, &k2).unwrap();
+        let ore2: OreAes128ChaCha20 = OreAes128ChaCha20::init(&k3, &k2).unwrap();
 
         let a = 1000u32.encrypt(&ore1).unwrap().to_bytes();
         let b = 1000u32.encrypt(&ore2).unwrap().to_bytes();
@@ -669,8 +703,8 @@ mod tests {
             49, 50, 51, 52, 53, 54, 55, 56, 57, 48, 97, 98, 99, 100, 101, 102,
         ];
 
-        let ore1: OreAes128ChaCha20 = OreCipher::init(&k1, &k2).unwrap();
-        let ore2: OreAes128ChaCha20 = OreCipher::init(&k1, &k3).unwrap();
+        let ore1: OreAes128ChaCha20 = OreAes128ChaCha20::init(&k1, &k2).unwrap();
+        let ore2: OreAes128ChaCha20 = OreAes128ChaCha20::init(&k1, &k3).unwrap();
 
         let a = 1000u32.encrypt(&ore1).unwrap().to_bytes();
         let b = 1000u32.encrypt(&ore2).unwrap().to_bytes();

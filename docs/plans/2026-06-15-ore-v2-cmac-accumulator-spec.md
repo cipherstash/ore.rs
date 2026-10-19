@@ -75,17 +75,24 @@ a labelled KDF distinct from every other use (the fixed-N `prf1`/`prf2`, H's
 public `π`, the nonce RNG):
 
 ```
-k = E_{k1}( "ORE.v2.chain.acc" )      # the 16 ASCII bytes, no terminator; one AES call
+k_root = E_{key}( "ORE.v2.chainroot" )                        # one AES call; the only use of `key`
+k_salt = CMAC_{k_root}( len(salt):u64 ‖ salt ‖ 0… ‖ "ORE.v2.salt.done" )   # full blocks, length-prefixed
+k      = E_{k_salt}( "ORE.v2.chain.acc" )
 ```
 
-The label is exactly one AES block: the 16 bytes
-`4f 52 45 2e 76 32 2e 63 68 61 69 6e 2e 61 63 63`. The key slot is `k1`; the
-chained scheme's `init` takes that one key (`chained.rs`, `ACC_KEY_LABEL`). No
-legacy PRF input equals the label: legacy PRF₁ inputs end in a block index
-`0..=14` and legacy PRF₂ inputs end in `0x00`, and the label ends in `c` (`0x63`).
-It also differs from the Bit6 labels, which are encrypted under the same `k1`. A
-dedicated key makes the accumulator's PRF security self-contained: no cross-use
-collisions with the fixed-N schemes or with H. The chained scheme therefore
+(Revised 2026-10-16, issue #89 / PR #114; the original was the single call
+`k = E_{k1}("ORE.v2.chain.acc")`.) The caller's `key` is evaluated on nothing
+but the root label, so the scheme learns nothing about any other use of the
+key. No legacy PRF input equals the root label: legacy PRF₁ inputs end in a
+block index `0..=14` and legacy PRF₂ inputs end in `0x00`, and the label ends
+in `t` (`0x74`). The salt is the caller's name for what the key is for (a
+data set, a tenant, a plaintext type; `init(key)` is the empty salt); it is
+absorbed as full CMAC blocks behind a length prefix, so the encoding is
+injective and `k_salt` is a CMAC tag over a prefix-free message. Ciphertexts
+under different salts share no key material. Bit6 uses the same three stages
+with its own root label (`ORE.v2.bit6.root`) and two PRF labels; see
+`scheme/keys.rs`. A dedicated key makes the accumulator's PRF security
+self-contained: no cross-use collisions with the fixed-N schemes or with H. The chained scheme therefore
 **unifies the old `prf1` and `prf2`** into one key, domain-separated by the
 **branch tag** (the `RO_KEY` / `PRP_STREAM` output families defined in §4) —
 PRF₂ is subsumed.
@@ -101,8 +108,9 @@ Two consequences for review:
 - **vs fixed-N (#82):** that scheme keeps two secret keys (`prf1`/`prf2`); the
   unification is a *chained-scheme* choice, not retroactive.
 - **vs the `init(k1, k2)` API:** `k` is KDF-derived, so a single master input
-  suffices, and the chained scheme's `init` takes `k1` only (open question 1,
-  resolved). The alternative design — two keys, one per branch, no branch tag —
+  suffices: the chained scheme's `init` takes one key, and `init_with_salt`
+  (or `init_with` and `Options::with_salt`) adds a salt (open question 1,
+  resolved; §3). The alternative design — two keys, one per branch, no branch tag —
   is equivalent in security but costs a second key schedule/subkey pair.
 
 ---

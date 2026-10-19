@@ -1,4 +1,16 @@
+## [0.2.1] - 2026-10-19
 
+No change to the API or the encodings.
+
+### Refactoring
+
+- Library code no longer panics through `assert!` or `debug_assert!`: the decimal encoder's
+  debug checks are gone (their invariants are proved in comments), and clippy's panic lints
+  are denied outside tests.
+
+### CI
+
+- Build and test on Rust 1.88.
 
 ### Documentation
 

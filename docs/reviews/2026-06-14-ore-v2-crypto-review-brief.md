@@ -583,6 +583,62 @@ None of (a)–(d) changes ciphertexts, so Bit6 vectors are gated only by A1.
 
 ---
 
+## 5A. A5 — single-key, salted derivation for the v2 schemes (2026-10-16, pending review)
+
+### The question
+
+Issue #89 asked for one key per v2 cipher. vitaminc-ore (vitaminc#455, ADR
+0002) asks each scheme to bind a salt `PAE("vitaminc/ore/v1", scheme, domain,
+context)` and, for a scheme with no salt of its own, to derive its keys under
+it. PR #114 does both: `init(key)` and `init_with_salt(key, salt)` on
+`OreAes128Bit6` and `OreAes128Bit6Chained`; `OreCipher::init(k1, k2)` leaves
+the trait; the legacy scheme keeps its frozen two-key inherent `init`.
+
+### The construction
+
+```
+k_root = AES_key( ROOT_LABEL )                                 only use of `key`
+k_salt = CMAC_{k_root}( len(salt):u64 ‖ salt ‖ 0… ‖ "ORE.v2.salt.done" )
+Bit6:    prf1 = AES_{AES_{k_salt}("ORE.v2.bit6.prf1")},  prf2 likewise with "…prf2"
+chained: k_acc = AES_{k_salt}("ORE.v2.chain.acc")
+```
+
+Root labels: `ORE.v2.bit6.root`, `ORE.v2.chainroot` (byte 15 = `'t'`, 0x74).
+The salt is absorbed as full blocks of the existing `CmacAccumulator` (the
+NIST-validated chain used by the chained scheme), length-prefixed and
+finalised with a constant block, so `k_salt` is a CMAC tag over a prefix-free
+message. `init(key)` is the empty salt. All at init time; the per-encryption
+cost is unchanged. Code: `scheme/keys.rs`.
+
+### What needs scrutiny
+
+1. **Root stage.** `key` is evaluated once, on a fixed label whose byte 15 is
+   outside every legacy PRF input (`0..=14` for PRF₁, `0` for PRF₂), so a key
+   shared with the legacy scheme never publishes `k_root`. Same argument as
+   the existing scheme labels; confirm it still holds now that there is one
+   label per scheme instead of one per PRF.
+2. **Salt stage as a KDF.** CMAC is a PRF over variable-length messages;
+   the message is `len ‖ salt ‖ pad ‖ FINAL` in full blocks, injective by the
+   length prefix. This is not the SP 800-108 counter-mode shape (no counter,
+   one output block). Confirm one CMAC tag is an acceptable KDF output here.
+3. **Nothing on the wire.** The salt is not recorded in the ciphertext;
+   cross-salt comparisons return a confident, meaningless result, `Equal`
+   included (zero-block values compare `Equal` under any salts), so no result
+   can confirm matching salts. Accepted as the caller's job
+   (vitaminc / EQL keep the salt with the data), documented on both
+   constructors.
+4. **What this does not do.** No per-type separation inside one salt: under
+   one key and salt, `0u64` and `i64::MIN` still encrypt identically. The
+   earlier revision of #114 added a per-type subkey and a header type tag;
+   withdrawn because vitaminc-ore's domain-and-context salt is strictly
+   stronger and the ADR places type identity there.
+
+### Decision & what it unblocks
+
+Pending. Re-pins the Bit6 and chained vectors (both unfrozen), so it must land
+before 0.9.0 or not at all. Unblocks the ore-rs `OrderScheme` adapter
+(vitaminc#455 follow-up 1).
+
 ## 6. Sign-off checklist
 
 **Gate 1 — before #82 merges / Bit6 vectors pinned:**
@@ -609,6 +665,9 @@ None of (a)–(d) changes ciphertexts, so Bit6 vectors are gated only by A1.
       no-retry rule is adopted — see A4.
 - [ ] Bit6 byte vectors regenerated and pinned **after A1** (all A4 fixes are
       byte-stable; production comparator adopts `ct_select_byte` separately).
+
+**Gate 1b — before 0.9.0 (vectors re-pinned by A5):**
+- [ ] **A5** single-key, salted derivation ratified (§5A).
 
 **Gate 2 — before PR 6 is written:**
 - [x] **A2** CMAC encoding fully specified and checked injective; many-outputs

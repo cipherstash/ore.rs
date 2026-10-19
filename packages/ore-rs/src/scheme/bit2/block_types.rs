@@ -17,14 +17,12 @@ pub struct RightBlock32 {
 }
 
 impl RightBlock32 {
-    /// Set bit `bit` (in `0..256`) to `value` (which must be `0` or `1`),
-    /// overwriting whatever the bit held. Panics in debug if `bit >= 256`.
+    /// Set bit `bit` to the low bit of `value`, overwriting whatever the
+    /// bit held. A `u8` names every one of the 256 bits and no other.
     #[inline]
-    pub fn set_bit(&mut self, bit: usize, value: u8) {
-        debug_assert!(bit < 256);
-        let byte_index = bit / 8;
+    pub fn set_bit(&mut self, bit: u8, value: u8) {
         let shift = bit % 8;
-        let b = &mut self.data[byte_index];
+        let b = &mut self.data[usize::from(bit / 8)];
         *b = (*b & !(1 << shift)) | ((value & 1) << shift);
     }
 
@@ -37,15 +35,14 @@ impl RightBlock32 {
 
     /// Mutable form of [`Self::bytes`].
     #[inline]
-    pub(crate) fn bytes_mut(&mut self) -> &mut [u8] {
+    pub(crate) fn bytes_mut(&mut self) -> &mut [u8; 32] {
         &mut self.data
     }
 
-    /// Read bit `bit` (in `0..256`); returns `0` or `1`. Panics in debug if
-    /// `bit >= 256`.
+    /// Read bit `bit` (in `0..256`); returns `0` or `1`. A `bit` past the
+    /// block reads as `0`: the oblivious select finds no byte.
     #[inline]
     pub fn get_bit(&self, bit: usize) -> u8 {
-        debug_assert!(bit < 256);
         // `bit` is the secret permuted symbol; read the byte obliviously so the
         // access address does not depend on it. See `width::ct_select_byte`.
         let byte = crate::scheme::width::ct_select_byte(&self.data, bit / 8);
