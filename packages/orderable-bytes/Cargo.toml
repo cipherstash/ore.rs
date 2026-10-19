@@ -6,6 +6,7 @@ authors = [
     "James Sadler <james@cipherstash.com>",
 ]
 edition = "2021"
+rust-version = "1.78"
 homepage = "https://cipherstash.com"
 repository = "https://github.com/cipherstash/ore.rs"
 documentation = "https://docs.rs/orderable-bytes"

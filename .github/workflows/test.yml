@@ -79,6 +79,35 @@ jobs:
       - name: test (ct-bench)
         run: cargo test -p ore-rs --features ct-bench --lib ct_bench
 
+  msrv:
+    # The crates' `rust-version`. Every other job runs on 1.88, which the
+    # `vitaminc` feature needs; this one builds and tests both crates on
+    # the floor, without that feature, so nothing newer slips in.
+    runs-on: ubuntu-latest
+    name: "🦀 MSRV (1.78)"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-msrv-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: setup rust 1.78
+        uses: dtolnay/rust-toolchain@1.78.0
+
+      - name: test ore-rs (no vitaminc)
+        run: cargo test -p ore-rs --features chrono,decimal
+
+      - name: test orderable-bytes
+        run: cargo test -p orderable-bytes --all-features
+
   bench:
     runs-on: ubuntu-latest
     name: "⏱ Benchmark"

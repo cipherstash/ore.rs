@@ -2377,7 +2377,7 @@ mod tests {
                         && matches!(c.encrypt_str(s), Err(OreError::ExceedsPadding));
                 };
                 let mut extended = s.to_owned();
-                extended.extend(std::iter::repeat_n('\0', padded - s.len()));
+                extended.extend(std::iter::repeat('\0').take(padded - s.len()));
                 let left = c.encrypt_left_str(s).unwrap();
                 let a = left.to_bytes();
                 let b = unpadded.encrypt_left_str(&extended).unwrap().to_bytes();
