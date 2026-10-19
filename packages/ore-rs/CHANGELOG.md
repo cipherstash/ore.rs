@@ -39,6 +39,9 @@ had.
 - **MSRV is 1.88**, vitaminc's floor.
 - `OreError::RandError` is `OreError::Random(vitaminc_random::RandomError)`, and
   `OreError::VariableLength` is new: text or bytes on a fixed-width scheme.
+- The legacy scheme's `compare_raw_slices` refuses an input of more than fifteen
+  blocks (`MAX_BLOCKS`), as its typed path always has; the scheme never produced one,
+  so no stored ciphertext is affected.
 
 ### Removed
 

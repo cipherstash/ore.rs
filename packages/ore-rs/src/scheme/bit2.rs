@@ -280,6 +280,14 @@ impl OreScheme for OreAes128 {
             return None;
         }
         let num_blocks = body / per_block;
+        // The scheme never encrypts more than `MAX_BLOCKS` blocks, so a
+        // longer input is not a ciphertext of this scheme either, and the
+        // typed path (`compare_left_to_full`) has no such count to
+        // dispatch to. Refusing it here keeps the two comparators in
+        // agreement on every input.
+        if num_blocks > MAX_BLOCKS {
+            return None;
+        }
 
         let mut is_equal = Choice::from(1);
         // What the resolution step needs from the first differing block `l`:
@@ -604,6 +612,28 @@ mod tests {
             None
         );
         assert_eq!(Ore::compare_raw_slices(&good, &good), Some(Ordering::Equal));
+    }
+
+    /// The scheme never encrypts more than `MAX_BLOCKS` blocks, so a
+    /// well-shaped input of more is not a ciphertext of this scheme: the
+    /// raw comparator refuses it, as the typed path does, instead of
+    /// comparing it. The fuzz target `bit8_parse` found the two disagreeing
+    /// on a sixteen-block input.
+    #[test]
+    fn compare_raw_slices_refuses_more_than_max_blocks() {
+        let per_block = LeftBlock16::BLOCK_SIZE + RightBlock32::BLOCK_SIZE + 1;
+        let over = vec![0u8; NONCE_SIZE + (MAX_BLOCKS + 1) * per_block];
+        let at = vec![0u8; NONCE_SIZE + MAX_BLOCKS * per_block];
+        assert_eq!(Ore::compare_raw_slices(&over, &over), None);
+        assert_eq!(
+            Ore::compare_left_to_full(&over[..(MAX_BLOCKS + 1) * 17], &over),
+            None
+        );
+        assert_eq!(Ore::compare_raw_slices(&at, &at), Some(Ordering::Equal));
+        assert_eq!(
+            Ore::compare_left_to_full(&at[..MAX_BLOCKS * 17], &at),
+            Some(Ordering::Equal)
+        );
     }
 
     /// A nonce-only input is the valid zero-block ciphertext: it parses, and
