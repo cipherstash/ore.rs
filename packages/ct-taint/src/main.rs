@@ -208,7 +208,8 @@ fn bit6_u32() -> Vec<u8> {
 }
 
 /// The chained cipher with the default text padding, so the text modes
-/// cover the padding path, including the trailing-NUL check.
+/// cover the padding path, including the trailing-NUL check. The `u128`
+/// and bytes modes use the same cipher on the unpadded path.
 fn chained() -> OreAes128Bit6Chained {
     let k = tainted(key());
     OreAes128Bit6Chained::init(Protected::new(k)).expect("init")
@@ -240,6 +241,36 @@ fn chained_left() -> Vec<u8> {
     out
 }
 
+/// Full chained encryption of a tainted plaintext on the unpadded path:
+/// a fixed-width target, or bytes, which the cipher's padding never
+/// touches.
+fn chained_unpadded_of(target: OrderTarget, value: Physical<'_>) -> Vec<u8> {
+    let ore = chained();
+    let mut out = ore
+        .encrypt_plaintext(&tainted_plaintext(target, value))
+        .expect("encrypt")
+        .into_bytes();
+    untaint_output(&mut out);
+    out
+}
+
+/// A `u128` is 22 blocks on the chained engine, with no padding.
+fn chained_u128() -> Vec<u8> {
+    chained_unpadded_of(
+        OrderTarget::U128,
+        Physical::Int(Int::U128(0x0123_4567_89ab_cdef_fedc_ba98_7654_3210)),
+    )
+}
+
+/// Bytes go in unpadded, behind vitaminc's marker byte; the last byte is
+/// zero, which text would refuse and bytes take.
+fn chained_bytes() -> Vec<u8> {
+    chained_unpadded_of(
+        OrderTarget::Bytes,
+        Physical::Bytes(&hex!("00ff10203040506070809000")),
+    )
+}
+
 /// Positive control: branches on a tainted byte and indexes memory with it.
 /// Memcheck must report both, so `scripts/ct-taint.sh` requires this mode to
 /// fail. If it passes, the gate cannot see a secret-dependent branch.
@@ -262,6 +293,8 @@ const MODES: &[(&str, fn() -> Vec<u8>)] = &[
     ("bit6-encrypt-u32", bit6_u32),
     ("chained-encrypt", chained_full),
     ("chained-encrypt-left", chained_left),
+    ("chained-encrypt-u128", chained_u128),
+    ("chained-encrypt-bytes", chained_bytes),
     ("canary", canary),
 ];
 

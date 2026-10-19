@@ -3,20 +3,28 @@
 # scripts/ct-taint.sh fails on anything not listed here. Add an entry only
 # with a reason. Frame names are demangled Rust symbols, matched as globs.
 #
-# The typed entry points report nothing: `permute` takes an in-domain
-# `Symbol`, and `OreEncrypt` and the string encryptors get their symbols from
-# the 6-bit decomposition, which masks rather than checks.
+# Every mode (src/main.rs, run by scripts/ct-taint.sh) encrypts a sealed
+# plaintext through `OreScheme::encrypt_plaintext` or
+# `encrypt_query_plaintext`: vitaminc encodes the value untainted, and the
+# harness marks the plaintext's bytes undefined in place. The Bit6 modes take
+# a u64 (full and left), an i64, an f64 and a u32. The chained modes take text
+# under the default padding (full and left), and a u128 and bytes, which go in
+# unpadded. Both engines get their symbols from the 6-bit decomposition, which
+# masks rather than checks, and `permute` takes an in-domain `Symbol`, so the
+# Bit6 modes and the unpadded chained modes report nothing.
 #
-# Two reports are accepted. The first is `Blocks6::check`, on the raw-block
-# entry points (`OreCipher::encrypt`/`encrypt_left` for Bit6; the chained
-# scheme's are test-only and not exercised here). A caller of those passes symbols
-# that may be out of the 6-bit domain, and the function must refuse them. It
-# ORs every symbol's high bits together without branching and branches once
-# on the result, so the branch reveals only whether some symbol was out of
-# domain. For a well-formed input it always goes the same way. `check` is
-# `#[inline(never)]`, so the branch is always in its own frame, whose name is
-# `ore_rs::scheme::decompose::Blocks6<B>::check` (or its v0-mangled form, which
-# also contains `Blocks6` and `check`).
+# Two reports are accepted. The first is `Blocks6::check`, which no mode
+# reaches now: it guards the raw-block entry points (Bit6's crate-private
+# `encrypt`/`encrypt_left` over 6-bit symbols, and the chained scheme's
+# test-only `encrypt_var`), which only the crate's own tests call. The entry
+# is kept for a mode that is added on that path. A caller of those passes
+# symbols that may be out of the 6-bit domain, and the function must refuse
+# them. It ORs every symbol's high bits together without branching and
+# branches once on the result, so the branch reveals only whether some symbol
+# was out of domain. For a well-formed input it always goes the same way.
+# `check` is `#[inline(never)]`, so the branch is always in its own frame,
+# whose name is `ore_rs::scheme::decompose::Blocks6<B>::check` (or its
+# v0-mangled form, which also contains `Blocks6` and `check`).
 
 {
    blocks6-check: one branch on whether any raw symbol is out of domain
@@ -24,11 +32,11 @@
    fun:*Blocks6*check*
 }
 
-# The second is `refuse_trailing_nul`, on the chained string encryptors
-# (`encrypt_str`/`encrypt_left_str`) under a padding policy, which the harness
-# uses (the default). Padded with NUL bytes, a string that ends in NUL would
-# encrypt the same as the string without it, so it must be refused. The
-# function branches once, on whether the last byte is NUL, and returns a
+# The second is `refuse_trailing_nul`, on the chained text path under a
+# padding policy, which the text modes use (the default); the u128 and bytes
+# modes are unpadded and never reach it. Padded with NUL bytes, text that ends
+# in NUL would encrypt the same as the text without it, so it must be refused.
+# The function branches once, on whether the last byte is NUL, and returns a
 # constant on each path, so the branch reveals only whether the encryption is
 # refused. It is `#[inline(never)]`, and its frame is
 # `ore_rs::scheme::chained::refuse_trailing_nul`.
