@@ -46,8 +46,13 @@ had.
   `encrypt_left_str`, `encrypt_fixed` and `encrypt_left_fixed`. Typed values enter through
   vitaminc's `FitsIn` table.
 - `CipherText<S, N>`, `Left<S, N>`, `Right<S, N>`, `ChainedCipherText<N>`, `ChainedLeft<N>`,
-  `VarCipherText`, `VarLeft`, `OreOutput`, `WireHeader` and `PlainText<N>` from the public
-  API. A term's plaintext type lives on vitaminc's `OrderTerm<_, T>` (closes #127).
+  `VarCipherText`, `VarLeft`, `OreOutput`, `WireHeader`, `CipherTextBlock`, `ParseError`
+  and `PlainText<N>` from the public API. A term's plaintext type lives on vitaminc's
+  `OrderTerm<_, T>` (closes #127).
+- The per-block types `scheme::bit2::block_types` (`LeftBlock16`, `RightBlock32`) and
+  `scheme::bit2_w6::block_types` (`RightBlock8`), and their re-exports from
+  `scheme::bit2` and `scheme::bit2_w6`: the only trait they implemented is crate-private
+  now.
 - The `chrono` and `decimal` features and the `orderable-bytes` dependency: vitaminc owns
   the encodings, ported byte for byte.
 - The 8-bit plaintext types (`bool`, `u8`, `i8`), which vitaminc has no target for: 256

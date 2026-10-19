@@ -32,8 +32,8 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Per-block ciphertext component types ([`LeftBlock16`], [`RightBlock32`])
 /// used by this scheme.
-pub mod block_types;
-pub use self::block_types::*;
+pub(crate) mod block_types;
+pub(crate) use self::block_types::*;
 
 /// AES-128 BlockORE cipher. The two PRF instances are keyed at
 /// construction; per-encryption nonces come from a [`SafeRand`] seeded

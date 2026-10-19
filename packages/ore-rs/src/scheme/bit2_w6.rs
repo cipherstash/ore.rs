@@ -56,8 +56,8 @@ use vitaminc_random::SafeRand;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Per-block ciphertext component types for this scheme.
-pub mod block_types;
-pub use self::block_types::*;
+pub(crate) mod block_types;
+pub(crate) use self::block_types::*;
 
 /// The Z2 random-oracle instantiation for this scheme (plan §6, option 3 —
 /// pending review; option 2 fallback is `Aes128Z2Hash` with an extra

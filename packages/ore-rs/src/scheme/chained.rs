@@ -7,8 +7,9 @@
 //! `docs/plans/2026-06-15-ore-v2-cmac-accumulator-spec.md` (the A2 gate).
 //!
 //! **Status: wire format (scheme id `0x03`) frozen as of 0.9.0.**
-//! `tests/compat_chained_vectors.rs` pins the bytes, padded and unpadded; a
-//! change that alters them breaks every stored chained ciphertext.
+//! `src/scheme/chained/compat_vectors.rs` pins the bytes, padded and
+//! unpadded; a change that alters them breaks every stored chained
+//! ciphertext.
 //!
 //! Per block `n` (prefix `x[0..n-1]`, accumulator state `S_n`):
 //! - **PRP** `π_n` (shape ii): keystream = `STREAM_BLOCKS` CMAC tags on the
@@ -67,11 +68,13 @@
 //! bucket, 2731 blocks and a 68 KB ciphertext. The ceiling is not on the
 //! wire: the comparators accept any block count the policy admits.
 //!
-//! Strings are the only public plaintext. The scheme encrypts any sequence of
-//! 6-bit symbols, and the tests use that entry point directly (symbols a
-//! string never produces, unpadded), but raw symbols cannot be padded with
-//! zero symbols, since a trailing zero symbol is a real value there, so they
-//! are not offered as an API (#110).
+//! The scheme takes no string, bytes or symbols directly: every plaintext
+//! arrives sealed, as an `OrderPlaintext` vitaminc has encoded, and text is
+//! the only target it pads. The scheme encrypts any sequence of 6-bit
+//! symbols, and the tests use that entry point directly (symbols a string
+//! never produces, unpadded), but raw symbols cannot be padded with zero
+//! symbols, since a trailing zero symbol is a real value there, so they are
+//! not offered as an API (#110).
 //!
 //! **Fixed-width plaintexts.** A sealed `OrderPlaintext` of any fixed
 //! width goes in unpadded (every value of its target has one width, so

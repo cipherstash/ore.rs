@@ -17,15 +17,18 @@ pub struct RightBlock32 {
 impl RightBlock32 {
     /// Set bit `bit` to the low bit of `value`, overwriting whatever the
     /// bit held. A `u8` names every one of the 256 bits and no other.
+    /// For the tests: the encryptor writes whole masks through
+    /// [`Self::bytes_mut`].
+    #[cfg(test)]
     #[inline]
-    pub fn set_bit(&mut self, bit: u8, value: u8) {
+    pub(crate) fn set_bit(&mut self, bit: u8, value: u8) {
         let shift = bit % 8;
         let b = &mut self.data[usize::from(bit / 8)];
         *b = (*b & !(1 << shift)) | ((value & 1) << shift);
     }
 
     /// The raw bitvector bytes, LSB-first within each byte — the bit order
-    /// used by [`Self::set_bit`] / [`Self::get_bit`].
+    /// used by `set_bit` and [`Self::get_bit`].
     #[inline]
     pub(crate) fn bytes(&self) -> &[u8] {
         &self.data

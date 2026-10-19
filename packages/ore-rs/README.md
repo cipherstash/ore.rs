@@ -138,7 +138,7 @@ assert_eq!(
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-`compare_raw_slices` and `compare_left_to_full` take serialised bytes and need no key, so a comparison can run wherever the bytes are, a database included. They return `None` for bytes that are not a ciphertext of the scheme, two ciphertexts of different block counts, or two chained ciphertexts made under different padding policies. Serde is not supported.
+`compare_raw_slices` and `compare_left_to_full` take serialised bytes and need no key, so a comparison can run wherever the bytes are, a database included. They return `None` for bytes that are not a ciphertext of the scheme, or for two chained ciphertexts made under different padding policies. Bit6 and the legacy scheme also return `None` for two ciphertexts of different block counts. The chained engine compares different block counts lexicographically, as it compares two strings: the first differing block decides, and when the shorter ciphertext's blocks all match the longer one's, the shorter sorts first. Serde is not supported.
 
 The chained engine takes `Options` for its salt, padding policy and ceiling: `OreAes128Bit6Chained::init_with(key, options)`. The legacy scheme takes two 16-byte keys: `OreAes128::init(k1, k2)`.
 
