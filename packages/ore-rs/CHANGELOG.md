@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bytes, `DEFAULT_MAX_STR_BYTES`). A longer string returns `OreError::TooLong`. Ciphertext
   size and encryption time grow with the padded length and the string is caller-supplied,
   so a ceiling bounds what one input can cost; it also bounds the number of length buckets
-  a column can show. `init_with_padding` is replaced by `init_with`.
+  the ciphertexts can show. `init_with_padding` is replaced by `init_with`.
 - `u128` and `i128` can be encrypted, on the chained scheme (`scheme::chained`): `OreEncrypt`
   impls producing `ChainedCipherText<22>` / `ChainedLeft<22>`, whose typed parsers and
   comparators accept only that block count, plus `encrypt_fixed` / `encrypt_left_fixed` for

@@ -50,7 +50,8 @@
 //! The header also carries the padding policy, and the comparators return
 //! `None` for two ciphertexts made under different policies: an unpadded
 //! `"abc"` and a padded `"abc"` have different blocks, and would compare
-//! unequal. A column's stored values and its queries must use one policy.
+//! unequal. Stored values and the queries that compare with them must use
+//! one policy.
 //!
 //! A cipher also has a longest string it encrypts
 //! ([`Options::with_max_bytes`](crate::scheme::chained::Options::with_max_bytes),
@@ -77,7 +78,7 @@
 //! The count is a length guard, not a type guard: a 16-byte string and an
 //! `i128` are 22 blocks too, and under one key an equal encoding gives an
 //! equal ciphertext (`0u128`, `i128::MIN`, sixteen NUL bytes). Use one key
-//! per column. A fixed-length value is not padded (every value of the type
+//! per kind of value. A fixed-length value is not padded (every value of the type
 //! has the same length, so there is nothing to hide) and is not subject to
 //! the cipher's string ceiling; its ciphertext is tagged
 //! [`Padding::None`](crate::scheme::chained::Padding::None), and the typed
@@ -186,16 +187,16 @@ fn right_at(s: &[u8], count: usize, i: usize) -> &[u8] {
 /// ciphertext reveals a length bucket rather than the exact length (see the
 /// module docs).
 ///
-/// Lengths are in UTF-8 bytes. The policy belongs to a column: its stored
-/// values and its queries must use the same one, and changing it means
-/// re-encrypting the column. The comparators refuse to compare ciphertexts
+/// Lengths are in UTF-8 bytes. The policy belongs with the key: stored
+/// values and the queries that compare with them must use the same one,
+/// and changing it means re-encrypting the stored values. The comparators refuse to compare ciphertexts
 /// made under different policies.
 ///
 /// Padding hides the exact length in the ciphertext only: the time the
 /// encryptor takes still depends on the exact length of the string.
 ///
 /// More policies may follow (a growth ratio between buckets, boundaries
-/// fitted to a column), so the enum is non-exhaustive.
+/// fitted to the data), so the enum is non-exhaustive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Padding {
@@ -314,8 +315,9 @@ impl Padding {
 pub const DEFAULT_MAX_STR_BYTES: usize = 1024;
 
 /// Per-cipher settings for the string encryptors, passed to
-/// [`OreAes128Bit6Chained::init_with`]. They belong to a column, like the
-/// key: its stored values and its queries use the same ones.
+/// [`OreAes128Bit6Chained::init_with`]. Like the key, they belong to the
+/// values that are compared together: stored values and the queries that
+/// compare with them use the same ones.
 ///
 /// ```rust
 /// use ore_rs::scheme::chained::{OreAes128Bit6ChainedChaCha20, Options, Padding};
@@ -356,8 +358,8 @@ impl Options {
 
     /// The longest string, in UTF-8 bytes, the cipher encrypts; a longer
     /// one returns [`OreError::TooLong`]. Bounds what one input can cost in
-    /// ciphertext size and encryption time, and how many length buckets a
-    /// column can show. Under [`Padding::Fixed`] the fixed length is also a
+    /// ciphertext size and encryption time, and how many length buckets the
+    /// ciphertexts can show. Under [`Padding::Fixed`] the fixed length is also a
     /// ceiling, and the lower of the two applies. `init_with` refuses a
     /// ceiling of 0 or one that pads past [`MAX_STR_BYTES`].
     pub fn with_max_bytes(self, max_bytes: usize) -> Self {
@@ -783,7 +785,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6Chained<R> {
     /// or a padded one. That is a length guard, not a type guard:
     /// ciphertexts of two types with equal-length encodings (`u128` and
     /// `i128`, or an unpadded 16-byte string) compare, and equal encodings
-    /// under one key give equal ciphertexts. Use one key per column.
+    /// under one key give equal ciphertexts. Use one key per kind of value.
     ///
     /// A type whose encoding is longer than [`MAX_STR_BYTES`] returns
     /// [`OreError::TooManyBlocks`] before the encoding is made (`[u8; N]`
@@ -1889,7 +1891,7 @@ mod tests {
 
     /// A ciphertext whose tag names a policy that cannot produce its block
     /// count was made by no cipher, and is refused: rewriting an unpadded
-    /// ciphertext's tag does not smuggle it into a padded column.
+    /// ciphertext's tag does not smuggle it in among padded ciphertexts.
     #[test]
     fn parsers_reject_counts_the_policy_cannot_produce() {
         type C = OreAes128Bit6ChainedChaCha20;
