@@ -1,6 +1,6 @@
 [package]
 name = "ore-rs"
-version = "0.9.0-rc.1"
+version = "0.9.0"
 authors = [
     "Dan Draper <dan@cipherstash.com>",
     "James Sadler <james@cipherstash.com>",
@@ -12,6 +12,12 @@ documentation = "https://docs.rs/ore-rs"
 description = "Order-revealing encryption library used by the CipherStash searchable encryption platform"
 license-file = "../../LICENCE"
 readme = "README.md"
+
+# docs.rs builds default features only; these show the chrono and decimal
+# impls and the vitaminc adapter. (`ct-bench` and the Kani features are not
+# public API.)
+[package.metadata.docs.rs]
+features = ["chrono", "decimal", "vitaminc"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dev-dependencies]

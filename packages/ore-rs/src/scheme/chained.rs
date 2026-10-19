@@ -6,6 +6,10 @@
 //! arbitrary-length plaintexts — strings in particular. Design:
 //! `docs/plans/2026-06-15-ore-v2-cmac-accumulator-spec.md` (the A2 gate).
 //!
+//! **Status: wire format (scheme id `0x03`) frozen as of 0.9.0.**
+//! `tests/compat_chained_vectors.rs` pins the bytes, padded and unpadded; a
+//! change that alters them breaks every stored chained ciphertext.
+//!
 //! Per block `n` (prefix `x[0..n-1]`, accumulator state `S_n`):
 //! - **PRP** `π_n` (shape ii): keystream = `STREAM_BLOCKS` CMAC tags on the
 //!   `PRP_STREAM` branch → `LemireFyPrp::from_stream` (no per-block key

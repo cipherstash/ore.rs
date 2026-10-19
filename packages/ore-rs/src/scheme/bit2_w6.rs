@@ -16,11 +16,10 @@
 //! fit neither this scheme nor the legacy one (15 bytes at most); they are
 //! encrypted with [`crate::scheme::chained`], which has no length cap.
 //!
-//! **Status: wire format NOT yet frozen.** The Z2 hash is the fixed-π MMO
-//! construction proposed in plan §6 (option 3), pending crypto review;
-//! flipping the private `Z2Hash` alias re-keys the right ciphertexts without any other
-//! code change. Do not store ciphertexts produced by this scheme until
-//! the review lands and vectors are pinned.
+//! **Status: wire format frozen as of 0.9.0.** `tests/compat_w6_vectors.rs`
+//! pins the bytes; a change that alters them breaks every stored Bit6
+//! ciphertext. The Z2 hash is the BHKR σ-MMO over a fixed public AES
+//! permutation (plan §6, review brief A1).
 //!
 //! **Keys:** one 16-byte key and an optional salt. PRF₁ and PRF₂ run under
 //! keys derived through the crate-private `scheme::keys` stages (root

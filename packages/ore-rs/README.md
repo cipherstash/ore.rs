@@ -43,7 +43,7 @@ width, so terms that compare together always have one width.
   (`OreAes128Bit6`) for targets up to ten bytes, the one to prefer for new
   fixed-width data.
 - `vitaminc::ChainedBlockOre` is the chained, variable-length scheme. It
-  takes every target, text and bytes included, and is not yet frozen. Text
+  takes every target, text and bytes included. Text
   and bytes go in behind one marker byte (`vitaminc::VARIABLE_WIDTH_MARKER`),
   so an empty value still makes a keyed block, and are refused past 1023
   bytes (`OrderError::Backend(OreError::TooLong)`): the scheme's default
