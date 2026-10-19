@@ -86,6 +86,7 @@ And one change to PR 482: `open` takes the target, `fn open(&self, target: Order
 - **A `Supports`-style bound on the cipher, `cipher.encrypt<T: SupportedBy<Self>>`.** Moves the compile error, keeps the problem.
 - **Chained for everything.** Chained is faster per block (0.69 µs against 0.81) and the leakage is the same for fixed widths. Rejected only because 0.9 Bit6 ciphertexts exist and routing is internal, so it can change later without touching callers.
 - **Keeping a legacy adapter.** No stored term needs it, and it would put new data on a scheme the README warns against.
+- **The value as the receiver, `10u32.encrypt(&quantity)`.** This is how 0.9 reads, and it goes: the space is the receiver, `quantity.encrypt(10u32)`, as vitaminc spells it everywhere (`encrypt` on a space, `seal` on a cipher; a value only implements `Encrypt::visit`). Deferred, not ruled out. If it is wanted later, the shape is an extension trait in vitaminc-ore over every `V: Encrypt`, `value.encrypt_in(&space)`, under a name that cannot shadow a type's own `encrypt`. It is additive and belongs in vitaminc, so it does not need to be decided here.
 
 ## Roadmap
 
