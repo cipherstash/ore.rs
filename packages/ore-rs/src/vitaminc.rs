@@ -129,7 +129,22 @@ impl BlockOre {
     /// The longest text or bytes value, in bytes, every space of this
     /// scheme encrypts, counting the marker byte vitaminc puts before it;
     /// [`DEFAULT_MAX_STR_BYTES`] unless set. A longer one is refused
-    /// ([`OreError::TooLong`]).
+    /// ([`OreError::TooLong`]). Fixed-width spaces are not bounded by it.
+    ///
+    /// The ceiling must be one the chained engine accepts: at least 1, and
+    /// no longer than the space's padding can pad within the wire format's
+    /// limit, [`MAX_STR_BYTES`](crate::scheme::chained::MAX_STR_BYTES)
+    /// (49151 bytes). A `Bytes` space is unpadded, so it takes any ceiling
+    /// from 1 to 49151. A `Text` space pads the ceiling under
+    /// [`Self::with_text_padding`]. Under [`Padding::PowerOfTwo`], the
+    /// default, the longest is 32768 (or the floor, if that is higher),
+    /// since a longer value would pad to 65536 bytes. Under
+    /// [`Padding::Fixed`] the lower of the ceiling and the fixed length
+    /// applies, so any ceiling from 1 opens while the fixed length is
+    /// itself within the wire format's limit. Outside that range a `Text`
+    /// or `Bytes` space fails to open ([`OreError::InitFailed`]), and so
+    /// does every encryption in it; the scheme does not check the ceiling
+    /// when it is set.
     pub fn with_max_bytes(mut self, max_bytes: usize) -> Self {
         self.max_bytes = max_bytes;
         self
@@ -225,22 +240,31 @@ impl OrderScheme for BlockOre {
     type Space = BlockOreSpace;
 
     /// Key the engine the target's width wants under `salt`. A `Text`
-    /// space pads under the scheme's policy; a `Bytes` space never pads;
-    /// both keep the scheme's ceiling.
+    /// space pads under the scheme's policy and a `Bytes` space never
+    /// pads; both keep the scheme's ceiling, and either fails to open
+    /// ([`OreError::InitFailed`]) under a ceiling the chained engine
+    /// refuses (see [`BlockOre::with_max_bytes`]). A fixed-width space on
+    /// the chained engine takes neither the padding nor the ceiling, so
+    /// no setting of either keeps it from opening.
     fn open(&self, target: OrderTarget, salt: &Context<'_>) -> Result<BlockOreSpace, OreError> {
         let key = self.key()?;
         let engine = match engine_for(target) {
             EngineKind::Bit6 => Engine::Bit6(Box::new(OreAes128Bit6::init_with_salt(key, salt)?)),
             EngineKind::Chained => {
-                let padding = if target == OrderTarget::Text {
-                    self.text_padding
-                } else {
-                    Padding::None
+                let options = match target {
+                    OrderTarget::Text => Options::default()
+                        .with_salt(salt)
+                        .with_padding(self.text_padding)
+                        .with_max_bytes(self.max_bytes),
+                    OrderTarget::Bytes => Options::default()
+                        .with_salt(salt)
+                        .with_padding(Padding::None)
+                        .with_max_bytes(self.max_bytes),
+                    // A fixed width: the engine goes in unpadded with no
+                    // ceiling, so the defaults are only there to pass
+                    // the engine's own check.
+                    _ => Options::default().with_salt(salt),
                 };
-                let options = Options::default()
-                    .with_salt(salt)
-                    .with_padding(padding)
-                    .with_max_bytes(self.max_bytes);
                 Engine::Chained(Box::new(OreAes128Bit6Chained::init_with(key, options)?))
             }
         };
@@ -333,6 +357,7 @@ impl OrderKeyInit for BlockOre {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scheme::chained::MAX_STR_BYTES;
     use crate::scheme::decompose::num_blocks_6bit;
     use vitaminc_ore::target::{Bytes, Date, Decimal, Text, I32, I64, U128};
     use vitaminc_ore::{test_support, OrderEncrypt, OrderError, OrderTerm, QueryTerm};
@@ -566,6 +591,48 @@ mod tests {
         ));
         // Fixed-width spaces are not subject to the ceiling.
         assert!(small.target(U128).context("c").encrypt(u128::MAX).is_ok());
+    }
+
+    /// A ceiling the chained engine refuses closes the text and bytes
+    /// spaces, with the documented error, and no fixed-width space: those
+    /// take no ceiling.
+    #[test]
+    fn a_ceiling_out_of_range_closes_only_text_and_bytes_spaces() {
+        for ceiling in [0, MAX_STR_BYTES + 1, 60000] {
+            let s = BlockOre::new(key()).with_max_bytes(ceiling);
+            for t in [T::U128, T::I128, T::Uuid, T::Timestamp, T::Decimal] {
+                if let Err(e) = s.target(t).context("c").open() {
+                    panic!("{:?} under {}: {:?}", t, ceiling, e);
+                }
+            }
+            assert!(s.target(U128).context("c").encrypt(u128::MAX).is_ok());
+            for t in [T::Text, T::Bytes] {
+                assert!(
+                    matches!(s.target(t).context("c").open(), Err(OreError::InitFailed)),
+                    "{:?} under {}",
+                    t,
+                    ceiling
+                );
+            }
+        }
+        // The edges the docs give: unpadded bytes take up to 49151, text
+        // under the default padding up to 32768.
+        let s = BlockOre::new(key()).with_max_bytes(MAX_STR_BYTES);
+        s.target(Bytes)
+            .context("c")
+            .open()
+            .expect("bytes at the wire limit");
+        assert!(matches!(
+            s.target(Text).context("c").open(),
+            Err(OreError::InitFailed)
+        ));
+        let s = BlockOre::new(key()).with_max_bytes(32768);
+        s.target(Text).context("c").open().expect("text at 32768");
+        let s = BlockOre::new(key()).with_max_bytes(32769);
+        assert!(matches!(
+            s.target(Text).context("c").open(),
+            Err(OreError::InitFailed)
+        ));
     }
 
     /// The default ceiling is 1024 bytes with the marker, so 1023 of value.
