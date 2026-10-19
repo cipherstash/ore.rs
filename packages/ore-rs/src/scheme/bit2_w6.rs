@@ -304,31 +304,49 @@ impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
     #[cfg(feature = "vitaminc")]
     pub(crate) fn encrypt_bytes(&self, bytes: &[u8]) -> Result<Vec<u8>, OreError> {
         match bytes.len() {
-            0 => self.encrypt_bytes_as::<0>(bytes),
-            1 => self.encrypt_bytes_as::<2>(bytes),
-            2 => self.encrypt_bytes_as::<3>(bytes),
-            3 => self.encrypt_bytes_as::<4>(bytes),
-            4 => self.encrypt_bytes_as::<6>(bytes),
-            5 => self.encrypt_bytes_as::<7>(bytes),
-            6 => self.encrypt_bytes_as::<8>(bytes),
-            7 => self.encrypt_bytes_as::<10>(bytes),
-            8 => self.encrypt_bytes_as::<11>(bytes),
-            9 => self.encrypt_bytes_as::<12>(bytes),
-            10 => self.encrypt_bytes_as::<14>(bytes),
+            0 => self.encrypt_bytes_as::<0, 0>(bytes),
+            1 => self.encrypt_bytes_as::<1, 2>(bytes),
+            2 => self.encrypt_bytes_as::<2, 3>(bytes),
+            3 => self.encrypt_bytes_as::<3, 4>(bytes),
+            4 => self.encrypt_bytes_as::<4, 6>(bytes),
+            5 => self.encrypt_bytes_as::<5, 7>(bytes),
+            6 => self.encrypt_bytes_as::<6, 8>(bytes),
+            7 => self.encrypt_bytes_as::<7, 10>(bytes),
+            8 => self.encrypt_bytes_as::<8, 11>(bytes),
+            9 => self.encrypt_bytes_as::<9, 12>(bytes),
+            10 => self.encrypt_bytes_as::<10, 14>(bytes),
             _ => Err(OreError::TooManyBlocks),
         }
     }
 
-    /// [`Self::encrypt_bytes`] at a block count the caller has matched to
-    /// the length: `B == num_blocks_6bit(bytes.len())`.
+    /// [`Self::encrypt_bytes`] for `N` bytes, which the caller has matched
+    /// to the length, as `B` blocks. `B` must be `num_blocks_6bit(N)`,
+    /// checked at compile time.
     #[cfg(feature = "vitaminc")]
-    fn encrypt_bytes_as<const B: usize>(&self, bytes: &[u8]) -> Result<Vec<u8>, OreError> {
-        debug_assert_eq!(B, num_blocks_6bit(bytes.len()));
+    #[allow(clippy::let_unit_value)]
+    fn encrypt_bytes_as<const N: usize, const B: usize>(
+        &self,
+        bytes: &[u8],
+    ) -> Result<Vec<u8>, OreError> {
+        let () = BlocksFor::<N, B>::OK;
         stack::scrubbed(|| {
             let blocks = Blocks6::decompose(bytes, [0u8; B]);
             self.encrypt_blocks(&blocks).map(|ct| ct.to_bytes())
         })
     }
+}
+
+/// `N` bytes are `B` six-bit blocks: [`Self::OK`] fails to compile
+/// otherwise.
+#[cfg(feature = "vitaminc")]
+struct BlocksFor<const N: usize, const B: usize>;
+
+#[cfg(feature = "vitaminc")]
+impl<const N: usize, const B: usize> BlocksFor<N, B> {
+    const OK: () = assert!(
+        B == num_blocks_6bit(N),
+        "BlocksFor: B is not num_blocks_6bit(N)"
+    );
 }
 
 impl<R: Rng + SeedableRng> OreCipher for OreAes128Bit6<R> {
