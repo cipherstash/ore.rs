@@ -1,3 +1,0 @@
-[toolchain]
-# vitaminc's floor, and this crate's MSRV (rust-version in packages/ore-rs/Cargo.toml).
-channel = "1.88"
