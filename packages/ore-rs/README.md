@@ -14,9 +14,9 @@ Reference documentation is on [docs.rs/ore-rs](https://docs.rs/ore-rs).
 
 | Scheme | When to use it |
 |---|---|
-| `OreAes128Bit6` (`scheme::bit2_w6`) | The recommended choice for new fixed-width data: booleans, integers up to 64 bits, characters and floats. |
-| `OreAes128Bit6Chained` (`scheme::chained`) | Strings, other variable-length data and 128-bit integers. |
-| `OreAes128` (`scheme::bit2`) | Existing data encrypted with the legacy scheme, or `Decimal` and `chrono` types. |
+| `OreAes128Bit6` ([`scheme::bit2_w6`](https://docs.rs/ore-rs/latest/ore_rs/scheme/bit2_w6/index.html)) | The recommended choice for new fixed-width data: booleans, integers up to 64 bits, characters and floats. |
+| `OreAes128Bit6Chained` ([`scheme::chained`](https://docs.rs/ore-rs/latest/ore_rs/scheme/chained/index.html)) | Strings, other variable-length data and 128-bit integers. |
+| `OreAes128` ([`scheme::bit2`](https://docs.rs/ore-rs/latest/ore_rs/scheme/bit2/index.html)) | Existing data encrypted with the legacy scheme, or `Decimal` and `chrono` types. |
 
 Bit6 and chained are the v2 schemes. Both use 6-bit blocks. Their ciphertext formats are frozen as of 0.9.0, with compatibility tests to check that stored ciphertexts remain readable across releases. The [legacy format](#the-legacy-scheme-oreaes128) is also frozen.
 
@@ -80,6 +80,22 @@ assert_eq!(
     Some(Ordering::Equal)
 );
 ```
+
+## Ciphertext types and serialisation
+
+Bit6 returns a `CipherText<S, N>`, where `S` is the scheme and `N` is the block count. A `u64` uses 11 blocks. Comparing ciphertexts with different schemes or block counts is a compile error:
+
+```compile_fail
+use ore_rs::{OreEncrypt, scheme::bit2_w6::OreAes128Bit6ChaCha20};
+
+let ore = OreAes128Bit6ChaCha20::init(&[0x2b; 16]).unwrap();
+let a = 456u64.encrypt(&ore).unwrap();
+let b = 1024u32.encrypt(&ore).unwrap(); // a u32 is 6 blocks
+
+let result = a > b; // compilation error
+```
+
+Use `to_bytes` to serialise a ciphertext and `from_slice` to parse it, specifying the scheme and block count as in the quick start. You can also compare serialised ciphertexts directly with `compare_raw_slices`. Serde is not supported.
 
 ## Bit6 performance and limits
 
