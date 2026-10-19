@@ -1,5 +1,5 @@
-//! ORE encryption for `rust_decimal::Decimal`, gated behind the `decimal`
-//! feature.
+//! Legacy ORE encryption for `rust_decimal::Decimal`, gated behind the
+//! `decimal` feature. The v2 implementation lives in `scheme::chained`.
 //!
 //! Wraps the canonical fixed-length byte encoding from
 //! [`orderable_bytes::decimal`] in an [`OreEncrypt`] impl, feeding the

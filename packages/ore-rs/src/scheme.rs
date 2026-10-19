@@ -1,8 +1,6 @@
-//! Concrete BlockORE schemes. The crate currently exposes one scheme,
-//! [`bit2`], which uses a 2-bit indicator function with AES-128 as the PRF
-//! and Knuth-shuffle as the per-block PRP. Future schemes (different
-//! indicator widths or primitive choices) would land alongside it as
-//! sibling submodules.
+//! Concrete BlockORE schemes. Use [`bit2_w6`] for fixed-length values up to
+//! 10 bytes, or [`chained`] for wider values and strings. The legacy
+//! [`bit2`] scheme remains available for compatibility with existing data.
 
 /// 2-bit-indicator BlockORE with AES-128 PRF and Knuth-shuffle PRP.
 pub mod bit2;

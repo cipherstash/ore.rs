@@ -11,9 +11,9 @@
 //! The packed prefix caps `N` at 14 (`prefix ≤ 13 ‖ value ‖ index` plus
 //! the block count in byte 15 must fit one AES block; seeds also use byte
 //! 14 for the block index), which covers all
-//! primitives up to 64 bits. `Decimal` (14 bytes) and `DateTime<Utc>`
-//! (12 bytes) exceed this limit; use
-//! [`crate::scheme::chained::OreAes128Bit6Chained::encrypt_fixed`] for them.
+//! primitives up to 64 bits, plus `chrono::NaiveDate` with the `chrono`
+//! feature. `Decimal` (14 bytes) and `DateTime<Utc>` (12 bytes) exceed
+//! this limit; their [`crate::OreEncrypt`] implementations use the chained scheme.
 //! `u128`/`i128` (22 blocks) fit neither this scheme nor the legacy one
 //! (15 bytes at most); their [`crate::OreEncrypt`] implementations use
 //! [`crate::scheme::chained`].
@@ -622,6 +622,15 @@ mod encrypt_impls {
     impl_ore_encrypt_bit6!(char, CHAR_BLOCKS, char_tests, '\0', char::MAX);
     impl_ore_encrypt_bit6!(f32, F32_BLOCKS, f32_tests, f32::MIN, f32::MAX);
     impl_ore_encrypt_bit6!(f64, F64_BLOCKS, f64_tests, f64::MIN, f64::MAX);
+
+    #[cfg(feature = "chrono")]
+    impl_ore_encrypt_bit6!(
+        ::chrono::NaiveDate,
+        NAIVE_DATE_BLOCKS,
+        naive_date_tests,
+        ::chrono::NaiveDate::MIN,
+        ::chrono::NaiveDate::MAX
+    );
 }
 
 #[cfg(test)]

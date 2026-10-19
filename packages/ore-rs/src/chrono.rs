@@ -1,5 +1,7 @@
-//! ORE encryption for `chrono::NaiveDate` and `chrono::DateTime<Utc>`,
+//! Legacy ORE encryption for `chrono::NaiveDate` and `chrono::DateTime<Utc>`,
 //! gated behind the `chrono` feature.
+//! The v2 implementations live in `scheme::bit2_w6` (dates) and
+//! `scheme::chained` (dates and timestamps).
 //!
 //! Wraps the canonical fixed-length byte encodings from
 //! [`orderable_bytes::chrono`] in [`OreEncrypt`] impls, feeding the

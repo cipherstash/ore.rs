@@ -30,11 +30,10 @@ quickcheck = "1.0.3"
 rust_decimal_macros = "1.28"
 
 [features]
-# Adds ORE support for `chrono::NaiveDate` and `chrono::DateTime<Utc>`. The
-# orderable-bytes encoders live in the sibling `orderable-bytes` crate.
+# Adds dates on all schemes and UTC timestamps on legacy and chained.
+# The encoders live in the sibling `orderable-bytes` crate.
 chrono = ["dep:chrono", "orderable-bytes/chrono"]
-# Adds ORE support for `rust_decimal::Decimal` via a fixed-length 14-byte
-# order-preserving encoding fed into the existing fixed-N ORE machinery.
+# Adds Decimal support on legacy and chained via a 14-byte encoding.
 # The encoder lives in the sibling `orderable-bytes` crate.
 decimal = ["dep:rust_decimal", "orderable-bytes/decimal"]
 # Exposes `ct_bench`, timing-measurement entry points to otherwise private

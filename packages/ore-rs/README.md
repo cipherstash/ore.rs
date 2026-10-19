@@ -14,8 +14,8 @@ Reference documentation is on [docs.rs/ore-rs](https://docs.rs/ore-rs).
 
 | Scheme | When to use it |
 |---|---|
-| `OreAes128Bit6` ([`scheme::bit2_w6`](https://docs.rs/ore-rs/latest/ore_rs/scheme/bit2_w6/index.html)) | The recommended choice for new fixed-width data: booleans, integers up to 64 bits, characters and floats. |
-| `OreAes128Bit6Chained` ([`scheme::chained`](https://docs.rs/ore-rs/latest/ore_rs/scheme/chained/index.html)) | Strings, other variable-length data and 128-bit integers. Also supports `Decimal` and `chrono` types through `encrypt_fixed`. |
+| `OreAes128Bit6` ([`scheme::bit2_w6`](https://docs.rs/ore-rs/latest/ore_rs/scheme/bit2_w6/index.html)) | The recommended choice for booleans, integers up to 64 bits, characters, floats and `chrono::NaiveDate`. |
+| `OreAes128Bit6Chained` ([`scheme::chained`](https://docs.rs/ore-rs/latest/ore_rs/scheme/chained/index.html)) | Strings, other variable-length data, 128-bit integers, `Decimal` and `chrono::DateTime<Utc>`. Also supports all of the Bit6 types. |
 
 The [legacy `OreAes128` scheme](#the-legacy-scheme-oreaes128) remains available for compatibility with existing ciphertexts. It is not recommended for new data.
 
@@ -104,15 +104,72 @@ The following types implement `OreEncrypt`, which provides `value.encrypt(&ciphe
 
 | Scheme | Types |
 |---|---|
-| `OreAes128Bit6` | `bool`, `u8`–`u64`, `i8`–`i64`, `char`, `f32`, `f64` |
-| `OreAes128Bit6Chained` | `u128`, `i128` |
-| `OreAes128` (legacy) | The Bit6 types, plus `rust_decimal::Decimal` with the `decimal` feature, and `chrono::NaiveDate` and `chrono::DateTime<Utc>` with the `chrono` feature |
+| `OreAes128Bit6` | `bool`, `u8`–`u64`, `i8`–`i64`, `char`, `f32`, `f64`, plus `chrono::NaiveDate` with the `chrono` feature |
+| `OreAes128Bit6Chained` | The Bit6 types, plus `u128`, `i128`, `rust_decimal::Decimal` with the `decimal` feature, and `chrono::DateTime<Utc>` with the `chrono` feature |
+| `OreAes128` (legacy) | The Bit6 types, plus `rust_decimal::Decimal` with the `decimal` feature, and `chrono::DateTime<Utc>` with the `chrono` feature |
 
-The chained scheme also provides `encrypt_str` for strings and `encrypt_fixed` for other fixed-length types. This includes `rust_decimal::Decimal` with the `decimal` feature, and `chrono::NaiveDate` and `chrono::DateTime<Utc>` with the `chrono` feature. Use `cipher.encrypt_fixed(&value)` for a full ciphertext or `cipher.encrypt_left_fixed(&value)` for a query.
+The chained scheme also provides `encrypt_str` for strings and `encrypt_fixed` / `encrypt_left_fixed` for other fixed-length `orderable-bytes` types, such as byte arrays.
 
-These three types do not yet implement `OreEncrypt` for either v2 scheme. Decimal and timestamp encodings are 14 and 12 bytes respectively, exceeding Bit6's 10-byte limit. `NaiveDate` uses 4 bytes and would fit, but its Bit6 implementation is still missing. Use the chained scheme's `encrypt_fixed` method for all three today.
+Decimal and timestamp encodings are 14 and 12 bytes respectively, exceeding Bit6's 10-byte limit. Use the chained scheme for them. `NaiveDate` uses 4 bytes and works with either v2 scheme.
 
 The plaintext encodings come from the sibling [`orderable-bytes`](https://crates.io/crates/orderable-bytes) crate.
+
+### Decimals
+
+Enable the `decimal` feature to encrypt `rust_decimal::Decimal` values:
+
+```rust
+# #[cfg(feature = "decimal")]
+# {
+use ore_rs::scheme::chained::{ChainedCipherText, OreAes128Bit6ChainedChaCha20, DECIMAL_BLOCKS};
+use ore_rs::{OreEncrypt, OreOutput};
+use rust_decimal::Decimal;
+use std::cmp::Ordering;
+
+let ore = OreAes128Bit6ChainedChaCha20::init_with_salt(&[0x2b; 16], b"prices").unwrap();
+let price = Decimal::new(1999, 2); // 19.99
+let stored = price.encrypt(&ore).unwrap();
+let query = price.encrypt_left(&ore).unwrap();
+assert_eq!(
+    ChainedCipherText::<DECIMAL_BLOCKS>::compare_left_to_full(
+        &query.to_bytes(), &stored.to_bytes()
+    ),
+    Some(Ordering::Equal)
+);
+# }
+```
+
+### Dates and timestamps
+
+Enable the `chrono` feature for `NaiveDate` and `DateTime<Utc>`. Dates fit Bit6; timestamps use chained. Use a separate key or salt for each plaintext type:
+
+```rust
+# #[cfg(feature = "chrono")]
+# {
+use chrono::{DateTime, NaiveDate, Utc};
+use ore_rs::scheme::bit2_w6::OreAes128Bit6ChaCha20;
+use ore_rs::scheme::chained::{ChainedCipherText, OreAes128Bit6ChainedChaCha20, DATETIME_UTC_BLOCKS};
+use ore_rs::{OreEncrypt, OreOutput};
+use std::cmp::Ordering;
+
+let key = [0x2b; 16];
+let dates = OreAes128Bit6ChaCha20::init_with_salt(&key, b"dates").unwrap();
+let yesterday = NaiveDate::from_ymd_opt(2026, 10, 18).unwrap();
+let today = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
+assert!(yesterday.encrypt(&dates).unwrap() < today.encrypt(&dates).unwrap());
+
+let timestamps = OreAes128Bit6ChainedChaCha20::init_with_salt(&key, b"timestamps").unwrap();
+let timestamp = DateTime::<Utc>::from_timestamp(0, 123).unwrap();
+let stored = timestamp.encrypt(&timestamps).unwrap();
+let query = timestamp.encrypt_left(&timestamps).unwrap();
+assert_eq!(
+    ChainedCipherText::<DATETIME_UTC_BLOCKS>::compare_left_to_full(
+        &query.to_bytes(), &stored.to_bytes()
+    ),
+    Some(Ordering::Equal)
+);
+# }
+```
 
 ## Bit6 performance and limits
 
@@ -158,9 +215,9 @@ let ore = OreAes128Bit6ChainedChaCha20::init_with(&key, options).unwrap();
 let ct = ore.encrypt_str("alice@example.com").unwrap();
 ```
 
-### 128-bit integers and other fixed-length types
+### Fixed-length types
 
-The chained scheme implements `OreEncrypt` for `u128` and `i128`, returning `ChainedCipherText<22>` or `ChainedLeft<22>`. Their parsers and comparators require exactly 22 blocks.
+The chained scheme's `OreEncrypt` implementations return `ChainedCipherText<N>` or `ChainedLeft<N>`, where `N` is the block count. For example, `u128` and `i128` use 22 blocks, decimals use 19, timestamps use 16 and dates use 6. Their parsers and comparators require exactly that count.
 
 The block count does not identify the plaintext type: both integer types and a 16-byte string use 22 blocks. Use a separate key or salt for each type, as described in [Keys and salts](#keys-and-salts).
 
@@ -216,7 +273,7 @@ To report a security issue, see [SECURITY.md](https://github.com/cipherstash/ore
 
 ## The legacy scheme: `OreAes128`
 
-`OreAes128` (`scheme::bit2`) uses 8-bit blocks and was the only scheme available before 0.9. It remains available for compatibility with existing legacy ciphertexts, but is not recommended for new data. Its format remains frozen so existing ciphertexts stay readable. For new decimal and chrono values, use the chained scheme's `encrypt_fixed` method as described in [Plaintext types](#plaintext-types).
+`OreAes128` (`scheme::bit2`) uses 8-bit blocks and was the only scheme available before 0.9. It remains available for compatibility with existing legacy ciphertexts, but is not recommended for new data. Its format remains frozen so existing ciphertexts stay readable. Use a v2 scheme for new data, including decimal and chrono values, as described in [Plaintext types](#plaintext-types).
 
 ```rust
 use ore_rs::scheme::bit2::OreAes128ChaCha20;
