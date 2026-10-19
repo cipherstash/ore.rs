@@ -373,79 +373,128 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128Bit6<R> {
         if a.len() != b.len() {
             return None;
         }
-        let (header_a, a) = parse_header(a).ok()?;
-        let (header_b, b) = parse_header(b).ok()?;
-        if header_a != header_b || (header_a.0, header_a.1) != (WIRE.version, WIRE.scheme_id) {
+        let (num_blocks, a, b) = parse_pair(a, b)?;
+        if a.len() != full_body_len(num_blocks) {
             return None;
         }
-        let num_blocks = header_a.2;
-        // Reject a degenerate count=0 header: no OreEncrypt path produces zero
-        // blocks, and an empty scan would otherwise return Equal for any pair
-        // of crafted 0-block ciphertexts.
-        if num_blocks == 0 || num_blocks > MAX_BLOCKS {
-            return None;
-        }
-
-        let left_size = Self::LeftBlockType::BLOCK_SIZE;
-        let right_size = Self::RightBlockType::BLOCK_SIZE;
-        if a.len() != num_blocks * (left_size + 1 + right_size) + NONCE_SIZE {
-            return None;
-        }
-        // Reject symbols outside the 64-element domain: the scan below reads
-        // the right block at `a[l]`, which must index one of its 64 bits.
-        // `xt` is public, so this may branch.
-        if a[..num_blocks]
-            .iter()
-            .chain(&b[..num_blocks])
-            .any(|&s| usize::from(s) >= <Bit6 as BlockWidth>::DOMAIN)
-        {
-            return None;
-        }
-
-        let mut is_equal = Choice::from(1);
-        // What the resolution step needs from the first differing block `l`:
-        // `a`'s permuted symbol and PRF tag, and `b`'s right bitvector. All
-        // three are latched *inside* the scan, under the choice "this is the
-        // first difference", so no load after the loop is indexed by `l`.
-        // The right blocks are the one region the scan would otherwise never
-        // touch, so a direct `right[l]` afterwards hits or misses the cache
-        // according to `l`; measured as a timing signal, see `docs/reviews/`.
-        let mut diff = FirstDiff::<{ RightBlock8::BLOCK_SIZE }>::new();
-
-        // Slices for the PRF ("f") blocks and the right half.
-        let a_f = &a[num_blocks..];
-        let b_f = &b[num_blocks..];
-        let b_right = &b[num_blocks * (left_size + 1)..];
-        let b_right_blocks = &b_right[NONCE_SIZE..];
-
-        for n in 0..num_blocks {
-            let prp_eq: Choice = !a[n].ct_eq(&b[n]);
-            let left_block_comparison: Choice = !left_block(a_f, n).ct_eq(left_block(b_f, n));
-            let condition: Choice = prp_eq | left_block_comparison;
-            // Set for exactly one `n`: the first differing block.
-            let first = is_equal & condition;
-
-            diff.latch(
-                a[n],
-                left_block(a_f, n),
-                right_block(b_right_blocks, n),
-                first,
-            );
-            is_equal.conditional_assign(&Choice::from(0), first);
-        }
-
-        if bool::from(is_equal) {
-            return Some(Ordering::Equal);
-        }
-
-        let hash: Z2Hash = Hash::new(HashKey::from_slice(&b_right[0..NONCE_SIZE]));
-
-        if diff.resolve(&hash) == 1 {
-            return Some(Ordering::Greater);
-        }
-
-        Some(Ordering::Less)
+        compare_bodies(a, b, num_blocks)
     }
+}
+
+impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
+    /// Compare a serialised left (query) ciphertext, from
+    /// [`crate::OreEncrypt::encrypt_left`], with a serialised full one: the
+    /// order of `left`'s plaintext against `full`'s, as
+    /// [`OreCipher::compare_raw_slices`] gives it for two full ciphertexts.
+    /// A query needs only the left half; the comparison reads `full`'s
+    /// left and right halves.
+    ///
+    /// `None` if either input is malformed (including a full ciphertext
+    /// passed as `left`, or a left one as `full`), if their headers or
+    /// block counts differ, or if a symbol is outside the 6-bit domain.
+    pub fn compare_left_to_full(left: &[u8], full: &[u8]) -> Option<Ordering> {
+        let (num_blocks, left, full) = parse_pair(left, full)?;
+        if left.len() != left_body_len(num_blocks) {
+            return None;
+        }
+        compare_bodies(left, full, num_blocks)
+    }
+}
+
+/// Check two headered Bit6 slices against each other and the scheme:
+/// the same version, scheme id and block count, and a count from 1 to
+/// [`MAX_BLOCKS`]. Returns the count and the two bodies. Lengths are the
+/// caller's to check.
+fn parse_pair<'a>(a: &'a [u8], b: &'a [u8]) -> Option<(usize, &'a [u8], &'a [u8])> {
+    let (header_a, a) = parse_header(a).ok()?;
+    let (header_b, b) = parse_header(b).ok()?;
+    if header_a != header_b || (header_a.0, header_a.1) != (WIRE.version, WIRE.scheme_id) {
+        return None;
+    }
+    let num_blocks = header_a.2;
+    // Reject a degenerate count=0 header: no OreEncrypt path produces zero
+    // blocks, and an empty scan would otherwise return Equal for any pair
+    // of crafted 0-block ciphertexts.
+    if num_blocks == 0 || num_blocks > MAX_BLOCKS {
+        return None;
+    }
+    Some((num_blocks, a, b))
+}
+
+/// Body length (after the header) of a left ciphertext: `xt ‖ f`.
+fn left_body_len(num_blocks: usize) -> usize {
+    num_blocks * (LeftBlock16::BLOCK_SIZE + 1)
+}
+
+/// Body length (after the header) of a full ciphertext:
+/// `xt ‖ f ‖ nonce ‖ right`.
+fn full_body_len(num_blocks: usize) -> usize {
+    left_body_len(num_blocks) + NONCE_SIZE + num_blocks * RightBlock8::BLOCK_SIZE
+}
+
+/// Compare the bodies of `a` and `b`, which share `num_blocks`. `a` may be
+/// a left or a full body: only its left view (`xt ‖ f`, the same prefix in
+/// both) is read. `b` must be a full body of `full_body_len(num_blocks)`
+/// bytes; `a` at least `left_body_len(num_blocks)`. Refuses (`None`) a
+/// symbol outside the 6-bit domain in either.
+fn compare_bodies(a: &[u8], b: &[u8], num_blocks: usize) -> Option<Ordering> {
+    if b.len() != full_body_len(num_blocks) || a.len() < left_body_len(num_blocks) {
+        return None;
+    }
+    // Reject symbols outside the 64-element domain: the scan below reads
+    // the right block at `a[l]`, which must index one of its 64 bits.
+    // `xt` is public, so this may branch.
+    if a[..num_blocks]
+        .iter()
+        .chain(&b[..num_blocks])
+        .any(|&s| usize::from(s) >= <Bit6 as BlockWidth>::DOMAIN)
+    {
+        return None;
+    }
+
+    let mut is_equal = Choice::from(1);
+    // What the resolution step needs from the first differing block `l`:
+    // `a`'s permuted symbol and PRF tag, and `b`'s right bitvector. All
+    // three are latched *inside* the scan, under the choice "this is the
+    // first difference", so no load after the loop is indexed by `l`.
+    // The right blocks are the one region the scan would otherwise never
+    // touch, so a direct `right[l]` afterwards hits or misses the cache
+    // according to `l`; measured as a timing signal, see `docs/reviews/`.
+    let mut diff = FirstDiff::<{ RightBlock8::BLOCK_SIZE }>::new();
+
+    // Slices for the PRF ("f") blocks and `b`'s right half.
+    let a_f = &a[num_blocks..];
+    let b_f = &b[num_blocks..];
+    let b_right = &b[left_body_len(num_blocks)..];
+    let b_right_blocks = &b_right[NONCE_SIZE..];
+
+    for n in 0..num_blocks {
+        let prp_eq: Choice = !a[n].ct_eq(&b[n]);
+        let left_block_comparison: Choice = !left_block(a_f, n).ct_eq(left_block(b_f, n));
+        let condition: Choice = prp_eq | left_block_comparison;
+        // Set for exactly one `n`: the first differing block.
+        let first = is_equal & condition;
+
+        diff.latch(
+            a[n],
+            left_block(a_f, n),
+            right_block(b_right_blocks, n),
+            first,
+        );
+        is_equal.conditional_assign(&Choice::from(0), first);
+    }
+
+    if bool::from(is_equal) {
+        return Some(Ordering::Equal);
+    }
+
+    let hash: Z2Hash = Hash::new(HashKey::from_slice(&b_right[0..NONCE_SIZE]));
+
+    if diff.resolve(&hash) == 1 {
+        return Some(Ordering::Greater);
+    }
+
+    Some(Ordering::Less)
 }
 
 #[inline]
@@ -468,38 +517,52 @@ impl<const N: usize> PartialEq for CipherText<OreAes128Bit6ChaCha20, N> {
 
 impl<const N: usize> Ord for CipherText<OreAes128Bit6ChaCha20, N> {
     fn cmp(&self, b: &Self) -> Ordering {
-        let mut is_equal = Choice::from(1);
-        // Latch the first differing block during the scan, as in
-        // `compare_raw_slices`: no load after the loop is indexed by its
-        // position.
-        let mut diff = FirstDiff::<{ RightBlock8::BLOCK_SIZE }>::new();
-
-        for n in 0..N {
-            let condition: Choice =
-                !(self.left.xt[n].ct_eq(&b.left.xt[n])) | !(self.left.f[n].ct_eq(&b.left.f[n]));
-            // Set for exactly one `n`: the first differing block.
-            let first = is_equal & condition;
-
-            diff.latch(
-                self.left.xt[n],
-                &self.left.f[n],
-                b.right.data[n].bytes(),
-                first,
-            );
-            is_equal.conditional_assign(&Choice::from(0), first);
-        }
-
-        if bool::from(is_equal) {
-            return Ordering::Equal;
-        }
-
-        let hash: Z2Hash = Hash::new(HashKey::from_slice(&b.right.nonce));
-        if diff.resolve(&hash) == 1 {
-            return Ordering::Greater;
-        }
-
-        Ordering::Less
+        compare_typed(&self.left, b)
     }
+}
+
+impl<const N: usize> Left<OreAes128Bit6ChaCha20, N> {
+    /// The order of this left (query) ciphertext's plaintext against
+    /// `full`'s: the typed form of
+    /// [`OreAes128Bit6::compare_left_to_full`], and what `Ord` on
+    /// [`CipherText`] computes from the first ciphertext's left half.
+    pub fn compare_to_full(&self, full: &CipherText<OreAes128Bit6ChaCha20, N>) -> Ordering {
+        compare_typed(self, full)
+    }
+}
+
+/// The typed comparator: `left`'s plaintext against `b`'s. Reads only
+/// `left` and `b`, as the raw comparator reads only `a`'s left view.
+fn compare_typed<const N: usize>(
+    left: &Left<OreAes128Bit6ChaCha20, N>,
+    b: &CipherText<OreAes128Bit6ChaCha20, N>,
+) -> Ordering {
+    let mut is_equal = Choice::from(1);
+    // Latch the first differing block during the scan, as in
+    // `compare_raw_slices`: no load after the loop is indexed by its
+    // position.
+    let mut diff = FirstDiff::<{ RightBlock8::BLOCK_SIZE }>::new();
+
+    for n in 0..N {
+        let condition: Choice =
+            !(left.xt[n].ct_eq(&b.left.xt[n])) | !(left.f[n].ct_eq(&b.left.f[n]));
+        // Set for exactly one `n`: the first differing block.
+        let first = is_equal & condition;
+
+        diff.latch(left.xt[n], &left.f[n], b.right.data[n].bytes(), first);
+        is_equal.conditional_assign(&Choice::from(0), first);
+    }
+
+    if bool::from(is_equal) {
+        return Ordering::Equal;
+    }
+
+    let hash: Z2Hash = Hash::new(HashKey::from_slice(&b.right.nonce));
+    if diff.resolve(&hash) == 1 {
+        return Ordering::Greater;
+    }
+
+    Ordering::Less
 }
 
 impl<const N: usize> PartialOrd for CipherText<OreAes128Bit6ChaCha20, N> {
@@ -752,7 +815,51 @@ mod tests {
         );
     }
 
+    /// A left ciphertext against a full one, raw: what each kind of
+    /// malformed or mismatched pair returns (#120).
+    #[test]
+    fn left_to_full_refuses_what_is_not_a_left_and_a_full() {
+        let ore = init_ore();
+        let left = 7u64.encrypt_left(&ore).unwrap().to_bytes();
+        let full = 7u64.encrypt(&ore).unwrap().to_bytes();
+        assert_eq!(
+            Ore::compare_left_to_full(&left, &full),
+            Some(Ordering::Equal)
+        );
+        // Swapped, or two of a kind.
+        assert_eq!(Ore::compare_left_to_full(&full, &left), None);
+        assert_eq!(Ore::compare_left_to_full(&full, &full), None);
+        assert_eq!(Ore::compare_left_to_full(&left, &left), None);
+        // Another block count: a `u32` is 6 blocks.
+        let left_u32 = 7u32.encrypt_left(&ore).unwrap().to_bytes();
+        assert_eq!(Ore::compare_left_to_full(&left_u32, &full), None);
+        // Truncated, or a symbol outside the 6-bit domain (the first `xt`
+        // byte, after the 4-byte header).
+        assert_eq!(
+            Ore::compare_left_to_full(&left[..left.len() - 1], &full),
+            None
+        );
+        let mut bad = left.clone();
+        bad[4] = 64;
+        assert_eq!(Ore::compare_left_to_full(&bad, &full), None);
+    }
+
     quickcheck! {
+        /// A left (query) ciphertext orders against a full one as the
+        /// plaintexts do, raw and typed, and agrees with the full-vs-full
+        /// comparators (#120).
+        fn left_to_full_orders_as_the_plaintexts(a: u64, b: u64) -> bool {
+            let ore = init_ore();
+            let left = a.encrypt_left(&ore).unwrap();
+            let full_a = a.encrypt(&ore).unwrap();
+            let full_b = b.encrypt(&ore).unwrap();
+            let want = a.cmp(&b);
+            Ore::compare_left_to_full(&left.to_bytes(), &full_b.to_bytes()) == Some(want)
+                && left.compare_to_full(&full_b) == want
+                && full_a.cmp(&full_b) == want
+                && Ore::compare_raw_slices(&full_a.to_bytes(), &full_b.to_bytes()) == Some(want)
+        }
+
         fn compare_u64(x: u64, y: u64) -> bool {
             let ore = init_ore();
             let a = x.encrypt(&ore).unwrap();
