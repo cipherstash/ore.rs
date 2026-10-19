@@ -25,6 +25,8 @@ The two v2 schemes, Bit6 and chained, split plaintexts into 6-bit blocks. Their 
 ore-rs = "0.9"
 ```
 
+ore-rs needs Rust 1.78 or later (1.88 with the `vitaminc` feature).
+
 Encrypt with `OreEncrypt`, then compare the ciphertexts, or serialise them and compare the bytes:
 
 ```rust
