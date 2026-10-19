@@ -1,9 +1,9 @@
-//! ore-rs is an Order-Revealing Encryption (ORE) library: anyone can compare two
-//! ciphertexts and learn the order of their plaintexts, without the key, so range
-//! queries and sorting work on encrypted data.
+//! ore-rs is a Rust library for Order-Revealing Encryption (ORE). It lets you compare
+//! encrypted values without the encryption key, so you can sort them and run range
+//! queries.
 //!
-//! It implements the Block-ORE scheme of
-//! [Lewi and Wu (2016)](https://eprint.iacr.org/2016/612.pdf), and is used in the
+//! The library is based on the Block-ORE scheme by
+//! [Lewi and Wu (2016)](https://eprint.iacr.org/2016/612.pdf) and is used in the
 //! [CipherStash](https://cipherstash.com) searchable encryption platform.
 //!
 //! # Usage
@@ -14,31 +14,32 @@
 //!
 //! # Choosing a scheme
 //!
-//! - [`scheme::bit2_w6`] (`OreAes128Bit6`): **use this for new fixed-width data**:
-//!   `bool`, integers up to 64 bits, `char`, `f32` and `f64`. Plaintexts are split into
-//!   6-bit blocks; against the legacy scheme it is about twice as fast to encrypt, a
-//!   `u64` ciphertext is 28% smaller, and a ciphertext does not reveal its runs of zero
-//!   bytes.
-//! - [`scheme::chained`] (`OreAes128Bit6Chained`): strings and other variable-length
-//!   data, and `u128`/`i128`. Strings are padded to a length bucket by default.
-//! - [`scheme::bit2`] (`OreAes128`): the legacy 8-bit-block scheme, for data already
-//!   encrypted with it, and for the `chrono` and `rust_decimal` types (features
-//!   `chrono` and `decimal`), which have no v2 implementation yet.
+//! - [`scheme::bit2_w6`] (`OreAes128Bit6`) is recommended for new fixed-width data.
+//!   It supports `bool`, integers up to 64 bits, `char`, `f32` and `f64`.
+//! - [`scheme::chained`] (`OreAes128Bit6Chained`) supports strings, other
+//!   variable-length data, and `u128` and `i128`. Strings are padded to a power of
+//!   two by default, with a minimum of 16 bytes, to hide their exact length.
+//! - [`scheme::bit2`] (`OreAes128`) is the legacy scheme. Use it for existing legacy
+//!   ciphertexts or the `chrono` and `rust_decimal` types, enabled by the `chrono`
+//!   and `decimal` features.
 //!
-//! The wire formats of all three are frozen. The v2 schemes ([`scheme::bit2_w6`],
-//! [`scheme::chained`]) take one 16-byte key and an optional salt that names what the
-//! key is for (a data set or a tenant, say); the legacy scheme keeps its two-key
-//! `init(k1, k2)`.
+//! Bit6 uses 6-bit blocks. It encrypts a `u64` about twice as fast as the legacy
+//! scheme and produces a 28% smaller full ciphertext, measured on an Apple M1 Max
+//! with hardware AES for 0.9.0. It also avoids the legacy scheme's leakage of
+//! zero-byte runs.
+//!
+//! All three ciphertext formats are frozen. Bit6 and chained each take one 16-byte
+//! key and an optional salt, such as a dataset or tenant identifier. The legacy
+//! scheme requires two keys through `init(k1, k2)`.
 //!
 //! # Example: encrypt and compare
 //!
-//! Construct a cipher with its scheme's `init`, and `use` the [`OreEncrypt`] trait,
-//! which encrypts the supported plaintext types:
+//! Create a cipher with `init`, then use the [`OreEncrypt`] trait to encrypt values:
 //!
 //! ```rust
 //! use ore_rs::{OreEncrypt, scheme::bit2_w6::OreAes128Bit6ChaCha20};
 //!
-//! // One 16-byte key. Use a random key from your key management system.
+//! // In production, use a random 16-byte key from your key management system.
 //! let key = [0x2b; 16];
 //! let ore = OreAes128Bit6ChaCha20::init(&key).unwrap();
 //!
@@ -47,9 +48,9 @@
 //! assert!(a < b);
 //! ```
 //!
-//! A ciphertext is a [`CipherText<S, N>`], where `S` is the scheme and `N` the number of
-//! blocks: 11 for a `u64` under Bit6. Only ciphertexts of the same scheme and block count
-//! compare:
+//! The result is a [`CipherText<S, N>`], where `S` is the scheme and `N` is the block
+//! count. A `u64` uses 11 blocks under Bit6. Comparing ciphertexts with different
+//! schemes or block counts is a compile error:
 //!
 //! ```compile_fail
 //! # use ore_rs::{OreEncrypt, scheme::bit2_w6::OreAes128Bit6ChaCha20};
@@ -62,9 +63,9 @@
 //!
 //! # Serialising and parsing
 //!
-//! [`OreOutput::to_bytes`] serialises a ciphertext. To parse one, name its type,
-//! including the block count. Two serialised ciphertexts also compare without being
-//! parsed, through [`OreCipher::compare_raw_slices`]:
+//! Use [`OreOutput::to_bytes`] to serialise a ciphertext. When parsing it, specify
+//! the scheme and block count. You can also compare serialised ciphertexts directly
+//! with [`OreCipher::compare_raw_slices`]:
 //!
 //! ```rust
 //! use ore_rs::{CipherText, OreCipher, OreEncrypt, OreOutput};
@@ -85,8 +86,7 @@
 //! );
 //! ```
 //!
-//! This library does not use [Serde](https://crates.io/crates/serde), because of the
-//! `GenericArray` types in the [AES](https://crates.io/crates/aes) library.
+//! Serde is not supported; use `to_bytes` and `from_slice` for serialisation.
 //!
 //! # Example: strings
 //!
@@ -103,8 +103,8 @@
 //! );
 //! ```
 //!
-//! See [`scheme::chained`] for padding, the length ceiling and what a comparison
-//! reveals.
+//! See [`scheme::chained`] for padding options, length limits and the information
+//! revealed by comparisons.
 
 #![deny(missing_docs)]
 // Library code does not panic: it returns an error or carries the invariant
@@ -135,9 +135,7 @@ pub mod scheme;
 pub mod vitaminc;
 pub use crate::ciphertext::*;
 
-// Runs the README's Rust examples as doctests, so the README cannot drift
-// from the API. The examples use no optional feature, so they run under a
-// plain `cargo test` as well as with `--all-features`.
+// Test the README examples with both default features and --all-features.
 #[cfg(doctest)]
 #[doc = include_str!("../README.md")]
 struct ReadmeDoctests;

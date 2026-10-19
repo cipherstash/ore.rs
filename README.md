@@ -4,14 +4,14 @@ _(pronounced "auras")_
 
 [![Test](https://github.com/cipherstash/ore.rs/actions/workflows/test.yml/badge.svg)](https://github.com/cipherstash/ore.rs/actions/workflows/test.yml)
 
-A Rust workspace providing Order-Revealing Encryption (ORE) primitives used in the [CipherStash](https://cipherstash.com) searchable encryption platform.
+Rust libraries for Order-Revealing Encryption (ORE), used in the [CipherStash](https://cipherstash.com) searchable encryption platform.
 
 ## Crates
 
 | Crate | Description |
 |-------|-------------|
-| [`ore-rs`](packages/ore-rs) | Block-ORE encryption based on [Lewi-Wu 2016](https://eprint.iacr.org/2016/612.pdf): the 6-bit-block `OreAes128Bit6` scheme for new fixed-width data, a chained scheme for strings, and the legacy `OreAes128` |
-| [`orderable-bytes`](packages/orderable-bytes) | Canonical, order-preserving byte encodings for plaintext types — feeds into ORE/OPE schemes |
+| [`ore-rs`](packages/ore-rs) | Order-revealing encryption for numbers and strings, based on [Lewi and Wu (2016)](https://eprint.iacr.org/2016/612.pdf) |
+| [`orderable-bytes`](packages/orderable-bytes) | Converts plaintext values to bytes while preserving their sort order, for use with ORE and OPE schemes |
 
 See each crate's README for usage, supported types, and feature flags.
 
