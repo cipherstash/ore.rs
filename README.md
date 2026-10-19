@@ -10,7 +10,7 @@ A Rust workspace providing Order-Revealing Encryption (ORE) primitives used in t
 
 | Crate | Description |
 |-------|-------------|
-| [`ore-rs`](packages/ore-rs) | Block-ORE encryption library based on the [Lewi-Wu 2016](https://eprint.iacr.org/2016/612.pdf) scheme |
+| [`ore-rs`](packages/ore-rs) | Block-ORE encryption based on [Lewi-Wu 2016](https://eprint.iacr.org/2016/612.pdf): the 6-bit-block `OreAes128Bit6` scheme for new fixed-width data, a chained scheme for strings, and the legacy `OreAes128` |
 | [`orderable-bytes`](packages/orderable-bytes) | Canonical, order-preserving byte encodings for plaintext types — feeds into ORE/OPE schemes |
 
 See each crate's README for usage, supported types, and feature flags.

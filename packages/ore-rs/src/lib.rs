@@ -1,139 +1,110 @@
-//! ore-rs is a library to encrypt numeric types in a way that allows the numeric ordering
-//! of the unencrypted values to be "revealed" during a query enabling range queries to be performed
-//! on encrypted data.
+//! ore-rs is an Order-Revealing Encryption (ORE) library: anyone can compare two
+//! ciphertexts and learn the order of their plaintexts, without the key, so range
+//! queries and sorting work on encrypted data.
 //!
-//! This is an implementation of the BlockORE Encryption scheme developed by
-//! [Lewi-Wu in 2016](https://eprint.iacr.org/2016/612.pdf). It is used extensively in the
+//! It implements the Block-ORE scheme of
+//! [Lewi and Wu (2016)](https://eprint.iacr.org/2016/612.pdf), and is used in the
 //! [CipherStash](https://cipherstash.com) searchable encryption platform.
 //!
-//!
 //! # Usage
-//! This crate is [on crates.io](https://crates.io/crates/ore-rs) and can be
-//! used by adding `ore-rs` to your dependencies in your project's `Cargo.toml`.
 //! ```toml
 //! [dependencies]
 //! ore-rs = "0.9"
 //! ```
 //!
-//! ## Example: Encrypt a number with ORE.
+//! # Choosing a scheme
 //!
-//! To encrypt a number you need to initialize an [`OreCipher`] as well as `use` the [`OreEncrypt`] trait,
-//! which comes with implementations for `bool`, integers up to 64 bits (`u8`–`u64`, `i8`–`i64`), `char`,
-//! `f32` and `f64` (plus `chrono` and `rust_decimal` types behind the `chrono`/`decimal` features).
-//! `u128` and `i128` are too wide for the fixed-width schemes and are encrypted with the
-//! chained scheme instead: see [`scheme::chained`].
+//! - [`scheme::bit2_w6`] (`OreAes128Bit6`): **use this for new fixed-width data**:
+//!   `bool`, integers up to 64 bits, `char`, `f32` and `f64`. Plaintexts are split into
+//!   6-bit blocks; against the legacy scheme it is about twice as fast to encrypt, a
+//!   `u64` ciphertext is 28% smaller, and a ciphertext does not reveal its runs of zero
+//!   bytes.
+//! - [`scheme::chained`] (`OreAes128Bit6Chained`): strings and other variable-length
+//!   data, and `u128`/`i128`. Strings are padded to a length bucket by default.
+//! - [`scheme::bit2`] (`OreAes128`): the legacy 8-bit-block scheme, for data already
+//!   encrypted with it, and for the `chrono` and `rust_decimal` types (features
+//!   `chrono` and `decimal`), which have no v2 implementation yet.
 //!
-//! To initialize the Cipher, you must decide on the scheme you want to use. Each scheme has its
-//! own constructor. The v2 schemes ([`scheme::bit2_w6`], [`scheme::chained`]) take one 16-byte
-//! key and an optional salt that names what the key is for (a data set or a tenant, say); the legacy scheme
-//! ([`scheme::bit2`]) keeps its frozen two-key `init(k1, k2)`.
+//! The wire formats of all three are frozen. The v2 schemes ([`scheme::bit2_w6`],
+//! [`scheme::chained`]) take one 16-byte key and an optional salt that names what the
+//! key is for (a data set or a tenant, say); the legacy scheme keeps its two-key
+//! `init(k1, k2)`.
 //!
-//! ```rust
-//! use ore_rs::{
-//!     OreCipher,  // Main ORE Cipher trait
-//!     OreEncrypt, // Traits for encrypting primitive types (e.g. u64)
-//!     scheme::bit2::OreAes128ChaCha20 // Specific scheme we want to use
-//! };
-//! use hex_literal::hex;
+//! # Example: encrypt and compare
 //!
-//! // Initalize an ORE Cipher with the OreAes128ChaCha20 scheme
-//! let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-//! let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-//! let ore = OreAes128ChaCha20::init(&k1, &k2).unwrap();
-//!
-//! // Encryption takes a reference to the cipher and returns a `Result`
-//! let a = 456u64.encrypt(&ore).unwrap();
-//! ```
-//!
-//!
-//! ## Example: Comparing 2 CipherTexts
-//!
-//! The result of an encryption is called a CipherText and is represented by the type
-//! [`CipherText<S, N>`] where `S` is the scheme used and `N` is the number of blocks is the size
-//! of the input type (in bytes) divided by 8. (e.g. for `u64` N=8).
-//!
-//! Comparisons can only be performed between ciphertexts of the same size and underlying scheme.
+//! Construct a cipher with its scheme's `init`, and `use` the [`OreEncrypt`] trait,
+//! which encrypts the supported plaintext types:
 //!
 //! ```rust
-//! # use ore_rs::{
-//! #     CipherText,
-//! #     OreCipher,  // Main ORE Cipher trait
-//! #     OreEncrypt, // Traits for encrypting primitive types (e.g. u64)
-//! #     scheme::bit2::OreAes128ChaCha20 // Specific scheme we want to use
-//! # };
-//! # use hex_literal::hex;
-//! # let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-//! # let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-//! # let ore = OreAes128ChaCha20::init(&k1, &k2).unwrap();
+//! use ore_rs::{OreEncrypt, scheme::bit2_w6::OreAes128Bit6ChaCha20};
+//!
+//! // One 16-byte key. Use a random key from your key management system.
+//! let key = [0x2b; 16];
+//! let ore = OreAes128Bit6ChaCha20::init(&key).unwrap();
+//!
 //! let a = 456u64.encrypt(&ore).unwrap();
 //! let b = 1024u64.encrypt(&ore).unwrap();
-//!
-//! // This is fine
-//! let result = a > b; // false because 456 < 1024
+//! assert!(a < b);
 //! ```
 //!
+//! A ciphertext is a [`CipherText<S, N>`], where `S` is the scheme and `N` the number of
+//! blocks: 11 for a `u64` under Bit6. Only ciphertexts of the same scheme and block count
+//! compare:
+//!
 //! ```compile_fail
-//! # use ore_rs::{
-//! #     CipherText,
-//! #     OreCipher,  // Main ORE Cipher trait
-//! #     OreEncrypt, // Traits for encrypting primitive types (e.g. u64)
-//! #     scheme::bit2::OreAes128ChaCha20 // Specific scheme we want to use
-//! # };
-//! # use hex_literal::hex;
-//! # let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-//! # let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-//! # let ore = OreAes128ChaCha20::init(&k1, &k2).unwrap();
-//! // This isn't
+//! # use ore_rs::{OreEncrypt, scheme::bit2_w6::OreAes128Bit6ChaCha20};
+//! # let ore = OreAes128Bit6ChaCha20::init(&[0x2b; 16]).unwrap();
 //! let a = 456u64.encrypt(&ore).unwrap();
-//! let b = 1024u32.encrypt(&ore).unwrap(); // note the u32
+//! let b = 1024u32.encrypt(&ore).unwrap(); // a u32 is 6 blocks
 //!
 //! let result = a > b; // compilation error
 //! ```
 //!
-//! ## Serializing/Deserializing
+//! # Serialising and parsing
 //!
-//! *Note: this library doesn't use [Serde](https://crates.io/crates/serde) due to some complexities
-//! with GenericArray used in the [AES](https://crates.io/crates/aes) library. This may change in the future.*
-//!
-//! To serialize a [`CipherText<S, N>`] to a vector of bytes:
+//! [`OreOutput::to_bytes`] serialises a ciphertext. To parse one, name its type,
+//! including the block count. Two serialised ciphertexts also compare without being
+//! parsed, through [`OreCipher::compare_raw_slices`]:
 //!
 //! ```rust
-//! # use ore_rs::{
-//! #     CipherText,
-//! #     OreCipher,  // Main ORE Cipher trait
-//! #     OreEncrypt, // Traits for encrypting primitive types (e.g. u64)
-//! #     OreOutput,
-//! #     scheme::bit2::OreAes128ChaCha20 // Specific scheme we want to use
-//! # };
-//! # use hex_literal::hex;
-//! # let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-//! # let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-//! # let ore = OreAes128ChaCha20::init(&k1, &k2).unwrap();
+//! use ore_rs::{CipherText, OreCipher, OreEncrypt, OreOutput};
+//! use ore_rs::scheme::bit2_w6::OreAes128Bit6ChaCha20;
+//! use std::cmp::Ordering;
+//!
+//! let ore = OreAes128Bit6ChaCha20::init(&[0x2b; 16]).unwrap();
 //! let a = 456u64.encrypt(&ore).unwrap();
 //! let bytes: Vec<u8> = a.to_bytes();
+//!
+//! let parsed = CipherText::<OreAes128Bit6ChaCha20, 11>::from_slice(&bytes).unwrap();
+//! assert!(parsed == a);
+//!
+//! let b = 1024u64.encrypt(&ore).unwrap().to_bytes();
+//! assert_eq!(
+//!     OreAes128Bit6ChaCha20::compare_raw_slices(&bytes, &b),
+//!     Some(Ordering::Less)
+//! );
 //! ```
 //!
-//! To deserialize, you must specify the CipherText type (including number of blocks) you
-//! are deserializing into:
+//! This library does not use [Serde](https://crates.io/crates/serde), because of the
+//! `GenericArray` types in the [AES](https://crates.io/crates/aes) library.
+//!
+//! # Example: strings
 //!
 //! ```rust
-//! # use ore_rs::{
-//! #     CipherText,
-//! #     OreCipher,  // Main ORE Cipher trait
-//! #     OreEncrypt, // Traits for encrypting primitive types (e.g. u64)
-//! #     OreOutput,
-//! #     scheme::bit2::OreAes128ChaCha20 // Specific scheme we want to use
-//! # };
-//! # use hex_literal::hex;
-//! # let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-//! # let k2: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
-//! # let ore = OreAes128ChaCha20::init(&k1, &k2).unwrap();
-//! # let a = 456u64.encrypt(&ore).unwrap();
-//! # let bytes: Vec<u8> = a.to_bytes();
+//! use ore_rs::scheme::chained::OreAes128Bit6ChainedChaCha20;
+//! use std::cmp::Ordering;
 //!
-//! let ct = CipherText::<OreAes128ChaCha20, 8>::from_bytes(&bytes).unwrap();
-//! # assert!(ct == a);
+//! let ore = OreAes128Bit6ChainedChaCha20::init(&[0x2b; 16]).unwrap();
+//! let alice = ore.encrypt_str("alice").unwrap().to_bytes();
+//! let bob = ore.encrypt_str("bob").unwrap().to_bytes();
+//! assert_eq!(
+//!     OreAes128Bit6ChainedChaCha20::compare_raw_slices(&alice, &bob),
+//!     Some(Ordering::Less)
+//! );
 //! ```
+//!
+//! See [`scheme::chained`] for padding, the length ceiling and what a comparison
+//! reveals.
 
 #![deny(missing_docs)]
 // Library code does not panic: it returns an error or carries the invariant
@@ -163,6 +134,13 @@ pub mod scheme;
 #[cfg(feature = "vitaminc")]
 pub mod vitaminc;
 pub use crate::ciphertext::*;
+
+// Runs the README's Rust examples as doctests, so the README cannot drift
+// from the API. The examples use no optional feature, so they run under a
+// plain `cargo test` as well as with `--all-features`.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
 
 /// Timing-measurement entry points to private primitives, for the detached
 /// `ct-dudect` crate. Enabled only by the `ct-bench` feature; not public API.
