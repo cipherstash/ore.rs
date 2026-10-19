@@ -33,24 +33,30 @@ The v2 schemes (`OreAes128Bit6`, `OreAes128Bit6Chained`) take **one 16-byte key*
 ## Use from vitaminc
 
 The `vitaminc` feature implements [`vitaminc-ore`](https://docs.rs/vitaminc-ore)'s
-`OrderScheme` for three schemes, so a vitaminc order index can encrypt
-the sealed order plaintexts it builds here. A caller opens a column with
-the type it declares (`scheme.column(OrderTarget::I32, context)`), and
-every value is encoded at that type's width, so one column's terms
-always have one width. `vitaminc::Bit6BlockOre` is the ORE v2
-fixed-width six-bit scheme (`OreAes128Bit6`) for targets up to ten
-bytes, the one to prefer for new fixed-width data;
-`vitaminc::ChainedBlockOre` is the chained, variable-length scheme,
-which takes every target, text and bytes included, and is not yet
-frozen; `vitaminc::BlockOre` is the legacy eight-bit scheme
-(`OreAes128`) up to 15 bytes. None of them takes a salt, so each derives
-its keys per term with HMAC-SHA256 under the salt the column hands it
-(scheme, domain and the caller's context). The chained scheme takes
-text and bytes behind one marker byte (`vitaminc::VARIABLE_WIDTH_MARKER`),
-so an empty value still makes a keyed block and its term is bound to the
-key and the column like any other. The feature is off by default,
-changes nothing in the typed API above, and needs Rust 1.88 and
-vitaminc 0.6.
+`OrderScheme` for three schemes, so vitaminc can encrypt the sealed order
+plaintexts it builds here. A caller names the type its values are encoded
+as and the context they compare within (`scheme.column(OrderTarget::I32,
+context)` in vitaminc 0.6), and every value is encoded at that type's
+width, so terms that compare together always have one width.
+
+- `vitaminc::Bit6BlockOre` is the ORE v2 fixed-width six-bit scheme
+  (`OreAes128Bit6`) for targets up to ten bytes, the one to prefer for new
+  fixed-width data.
+- `vitaminc::ChainedBlockOre` is the chained, variable-length scheme. It
+  takes every target, text and bytes included, and is not yet frozen. Text
+  and bytes go in behind one marker byte (`vitaminc::VARIABLE_WIDTH_MARKER`),
+  so an empty value still makes a keyed block, and are refused past 1023
+  bytes (`OrderError::Backend(OreError::TooLong)`): the scheme's default
+  1024-byte ceiling counts the marker.
+- `vitaminc::BlockOre` is the legacy eight-bit scheme (`OreAes128`) up to
+  15 bytes.
+
+vitaminc derives one salt per scheme, target and context. The two v2
+schemes bind it with `init_with_salt`, under an ORE key derived once from
+the scheme key with HMAC-SHA256 when the scheme is made; the legacy scheme
+takes no salt, so it derives its two keys for every term with HMAC-SHA256
+under the salt. The feature is off by default, changes nothing in the
+typed API above, and needs Rust 1.88 and vitaminc 0.6.
 
 ## Need help?
 
