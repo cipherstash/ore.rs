@@ -5,9 +5,11 @@ use ore_rs::OreScheme;
 use vitaminc_ore::{order, OrderPlaintext, OrderTarget, Physical};
 use vitaminc_protected::Protected;
 
-/// Unpadded, so that each bench's name gives the length it encrypts and the
-/// results compare with earlier runs. The padded benches below use the
-/// default policy.
+/// Unpadded, so that a bench encrypts the length its name implies. A name
+/// gives the characters, and each text encrypts one byte more (vitaminc's
+/// marker, see [`text`]) after folding, so these do not compare one for one
+/// with 0.9's runs of the same names, which encrypted the raw string. The
+/// padded benches below use the default policy.
 fn init_ore(padding: Padding) -> OreAes128Bit6Chained {
     let k1: [u8; 16] = hex!("00010203 04050607 08090a0b 0c0d0e0f");
     OreAes128Bit6Chained::init_with(Protected::new(k1), Options::default().with_padding(padding))
@@ -24,7 +26,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     let ore = init_ore(Padding::None);
     let padded = init_ore(Padding::default());
 
-    // Short (~8 chars ≈ 11 blocks) and long (~40 chars ≈ 54 blocks) strings.
+    // 6, 18 and 44 bytes with the marker: 8, 24 and 59 blocks.
     let short = text("alice");
     let medium = text("alice@example.com");
     let long = text("the quick brown fox jumps over the lazy dog");

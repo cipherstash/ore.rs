@@ -89,6 +89,11 @@ fn u64_pt(x: u64) -> OrderPlaintext {
     order(OrderTarget::U64, None, Physical::Int(Int::U64(x))).unwrap()
 }
 
+/// The sealed `u128` plaintext of `x`.
+fn u128_pt(x: u128) -> OrderPlaintext {
+    order(OrderTarget::U128, None, Physical::Int(Int::U128(x))).unwrap()
+}
+
 /// The sealed text plaintext of `s`: vitaminc's marker byte, then the
 /// folded text, which for lowercase ASCII is the text itself.
 fn text_pt(s: &str) -> OrderPlaintext {
@@ -149,29 +154,24 @@ fn bit6_compare_first_vs_last_block(runner: &mut CtRunner, rng: &mut BenchRng) {
     }
 }
 
-/// Chained string comparator over 17-character strings: first byte differs
-/// (`Left`) versus only the last byte differs (`Right`). Unpadded, so that
+/// Chained comparator, first byte differs (`Left`) versus only the last
+/// byte differs (`Right`), over `u128`s: 16 bytes, 22 blocks, the
+/// difference in block 0 or block 21. Not text: vitaminc puts a constant
+/// marker byte before every text, so no two texts differ in block 0. The
+/// comparator is the same for every target (it reads the bytes and the
+/// header, not the target), and fixed-width plaintexts go in unpadded, so
 /// the last byte is in the last block.
 fn chained_compare_first_vs_last_byte(runner: &mut CtRunner, rng: &mut BenchRng) {
     let ore = chained(Padding::None);
     let mut left = Vec::with_capacity(pool_size());
     let mut right = Vec::with_capacity(pool_size());
     for _ in 0..pool_size() {
-        let mut s = [0u8; 17];
-        for b in s.iter_mut() {
-            *b = rng.random_range(b'a'..=b'z');
-        }
-        let mut first = s;
-        first[0] ^= 0x01;
-        let mut last = s;
-        last[16] ^= 0x01;
-        let enc = |bytes: &[u8]| {
-            ore.encrypt_plaintext(&text_pt(std::str::from_utf8(bytes).unwrap()))
-                .unwrap()
-                .into_bytes()
-        };
-        left.push((enc(&s), enc(&first)));
-        right.push((enc(&s), enc(&last)));
+        let x: u128 = rng.random();
+        let first = x ^ (1 << 127);
+        let last = x ^ 1;
+        let enc = |x: u128| ore.encrypt_plaintext(&u128_pt(x)).unwrap().into_bytes();
+        left.push((enc(x), enc(first)));
+        right.push((enc(x), enc(last)));
     }
     for _ in 0..SAMPLES {
         let c = class(rng);
