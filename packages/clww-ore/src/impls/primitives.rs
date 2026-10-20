@@ -63,18 +63,12 @@ macro_rules! impl_clww_ore_uint {
                 key: &Key,
                 salt: Option<&[u8]>,
             ) -> Result<Self::Output, Error> {
-                let mut hasher = blake3::Hasher::new_keyed(&key.0);
-                if let Some(salt) = salt {
-                    let _ = hasher.update(salt);
-                }
+                let mut hasher = super::keyed_hasher(key, salt);
 
                 let mut bytes: [u8; $array_size] = [0; $array_size];
                 Biterator::new(self).enumerate().for_each(|(i, bit)| {
-                    let mut buf: [u8; 16] = [0; 16];
-                    hasher.finalize_xof().fill(&mut buf);
-                    let byte = u128::from_be_bytes(buf).wrapping_add(bit as u128) & 0xFF;
+                    bytes[i] = super::prf_byte(&hasher).wrapping_add(bit);
                     let _ = hasher.update(&[bit]);
-                    bytes[i] = byte as u8;
                 });
 
                 Ok(OreClww8V1 { bytes })
@@ -89,18 +83,12 @@ macro_rules! impl_clww_ore_uint {
                 key: &Key,
                 salt: Option<&[u8]>,
             ) -> Result<Self::Output, Error> {
-                let mut hasher = blake3::Hasher::new_keyed(&key.0);
-                if let Some(salt) = salt {
-                    let _ = hasher.update(salt);
-                }
+                let mut hasher = super::keyed_hasher(key, salt);
 
                 let mut result: $uint_type = 0;
                 for (i, &ciphertext_byte) in self.bytes.iter().enumerate() {
-                    let mut buf: [u8; 16] = [0; 16];
-                    hasher.finalize_xof().fill(&mut buf);
-                    let prf_block = u128::from_be_bytes(buf) & 0xFF;
                     // Recover the bit by subtracting ciphertext from PRF block
-                    let bit = ciphertext_byte.wrapping_sub(prf_block as u8) & 0x01;
+                    let bit = ciphertext_byte.wrapping_sub(super::prf_byte(&hasher)) & 0x01;
                     let _ = hasher.update(&[bit]);
                     // Set the bit in the result (MSB first)
                     // Use constant-time operation to avoid timing side-channel
@@ -122,7 +110,7 @@ impl_clww_ore_uint!(u128, 128);
 
 impl<const N: usize> Ord for OreClww8V1<N> {
     fn cmp(&self, other: &Self) -> Ordering {
-        super::compare_slice(self.bytes.as_slice(), other.bytes.as_slice())
+        super::compare_pairs(self.bytes.iter().zip(other.bytes.iter()))
     }
 }
 
@@ -303,8 +291,7 @@ macro_rules! impl_clww_ope_uint {
                 key: &Key,
                 salt: Option<&[u8]>,
             ) -> Result<Self::Output, Error> {
-                let n = <$uint_type>::BITS as usize;
-                let vec = super::encrypt_ope_bits(Biterator::new(self), n, key, salt);
+                let vec = super::encrypt_ope_bits(Biterator::new(self), key, salt);
                 let mut bytes = [0u8; { <$uint_type>::BITS as usize + 1 }];
                 bytes.copy_from_slice(&vec);
                 Ok(OpeClww8V1 { bytes })

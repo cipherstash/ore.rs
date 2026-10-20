@@ -107,20 +107,14 @@ impl OreClww8VariableV1 {
             return Err(Error);
         }
 
-        let mut hasher = blake3::Hasher::new_keyed(&key.0);
-        if let Some(salt) = salt {
-            let _ = hasher.update(salt);
-        }
+        let mut hasher = super::keyed_hasher(key, salt);
 
         let mut result_bytes = Vec::with_capacity(self.bytes.len() / BITS_PER_BYTE);
         let mut current_byte: u8 = 0;
 
         for (i, &ciphertext_byte) in self.bytes.iter().enumerate() {
-            let mut buf: [u8; 16] = [0; 16];
-            hasher.finalize_xof().fill(&mut buf);
-            let prf_block = u128::from_be_bytes(buf) & 0xFF;
             // Recover the bit by subtracting ciphertext from PRF block
-            let bit = ciphertext_byte.wrapping_sub(prf_block as u8) & 0x01;
+            let bit = ciphertext_byte.wrapping_sub(super::prf_byte(&hasher)) & 0x01;
             let _ = hasher.update(&[bit]);
 
             // Build up the byte MSB-first (8 bits per byte)
@@ -185,7 +179,7 @@ fn compare_lex(a: &OreClww8VariableV1, b: &OreClww8VariableV1) -> Ordering {
     }
 
     // Compare the common prefix
-    let prefix_ordering = super::compare_slice(&a.bytes[..slice_len], &b.bytes[..slice_len]);
+    let prefix_ordering = super::compare_pairs(a.bytes.iter().zip(b.bytes.iter()));
 
     // If prefix is equal, compare by length; otherwise return prefix comparison
     match prefix_ordering {

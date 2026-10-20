@@ -1,6 +1,7 @@
 use crate::Key;
 use std::cmp::Ordering;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
+use zeroize::Zeroizing;
 
 #[cfg(any(feature = "chrono", feature = "decimal"))]
 pub(crate) mod byte_array;
@@ -12,10 +13,31 @@ pub(crate) mod primitives;
 pub(crate) mod string;
 pub(crate) mod variable;
 
+/// The keyed PRF every scheme here draws from: BLAKE3 keyed with `key`, then
+/// the salt if there is one. Wiped on drop, so the key words and chaining
+/// values do not outlive the call.
+pub(crate) fn keyed_hasher(key: &Key, salt: Option<&[u8]>) -> Zeroizing<blake3::Hasher> {
+    let mut hasher = Zeroizing::new(blake3::Hasher::new_keyed(&key.0));
+    if let Some(salt) = salt {
+        let _ = hasher.update(salt);
+    }
+    hasher
+}
+
+/// The next keystream byte: the last of the first 16 bytes the hasher
+/// outputs. The output block and its reader are wiped before they are freed.
+pub(crate) fn prf_byte(hasher: &blake3::Hasher) -> u8 {
+    let mut buf = Zeroizing::new([0u8; 16]);
+    let mut reader = Zeroizing::new(hasher.finalize_xof());
+    reader.fill(&mut buf[..]);
+    buf[15]
+}
+
 /// Encrypts a bit stream into an OPE ciphertext whose lex order matches the
 /// plaintext order exactly.
 ///
-/// The output is `n + 1` bytes: a reserved leading byte absorbs any carry
+/// The output is `n + 1` bytes, for the `n` bits `bits` yields: a reserved
+/// leading byte absorbs any carry
 /// that propagates past the MSB, followed by one byte per plaintext bit
 /// (MSB-first).
 ///
@@ -32,34 +54,28 @@ pub(crate) mod variable;
 /// leftward where the signal re-emerges at the next shared-PRF byte and
 /// lex compare resolves cleanly.
 ///
-/// `n` is the number of plaintext bits, which must equal the number of items
-/// yielded by `bits` (debug-checked).
-///
 /// `bits` is an iterator of one byte per plaintext bit, each `0` or `1`. The
 /// MSB-first byte form of an integer or string is just one convenient producer
 /// — callers may freely pack their own tagged bit streams.
-pub fn encrypt_ope_bits<I>(bits: I, n: usize, key: &Key, salt: Option<&[u8]>) -> Vec<u8>
+pub fn encrypt_ope_bits<I>(bits: I, key: &Key, salt: Option<&[u8]>) -> Vec<u8>
 where
     I: IntoIterator<Item = u8>,
 {
-    let mut hasher = blake3::Hasher::new_keyed(&key.0);
-    if let Some(salt) = salt {
-        let _ = hasher.update(salt);
-    }
+    let bits = bits.into_iter();
+    let n = bits.size_hint().0;
+    let mut hasher = keyed_hasher(key, salt);
 
     let mut out: Vec<u8> = Vec::with_capacity(n + 1);
     out.push(0);
-    let mut plain_bits: Vec<u8> = Vec::with_capacity(n);
+    // One byte per plaintext bit, kept for the carry pass: wiped on drop.
+    let mut plain_bits: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::with_capacity(n));
     for bit in bits {
-        let mut buf: [u8; 16] = [0; 16];
-        hasher.finalize_xof().fill(&mut buf);
-        let prf = (u128::from_be_bytes(buf) & 0xFF) as u8;
-        out.push(prf);
+        out.push(prf_byte(&hasher));
         plain_bits.push(bit);
         let _ = hasher.update(&[bit]);
     }
-    debug_assert_eq!(plain_bits.len(), n);
 
+    // Each sum is at most 255 + 128 + 1, so the carry out of it is 0 or 1.
     let mut carry: u16 = 0;
     for (byte, &bit) in out[1..].iter_mut().rev().zip(plain_bits.iter().rev()) {
         // Place the plaintext bit at the MSB of the byte (weight 128) so the
@@ -68,22 +84,20 @@ where
         *byte = sum as u8;
         carry = sum >> 8;
     }
-    debug_assert!(carry <= 1);
     out[0] = carry as u8;
 
     out
 }
 
-/// Compare 2 CLWW ORE encrypted slices of the same length in constant time
-fn compare_slice(a: &[u8], b: &[u8]) -> Ordering {
-    assert_eq!(a.len(), b.len());
-
+/// Compare two CLWW ORE ciphertexts in constant time, given as their
+/// bytes paired position by position: the first differing pair decides.
+fn compare_pairs<'a>(pairs: impl Iterator<Item = (&'a u8, &'a u8)>) -> Ordering {
     // Track the first differing pair in a constant-time manner
     let mut diff_x: u8 = 0;
     let mut diff_y: u8 = 0;
     let mut found_diff = Choice::from(0u8);
 
-    for (x, y) in a.iter().zip(b.iter()) {
+    for (x, y) in pairs {
         let is_diff = !x.ct_eq(y);
         let not_found_yet = !found_diff;
         let should_record = is_diff & not_found_yet;

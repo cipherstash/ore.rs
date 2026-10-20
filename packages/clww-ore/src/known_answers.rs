@@ -254,7 +254,7 @@ fn bit_streams() {
     let mut digest = Digest::new();
     for salt in [None, Some(SALT)] {
         digest.add(&encrypt_ore_bits(bits, &key, salt));
-        digest.add(&encrypt_ope_bits(bits, bits.len(), &key, salt));
+        digest.add(&encrypt_ope_bits(bits, &key, salt));
     }
     assert_eq!(
         digest.hex(),

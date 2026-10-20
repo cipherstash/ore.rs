@@ -28,7 +28,8 @@ decimal = ["dep:rust_decimal", "dep:orderable-bytes", "orderable-bytes/decimal"]
 chrono = ["dep:chrono", "dep:orderable-bytes", "orderable-bytes/chrono"]
 
 [dependencies]
-blake3 = "1.5.4"
+# `zeroize` wipes the keyed hasher and its output readers on drop.
+blake3 = { version = "1.5.4", features = ["zeroize"] }
 chrono = { version = "0.4.42", default-features = false, optional = true }
 hex = "0.4.3"
 orderable-bytes = { version = "0.1.1", default-features = false, optional = true }

@@ -24,16 +24,10 @@ pub fn encrypt_ore_bits<I>(bits: I, key: &Key, salt: Option<&[u8]>) -> Vec<u8>
 where
     I: IntoIterator<Item = u8>,
 {
-    let mut hasher = blake3::Hasher::new_keyed(&key.0);
-    if let Some(salt) = salt {
-        let _ = hasher.update(salt);
-    }
+    let mut hasher = crate::impls::keyed_hasher(key, salt);
     bits.into_iter().fold(Vec::new(), |mut out, bit| {
-        let mut buf: [u8; 16] = [0; 16];
-        hasher.finalize_xof().fill(&mut buf);
-        let byte = u128::from_be_bytes(buf).wrapping_add(bit as u128) & 0xFF;
+        out.push(crate::impls::prf_byte(&hasher).wrapping_add(bit));
         let _ = hasher.update(&[bit]);
-        out.push(byte as u8);
         out
     })
 }
@@ -67,8 +61,7 @@ impl ClwwOpeEncrypt for &str {
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         let normalized = orderize_secret(self);
-        let n = normalized.len() * 8;
-        let bytes = encrypt_ope_bits(string_biter(&normalized), n, key, salt);
+        let bytes = encrypt_ope_bits(string_biter(&normalized), key, salt);
         Ok(OpeClww8VariableV1::from_bytes_unchecked(bytes))
     }
 }
@@ -77,9 +70,8 @@ impl ClwwOpeEncrypt for &[u8] {
     type Output = OpeClww8VariableV1;
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
-        let n = self.len() * 8;
         let bits = self.iter().flat_map(|&byte| Biterator::new(byte));
-        let bytes = encrypt_ope_bits(bits, n, key, salt);
+        let bytes = encrypt_ope_bits(bits, key, salt);
         Ok(OpeClww8VariableV1::from_bytes_unchecked(bytes))
     }
 }
