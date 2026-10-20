@@ -13,8 +13,9 @@
 //! The plaintext type is not in the bytes. vitaminc's `OrderTerm` and
 //! `QueryTerm` label a term with its target; here a `Term` is whatever
 //! the caller says it is, and the comparators refuse only what they can
-//! tell apart (another scheme, another block count, another padding
-//! policy), as the scheme docs say.
+//! tell apart (another scheme; on a fixed-width scheme another block
+//! count; on the chained scheme another padding policy), as the scheme
+//! docs say.
 
 /// A full ciphertext, serialised: left and right halves, with the wire
 /// header. What a scheme stores. Compared with the scheme's

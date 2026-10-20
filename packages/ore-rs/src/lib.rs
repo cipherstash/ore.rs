@@ -255,9 +255,12 @@ pub trait OreScheme: sealed::Sealed {
 
     /// Compare two serialised full ciphertexts (the bytes of two
     /// [`Term`]s) without a key. `None` if either is not a well-formed
-    /// ciphertext of this scheme, or the two were not made to compare (a
-    /// different block count, or for the chained scheme a different
-    /// padding policy).
+    /// ciphertext of this scheme, or the two were not made to compare: on
+    /// the fixed-width schemes (Bit6 and legacy), a different block
+    /// count; on the chained scheme, a different padding policy. The
+    /// chained scheme compares terms of different block counts, across
+    /// length buckets too, lexicographically: a plaintext that is a
+    /// prefix of the other sorts first.
     fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering>;
 
     /// Compare a serialised query (the bytes of a [`Query`]) with a
