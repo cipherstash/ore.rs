@@ -6,12 +6,12 @@
 //! See that module for the encoding details, ordering guarantees, and
 //! constant-time properties.
 
-use crate::{CllwOpeEncrypt, Error, Key, OpeCllw8V1};
+use crate::{ClwwOpeEncrypt, Error, Key, OpeClww8V1};
 use orderable_bytes::ToOrderableBytes;
 use rust_decimal::Decimal;
 
-impl CllwOpeEncrypt for Decimal {
-    type Output = OpeCllw8V1<{ <Self as ToOrderableBytes>::ENCODED_LEN * 8 + 1 }>;
+impl ClwwOpeEncrypt for Decimal {
+    type Output = OpeClww8V1<{ <Self as ToOrderableBytes>::ENCODED_LEN * 8 + 1 }>;
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         self.to_orderable_bytes().encrypt_ope_with_salt(key, salt)
@@ -32,7 +32,7 @@ mod tests {
         Key::from([7u8; 32])
     }
 
-    fn encrypt(d: Decimal) -> OpeCllw8V1<{ CT_LEN }> {
+    fn encrypt(d: Decimal) -> OpeClww8V1<{ CT_LEN }> {
         key().encrypt_ope(d).unwrap()
     }
 
@@ -245,7 +245,7 @@ mod tests {
         fn prop_decimal_hex_round_trip(x: ArbDecimal) -> bool {
             let ct = key().encrypt_ope(x.0).unwrap();
             let hex_str = hex::encode(ct.as_ref());
-            let ct2 = OpeCllw8V1::<CT_LEN>::from_hex(&hex_str).unwrap();
+            let ct2 = OpeClww8V1::<CT_LEN>::from_hex(&hex_str).unwrap();
             ct == ct2
         }
 

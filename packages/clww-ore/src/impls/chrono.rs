@@ -6,23 +6,23 @@
 //! encoders. See those modules for encoding details and ordering
 //! guarantees.
 //!
-//! - `NaiveDate` → `OpeCllw8V1<33>` (4 plaintext bytes × 8 + 1)
-//! - `DateTime<Utc>` → `OpeCllw8V1<97>` (12 plaintext bytes × 8 + 1)
+//! - `NaiveDate` → `OpeClww8V1<33>` (4 plaintext bytes × 8 + 1)
+//! - `DateTime<Utc>` → `OpeClww8V1<97>` (12 plaintext bytes × 8 + 1)
 
-use crate::{CllwOpeEncrypt, Error, Key, OpeCllw8V1};
+use crate::{ClwwOpeEncrypt, Error, Key, OpeClww8V1};
 use ::chrono::{DateTime, NaiveDate, Utc};
 use orderable_bytes::ToOrderableBytes;
 
-impl CllwOpeEncrypt for NaiveDate {
-    type Output = OpeCllw8V1<{ <Self as ToOrderableBytes>::ENCODED_LEN * 8 + 1 }>;
+impl ClwwOpeEncrypt for NaiveDate {
+    type Output = OpeClww8V1<{ <Self as ToOrderableBytes>::ENCODED_LEN * 8 + 1 }>;
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         self.to_orderable_bytes().encrypt_ope_with_salt(key, salt)
     }
 }
 
-impl CllwOpeEncrypt for DateTime<Utc> {
-    type Output = OpeCllw8V1<{ <Self as ToOrderableBytes>::ENCODED_LEN * 8 + 1 }>;
+impl ClwwOpeEncrypt for DateTime<Utc> {
+    type Output = OpeClww8V1<{ <Self as ToOrderableBytes>::ENCODED_LEN * 8 + 1 }>;
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         self.to_orderable_bytes().encrypt_ope_with_salt(key, salt)
@@ -49,7 +49,7 @@ mod tests {
         NaiveDate::from_ymd_opt(year, month, day).unwrap()
     }
 
-    fn encrypt_date(d: NaiveDate) -> OpeCllw8V1<33> {
+    fn encrypt_date(d: NaiveDate) -> OpeClww8V1<33> {
         key().encrypt_ope(d).unwrap()
     }
 
@@ -150,7 +150,7 @@ mod tests {
         fn prop_date_hex_round_trip(x: ArbDate) -> bool {
             let ct = key().encrypt_ope(x.0).unwrap();
             let hex_str = hex::encode(ct.as_ref());
-            let ct2 = OpeCllw8V1::<33>::from_hex(&hex_str).unwrap();
+            let ct2 = OpeClww8V1::<33>::from_hex(&hex_str).unwrap();
             ct == ct2
         }
 
@@ -178,7 +178,7 @@ mod tests {
         Utc.timestamp_opt(secs, nanos).single().unwrap()
     }
 
-    fn encrypt_dt(d: DateTime<Utc>) -> OpeCllw8V1<97> {
+    fn encrypt_dt(d: DateTime<Utc>) -> OpeClww8V1<97> {
         key().encrypt_ope(d).unwrap()
     }
 
@@ -310,7 +310,7 @@ mod tests {
         fn prop_datetime_hex_round_trip(x: ArbDateTime) -> bool {
             let ct = key().encrypt_ope(x.0).unwrap();
             let hex_str = hex::encode(ct.as_ref());
-            let ct2 = OpeCllw8V1::<97>::from_hex(&hex_str).unwrap();
+            let ct2 = OpeClww8V1::<97>::from_hex(&hex_str).unwrap();
             ct == ct2
         }
 

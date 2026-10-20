@@ -1,4 +1,4 @@
-use crate::{biterator::Biterator, CllwOpeEncrypt, CllwOreDecrypt, CllwOreEncrypt, Error, Key};
+use crate::{biterator::Biterator, ClwwOpeEncrypt, ClwwOreDecrypt, ClwwOreEncrypt, Error, Key};
 use hex::FromHex;
 #[cfg(feature = "postgres-types")]
 use postgres_types::ToSql;
@@ -10,25 +10,25 @@ use subtle::ConstantTimeEq;
 /// This type represents an encrypted value using the CLWW Order-Revealing Encryption scheme.
 /// The size `N` corresponds to the number of bits in the plaintext (one byte per bit).
 ///
-/// - `OreCllw8V1<8>` encrypts `u8` (8 bytes)
-/// - `OreCllw8V1<16>` encrypts `u16` (16 bytes)
-/// - `OreCllw8V1<32>` encrypts `u32` (32 bytes)
-/// - `OreCllw8V1<64>` encrypts `u64` (64 bytes)
-/// - `OreCllw8V1<128>` encrypts `u128` (128 bytes)
+/// - `OreClww8V1<8>` encrypts `u8` (8 bytes)
+/// - `OreClww8V1<16>` encrypts `u16` (16 bytes)
+/// - `OreClww8V1<32>` encrypts `u32` (32 bytes)
+/// - `OreClww8V1<64>` encrypts `u64` (64 bytes)
+/// - `OreClww8V1<128>` encrypts `u128` (128 bytes)
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "postgres-types", derive(ToSql))]
 #[cfg_attr(feature = "postgres-types", postgres(name = "ore_cllw_8_v1"))]
-pub struct OreCllw8V1<const N: usize> {
+pub struct OreClww8V1<const N: usize> {
     bytes: [u8; N],
 }
 
-impl<const N: usize> AsRef<[u8]> for OreCllw8V1<N> {
+impl<const N: usize> AsRef<[u8]> for OreClww8V1<N> {
     fn as_ref(&self) -> &[u8] {
         &self.bytes
     }
 }
 
-impl<const N: usize> FromHex for OreCllw8V1<N> {
+impl<const N: usize> FromHex for OreClww8V1<N> {
     type Error = Error;
 
     fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, <Self as FromHex>::Error> {
@@ -38,7 +38,7 @@ impl<const N: usize> FromHex for OreCllw8V1<N> {
     }
 }
 
-impl<const N: usize> TryFrom<&[u8]> for OreCllw8V1<N> {
+impl<const N: usize> TryFrom<&[u8]> for OreClww8V1<N> {
     type Error = Error;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
@@ -48,15 +48,15 @@ impl<const N: usize> TryFrom<&[u8]> for OreCllw8V1<N> {
 
         let mut bytes: [u8; N] = [0; N];
         bytes.copy_from_slice(value);
-        Ok(OreCllw8V1 { bytes })
+        Ok(OreClww8V1 { bytes })
     }
 }
 
-/// Macro to implement CllwOreEncrypt and CllwOreDecrypt for unsigned integer types
-macro_rules! impl_cllw_ore_uint {
+/// Macro to implement ClwwOreEncrypt and ClwwOreDecrypt for unsigned integer types
+macro_rules! impl_clww_ore_uint {
     ($uint_type:ty, $array_size:expr) => {
-        impl CllwOreEncrypt for $uint_type {
-            type Output = OreCllw8V1<$array_size>;
+        impl ClwwOreEncrypt for $uint_type {
+            type Output = OreClww8V1<$array_size>;
 
             fn encrypt_with_salt(
                 self,
@@ -77,11 +77,11 @@ macro_rules! impl_cllw_ore_uint {
                     bytes[i] = byte as u8;
                 });
 
-                Ok(OreCllw8V1 { bytes })
+                Ok(OreClww8V1 { bytes })
             }
         }
 
-        impl CllwOreDecrypt for OreCllw8V1<$array_size> {
+        impl ClwwOreDecrypt for OreClww8V1<$array_size> {
             type Output = $uint_type;
 
             fn decrypt_with_salt(
@@ -114,48 +114,48 @@ macro_rules! impl_cllw_ore_uint {
 }
 
 // Generate encrypt/decrypt implementations for all unsigned integer types
-impl_cllw_ore_uint!(u8, 8);
-impl_cllw_ore_uint!(u16, 16);
-impl_cllw_ore_uint!(u32, 32);
-impl_cllw_ore_uint!(u64, 64);
-impl_cllw_ore_uint!(u128, 128);
+impl_clww_ore_uint!(u8, 8);
+impl_clww_ore_uint!(u16, 16);
+impl_clww_ore_uint!(u32, 32);
+impl_clww_ore_uint!(u64, 64);
+impl_clww_ore_uint!(u128, 128);
 
-impl<const N: usize> Ord for OreCllw8V1<N> {
+impl<const N: usize> Ord for OreClww8V1<N> {
     fn cmp(&self, other: &Self) -> Ordering {
         super::compare_slice(self.bytes.as_slice(), other.bytes.as_slice())
     }
 }
 
-impl<const N: usize> PartialOrd for OreCllw8V1<N> {
+impl<const N: usize> PartialOrd for OreClww8V1<N> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<const N: usize> PartialEq for OreCllw8V1<N> {
+impl<const N: usize> PartialEq for OreClww8V1<N> {
     fn eq(&self, other: &Self) -> bool {
         self.bytes.ct_eq(&other.bytes).into()
     }
 }
 
-impl<const N: usize> Eq for OreCllw8V1<N> {}
+impl<const N: usize> Eq for OreClww8V1<N> {}
 
-/// Macro to implement CllwOreEncrypt for signed integer types.
+/// Macro to implement ClwwOreEncrypt for signed integer types.
 ///
 /// Sign-flips the plaintext to its unsigned equivalent (`x ^ (1 << (N-1))`)
 /// so two's-complement order on `iN` matches unsigned order on `uN`, then
 /// delegates to the matching unsigned ORE impl. The output ciphertext type
-/// is shared with the unsigned variant (`OreCllw8V1<N>`) — the bytes are
+/// is shared with the unsigned variant (`OreClww8V1<N>`) — the bytes are
 /// identical and `compare_slice` is byte-level, so a separate type would
 /// add no information.
 ///
-/// **Decryption note**: there is no `CllwOreDecrypt` impl for the signed
+/// **Decryption note**: there is no `ClwwOreDecrypt` impl for the signed
 /// case. To round-trip, decrypt to `uN` (using the existing unsigned impl)
 /// and reverse the bias yourself: `(biased ^ (1 << (N-1))) as iN`.
-macro_rules! impl_cllw_ore_iint {
+macro_rules! impl_clww_ore_iint {
     ($iint_type:ty, $uint_type:ty, $array_size:expr) => {
-        impl CllwOreEncrypt for $iint_type {
-            type Output = OreCllw8V1<$array_size>;
+        impl ClwwOreEncrypt for $iint_type {
+            type Output = OreClww8V1<$array_size>;
 
             fn encrypt_with_salt(
                 self,
@@ -170,24 +170,24 @@ macro_rules! impl_cllw_ore_iint {
 }
 
 // Generate encrypt implementations for all signed integer types.
-impl_cllw_ore_iint!(i8, u8, 8);
-impl_cllw_ore_iint!(i16, u16, 16);
-impl_cllw_ore_iint!(i32, u32, 32);
-impl_cllw_ore_iint!(i64, u64, 64);
-impl_cllw_ore_iint!(i128, u128, 128);
+impl_clww_ore_iint!(i8, u8, 8);
+impl_clww_ore_iint!(i16, u16, 16);
+impl_clww_ore_iint!(i32, u32, 32);
+impl_clww_ore_iint!(i64, u64, 64);
+impl_clww_ore_iint!(i128, u128, 128);
 
 /// CLWW ORE for `bool`. Maps `false → 0u8`, `true → 1u8` and delegates to the
-/// `u8` impl. The output ciphertext type is shared with `u8` (`OreCllw8V1<8>`),
+/// `u8` impl. The output ciphertext type is shared with `u8` (`OreClww8V1<8>`),
 /// so `false` ciphertext is strictly less than `true`.
-impl CllwOreEncrypt for bool {
-    type Output = OreCllw8V1<8>;
+impl ClwwOreEncrypt for bool {
+    type Output = OreClww8V1<8>;
 
     fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         (self as u8).encrypt_with_salt(key, salt)
     }
 }
 
-/// Macro to implement [`CllwOreEncrypt`] for floating-point types.
+/// Macro to implement [`ClwwOreEncrypt`] for floating-point types.
 ///
 /// Maps the IEEE-754 bit pattern to a sortable `uN` using the standard
 /// monotonic float→int trick: flip the sign bit on non-negatives, flip all
@@ -198,14 +198,14 @@ impl CllwOreEncrypt for bool {
 /// **`−0.0` vs `+0.0`**: distinguished — `−0.0` ciphertext is strictly less
 /// than `+0.0`. IEEE-754 `==` considers them equal; the encoding does not.
 ///
-/// **Decryption note**: there is no [`CllwOreDecrypt`] impl for floats. To
+/// **Decryption note**: there is no [`ClwwOreDecrypt`] impl for floats. To
 /// round-trip, decrypt to the matching `uN` and reverse the bias yourself:
 /// `let mask = (bits >> (BITS-1)).wrapping_neg() | (1 << (BITS-1));`
 /// `let f = fN::from_bits(bits ^ mask);`.
-macro_rules! impl_cllw_ore_float {
+macro_rules! impl_clww_ore_float {
     ($float_type:ty, $uint_type:ty, $array_size:expr) => {
-        impl CllwOreEncrypt for $float_type {
-            type Output = OreCllw8V1<$array_size>;
+        impl ClwwOreEncrypt for $float_type {
+            type Output = OreClww8V1<$array_size>;
 
             fn encrypt_with_salt(
                 self,
@@ -221,8 +221,8 @@ macro_rules! impl_cllw_ore_float {
     };
 }
 
-impl_cllw_ore_float!(f32, u32, 32);
-impl_cllw_ore_float!(f64, u64, 64);
+impl_clww_ore_float!(f32, u32, 32);
+impl_clww_ore_float!(f64, u64, 64);
 
 // --- Fixed-size numeric OPE ---
 
@@ -238,7 +238,7 @@ impl_cllw_ore_float!(f64, u64, 64);
 /// with the plaintext integer order. The `+128` signal at the first
 /// differing byte exceeds any backward-carry noise (±1 per byte), so no
 /// PRF choice can flip the comparison. See
-/// `packages/cllw-ore/docs/backward-carry-ope.md` for the derivation.
+/// `packages/clww-ore/docs/backward-carry-ope.md` for the derivation.
 ///
 /// **Encrypt-only**: this type intentionally does not support decryption.
 /// OPE is used for ordered lookups; if round-trip is required, pair the OPE
@@ -248,25 +248,25 @@ impl_cllw_ore_float!(f64, u64, 64);
 /// The size `N` is the ciphertext byte length: one byte per plaintext bit
 /// plus one reserved leading byte that absorbs the carry.
 ///
-/// - `OpeCllw8V1<9>` encrypts `u8` or `i8` (8 bits → 9 bytes)
-/// - `OpeCllw8V1<17>` encrypts `u16` or `i16` (16 bits → 17 bytes)
-/// - `OpeCllw8V1<33>` encrypts `u32` or `i32` (32 bits → 33 bytes)
-/// - `OpeCllw8V1<65>` encrypts `u64` or `i64` (64 bits → 65 bytes)
-/// - `OpeCllw8V1<129>` encrypts `u128` or `i128` (128 bits → 129 bytes)
+/// - `OpeClww8V1<9>` encrypts `u8` or `i8` (8 bits → 9 bytes)
+/// - `OpeClww8V1<17>` encrypts `u16` or `i16` (16 bits → 17 bytes)
+/// - `OpeClww8V1<33>` encrypts `u32` or `i32` (32 bits → 33 bytes)
+/// - `OpeClww8V1<65>` encrypts `u64` or `i64` (64 bits → 65 bytes)
+/// - `OpeClww8V1<129>` encrypts `u128` or `i128` (128 bits → 129 bytes)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "postgres-types", derive(ToSql))]
 #[cfg_attr(feature = "postgres-types", postgres(name = "ore_cllw_8_ope_v1"))]
-pub struct OpeCllw8V1<const N: usize> {
+pub struct OpeClww8V1<const N: usize> {
     bytes: [u8; N],
 }
 
-impl<const N: usize> AsRef<[u8]> for OpeCllw8V1<N> {
+impl<const N: usize> AsRef<[u8]> for OpeClww8V1<N> {
     fn as_ref(&self) -> &[u8] {
         &self.bytes
     }
 }
 
-impl<const N: usize> FromHex for OpeCllw8V1<N> {
+impl<const N: usize> FromHex for OpeClww8V1<N> {
     type Error = Error;
 
     fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, <Self as FromHex>::Error> {
@@ -276,7 +276,7 @@ impl<const N: usize> FromHex for OpeCllw8V1<N> {
     }
 }
 
-impl<const N: usize> TryFrom<&[u8]> for OpeCllw8V1<N> {
+impl<const N: usize> TryFrom<&[u8]> for OpeClww8V1<N> {
     type Error = Error;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
@@ -286,17 +286,17 @@ impl<const N: usize> TryFrom<&[u8]> for OpeCllw8V1<N> {
 
         let mut bytes: [u8; N] = [0; N];
         bytes.copy_from_slice(value);
-        Ok(OpeCllw8V1 { bytes })
+        Ok(OpeClww8V1 { bytes })
     }
 }
 
-/// Implements [`CllwOpeEncrypt`] for unsigned integer types using the shared
+/// Implements [`ClwwOpeEncrypt`] for unsigned integer types using the shared
 /// backward-carry encoding. The output size is `<$ty>::BITS + 1`, covering
 /// one byte per plaintext bit plus the reserved leading byte.
-macro_rules! impl_cllw_ope_uint {
+macro_rules! impl_clww_ope_uint {
     ($uint_type:ty) => {
-        impl CllwOpeEncrypt for $uint_type {
-            type Output = OpeCllw8V1<{ <$uint_type>::BITS as usize + 1 }>;
+        impl ClwwOpeEncrypt for $uint_type {
+            type Output = OpeClww8V1<{ <$uint_type>::BITS as usize + 1 }>;
 
             fn encrypt_ope_with_salt(
                 self,
@@ -307,26 +307,26 @@ macro_rules! impl_cllw_ope_uint {
                 let vec = super::encrypt_ope_bits(Biterator::new(self), n, key, salt);
                 let mut bytes = [0u8; { <$uint_type>::BITS as usize + 1 }];
                 bytes.copy_from_slice(&vec);
-                Ok(OpeCllw8V1 { bytes })
+                Ok(OpeClww8V1 { bytes })
             }
         }
     };
 }
 
-impl_cllw_ope_uint!(u8);
-impl_cllw_ope_uint!(u16);
-impl_cllw_ope_uint!(u32);
-impl_cllw_ope_uint!(u64);
-impl_cllw_ope_uint!(u128);
+impl_clww_ope_uint!(u8);
+impl_clww_ope_uint!(u16);
+impl_clww_ope_uint!(u32);
+impl_clww_ope_uint!(u64);
+impl_clww_ope_uint!(u128);
 
-/// Implements [`CllwOpeEncrypt`] for signed integer types by sign-flipping to
+/// Implements [`ClwwOpeEncrypt`] for signed integer types by sign-flipping to
 /// the matching unsigned width and delegating to the unsigned OPE impl.
 /// The output ciphertext type is shared with the unsigned variant — OPE has
 /// no decrypt path, so there is no type ambiguity.
-macro_rules! impl_cllw_ope_iint {
+macro_rules! impl_clww_ope_iint {
     ($iint_type:ty, $uint_type:ty) => {
-        impl CllwOpeEncrypt for $iint_type {
-            type Output = OpeCllw8V1<{ <$uint_type>::BITS as usize + 1 }>;
+        impl ClwwOpeEncrypt for $iint_type {
+            type Output = OpeClww8V1<{ <$uint_type>::BITS as usize + 1 }>;
 
             fn encrypt_ope_with_salt(
                 self,
@@ -340,28 +340,28 @@ macro_rules! impl_cllw_ope_iint {
     };
 }
 
-impl_cllw_ope_iint!(i8, u8);
-impl_cllw_ope_iint!(i16, u16);
-impl_cllw_ope_iint!(i32, u32);
-impl_cllw_ope_iint!(i64, u64);
-impl_cllw_ope_iint!(i128, u128);
+impl_clww_ope_iint!(i8, u8);
+impl_clww_ope_iint!(i16, u16);
+impl_clww_ope_iint!(i32, u32);
+impl_clww_ope_iint!(i64, u64);
+impl_clww_ope_iint!(i128, u128);
 
 /// CLWW OPE for `bool`. Delegates to the `u8` OPE impl; see the ORE `bool`
 /// impl for the encoding rationale.
-impl CllwOpeEncrypt for bool {
-    type Output = OpeCllw8V1<{ u8::BITS as usize + 1 }>;
+impl ClwwOpeEncrypt for bool {
+    type Output = OpeClww8V1<{ u8::BITS as usize + 1 }>;
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         (self as u8).encrypt_ope_with_salt(key, salt)
     }
 }
 
-/// Macro to implement [`CllwOpeEncrypt`] for floating-point types using the
+/// Macro to implement [`ClwwOpeEncrypt`] for floating-point types using the
 /// same monotonic float→int bias as the ORE float impl.
-macro_rules! impl_cllw_ope_float {
+macro_rules! impl_clww_ope_float {
     ($float_type:ty, $uint_type:ty) => {
-        impl CllwOpeEncrypt for $float_type {
-            type Output = OpeCllw8V1<{ <$uint_type>::BITS as usize + 1 }>;
+        impl ClwwOpeEncrypt for $float_type {
+            type Output = OpeClww8V1<{ <$uint_type>::BITS as usize + 1 }>;
 
             fn encrypt_ope_with_salt(
                 self,
@@ -377,13 +377,13 @@ macro_rules! impl_cllw_ope_float {
     };
 }
 
-impl_cllw_ope_float!(f32, u32);
-impl_cllw_ope_float!(f64, u64);
+impl_clww_ope_float!(f32, u32);
+impl_clww_ope_float!(f64, u64);
 
 // Gated with `byte_array` (its only user) so builds without either feature
 // don't carry a dead function.
 #[cfg(any(feature = "chrono", feature = "decimal"))]
-impl<const N: usize> OpeCllw8V1<N> {
+impl<const N: usize> OpeClww8V1<N> {
     /// Construct a ciphertext from raw bytes produced by
     /// [`super::encrypt_ope_bits`]. Crate-internal — used by feature
     /// modules (e.g. `chrono`, `decimal`) that build their own canonical
@@ -546,7 +546,7 @@ mod tests {
 
     #[test]
     fn test_u32_different_salts_produce_different_ciphertexts() {
-        use crate::CllwOreEncrypt;
+        use crate::ClwwOreEncrypt;
 
         let key = Key::from([0; 32]);
         let value: u32 = 42;
@@ -562,7 +562,7 @@ mod tests {
 
     #[test]
     fn test_u64_wrong_salt_produces_wrong_plaintext() {
-        use crate::{CllwOreDecrypt, CllwOreEncrypt};
+        use crate::{ClwwOreDecrypt, ClwwOreEncrypt};
 
         let key = Key::from([0; 32]);
         let value: u64 = 12345;
@@ -578,7 +578,7 @@ mod tests {
 
     #[test]
     fn test_u128_correct_salt_decrypts_correctly() {
-        use crate::{CllwOreDecrypt, CllwOreEncrypt};
+        use crate::{ClwwOreDecrypt, ClwwOreEncrypt};
 
         let key = Key::from([0; 32]);
         let value: u128 = 999999;
@@ -593,7 +593,7 @@ mod tests {
 
     #[test]
     fn test_u16_no_salt_and_none_salt_are_equivalent() {
-        use crate::CllwOreEncrypt;
+        use crate::ClwwOreEncrypt;
 
         let key = Key::from([0; 32]);
         let value: u16 = 100;
@@ -607,7 +607,7 @@ mod tests {
 
     #[test]
     fn test_u32_empty_salt_same_as_no_salt() {
-        use crate::CllwOreEncrypt;
+        use crate::ClwwOreEncrypt;
 
         let key = Key::from([0; 32]);
         let value: u32 = 42;
@@ -621,7 +621,7 @@ mod tests {
 
     #[test]
     fn test_u64_salt_preserves_ordering() {
-        use crate::CllwOreEncrypt;
+        use crate::ClwwOreEncrypt;
 
         let key = Key::from([0; 32]);
         let salt = b"domain";
@@ -635,7 +635,7 @@ mod tests {
 
     #[test]
     fn test_u128_salt_ordering_with_max_values() {
-        use crate::CllwOreEncrypt;
+        use crate::ClwwOreEncrypt;
 
         let key = Key::from([0; 32]);
         let salt = b"test-domain";
@@ -656,7 +656,7 @@ mod tests {
     #[test]
     fn test_ope_try_from_wrong_length_fails() {
         let bytes = [0u8; 16];
-        let result = OpeCllw8V1::<33>::try_from(bytes.as_slice());
+        let result = OpeClww8V1::<33>::try_from(bytes.as_slice());
         assert!(result.is_err());
     }
 
@@ -883,13 +883,13 @@ mod tests {
                     fn [<prop_ope_hex_round_trip_ $ty>](key: Key, x: $ty) -> bool {
                         let ct = key.encrypt_ope(x).unwrap();
                         let hex_str = hex::encode(ct.as_ref());
-                        let ct2 = OpeCllw8V1::<{ <$ty>::BITS as usize + 1 }>::from_hex(&hex_str).unwrap();
+                        let ct2 = OpeClww8V1::<{ <$ty>::BITS as usize + 1 }>::from_hex(&hex_str).unwrap();
                         ct == ct2
                     }
 
                     fn [<prop_ope_try_from_bytes_ $ty>](key: Key, x: $ty) -> bool {
                         let ct = key.encrypt_ope(x).unwrap();
-                        let ct2 = OpeCllw8V1::<{ <$ty>::BITS as usize + 1 }>::try_from(ct.as_ref()).unwrap();
+                        let ct2 = OpeClww8V1::<{ <$ty>::BITS as usize + 1 }>::try_from(ct.as_ref()).unwrap();
                         ct == ct2
                     }
 
@@ -1034,7 +1034,7 @@ mod tests {
                     fn [<prop_ope_hex_round_trip_ $ty>](key: Key, x: $ty) -> bool {
                         let ct = key.encrypt_ope(x).unwrap();
                         let hex_str = hex::encode(ct.as_ref());
-                        let ct2 = OpeCllw8V1::<{ $bits + 1 }>::from_hex(&hex_str).unwrap();
+                        let ct2 = OpeClww8V1::<{ $bits + 1 }>::from_hex(&hex_str).unwrap();
                         ct == ct2
                     }
 
@@ -1210,7 +1210,7 @@ mod tests {
     // The backward-carry encoding with MSB-bit placement (bit contributes
     // `+128` at its byte, not `+1`) gives exact OPE: lex comparison of the
     // ciphertext always agrees with the plaintext integer order. See
-    // `packages/cllw-ore/docs/backward-carry-ope.md` for the derivation.
+    // `packages/clww-ore/docs/backward-carry-ope.md` for the derivation.
     //
     // This test exhaustively verifies the property on every adjacent u16 pair
     // under a set of keys — the worst case for the older `+1` variant, which

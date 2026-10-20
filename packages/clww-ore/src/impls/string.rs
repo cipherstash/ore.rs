@@ -1,25 +1,25 @@
-//! `CllwOreEncrypt` / `CllwOpeEncrypt` impls for `&str` and `&[u8]` plus
+//! `ClwwOreEncrypt` / `ClwwOpeEncrypt` impls for `&str` and `&[u8]` plus
 //! the `orderize_string` collation step.
 //!
-//! The variable-length ciphertext types ([`OreCllw8VariableV1`] /
-//! [`OpeCllw8VariableV1`]) and their construction/decryption machinery
+//! The variable-length ciphertext types ([`OreClww8VariableV1`] /
+//! [`OpeClww8VariableV1`]) and their construction/decryption machinery
 //! live in [`super::variable`].
 
 use crate::biterator::{string_biter, Biterator};
 use crate::impls::encrypt_ope_bits;
-use crate::impls::variable::{OpeCllw8VariableV1, OreCllw8VariableV1};
-use crate::{CllwOpeEncrypt, CllwOreEncrypt, Error, Key};
+use crate::impls::variable::{OpeClww8VariableV1, OreClww8VariableV1};
+use crate::{ClwwOpeEncrypt, ClwwOreEncrypt, Error, Key};
 use unicode_normalization::char::decompose_canonical;
 use zeroize::Zeroizing;
 
-/// Encrypts a bit stream into a CLLW ORE ciphertext.
+/// Encrypts a bit stream into a CLWW ORE ciphertext.
 ///
 /// `bits` is an iterator of one byte per plaintext bit, each `0` or `1`. The
-/// CLLW keystream is derived from `key` (optionally domain-separated by `salt`)
+/// CLWW keystream is derived from `key` (optionally domain-separated by `salt`)
 /// and each ciphertext byte is `(PRF_i + bit_i) mod 256`. The output length is
 /// the number of plaintext bits — one byte per bit — and bytes compare under
-/// cllw-ore's ORE comparison (first-differing-byte `y + 1 == x`), **not** plain
-/// lex order. See [`OreCllw8VariableV1`].
+/// clww-ore's ORE comparison (first-differing-byte `y + 1 == x`), **not** plain
+/// lex order. See [`OreClww8VariableV1`].
 pub fn encrypt_ore_bits<I>(bits: I, key: &Key, salt: Option<&[u8]>) -> Vec<u8>
 where
     I: IntoIterator<Item = u8>,
@@ -38,23 +38,23 @@ where
     })
 }
 
-impl CllwOreEncrypt for &[u8] {
-    type Output = OreCllw8VariableV1;
+impl ClwwOreEncrypt for &[u8] {
+    type Output = OreClww8VariableV1;
 
     fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         let bits = self.iter().flat_map(|&byte| Biterator::new(byte));
-        Ok(OreCllw8VariableV1::from_bytes_unchecked(encrypt_ore_bits(
+        Ok(OreClww8VariableV1::from_bytes_unchecked(encrypt_ore_bits(
             bits, key, salt,
         )))
     }
 }
 
-impl CllwOreEncrypt for &str {
-    type Output = OreCllw8VariableV1;
+impl ClwwOreEncrypt for &str {
+    type Output = OreClww8VariableV1;
 
     fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         let string = orderize_secret(self);
-        Ok(OreCllw8VariableV1::from_bytes_unchecked(encrypt_ore_bits(
+        Ok(OreClww8VariableV1::from_bytes_unchecked(encrypt_ore_bits(
             string_biter(&string),
             key,
             salt,
@@ -62,25 +62,25 @@ impl CllwOreEncrypt for &str {
     }
 }
 
-impl CllwOpeEncrypt for &str {
-    type Output = OpeCllw8VariableV1;
+impl ClwwOpeEncrypt for &str {
+    type Output = OpeClww8VariableV1;
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         let normalized = orderize_secret(self);
         let n = normalized.len() * 8;
         let bytes = encrypt_ope_bits(string_biter(&normalized), n, key, salt);
-        Ok(OpeCllw8VariableV1::from_bytes_unchecked(bytes))
+        Ok(OpeClww8VariableV1::from_bytes_unchecked(bytes))
     }
 }
 
-impl CllwOpeEncrypt for &[u8] {
-    type Output = OpeCllw8VariableV1;
+impl ClwwOpeEncrypt for &[u8] {
+    type Output = OpeClww8VariableV1;
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         let n = self.len() * 8;
         let bits = self.iter().flat_map(|&byte| Biterator::new(byte));
         let bytes = encrypt_ope_bits(bits, n, key, salt);
-        Ok(OpeCllw8VariableV1::from_bytes_unchecked(bytes))
+        Ok(OpeClww8VariableV1::from_bytes_unchecked(bytes))
     }
 }
 
@@ -92,8 +92,8 @@ impl CllwOpeEncrypt for &[u8] {
 /// an owned plaintext is wiped when this returns rather than handed back to
 /// the allocator intact. A caller who owns the plaintext already should
 /// prefer the `Zeroizing<String>` impl and keep it wrapped throughout.
-impl CllwOreEncrypt for String {
-    type Output = OreCllw8VariableV1;
+impl ClwwOreEncrypt for String {
+    type Output = OreClww8VariableV1;
 
     fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         Zeroizing::new(self).encrypt_with_salt(key, salt)
@@ -102,8 +102,8 @@ impl CllwOreEncrypt for String {
 
 /// Owned counterpart of the `&[u8]` impl; byte-identical ciphertext. Wipes
 /// its operand, as the `String` impl does.
-impl CllwOreEncrypt for Vec<u8> {
-    type Output = OreCllw8VariableV1;
+impl ClwwOreEncrypt for Vec<u8> {
+    type Output = OreClww8VariableV1;
 
     fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         Zeroizing::new(self).encrypt_with_salt(key, salt)
@@ -112,8 +112,8 @@ impl CllwOreEncrypt for Vec<u8> {
 
 /// Owned counterpart of the `&str` impl; byte-identical ciphertext. Wipes its
 /// operand, as the ORE `String` impl does.
-impl CllwOpeEncrypt for String {
-    type Output = OpeCllw8VariableV1;
+impl ClwwOpeEncrypt for String {
+    type Output = OpeClww8VariableV1;
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         Zeroizing::new(self).encrypt_ope_with_salt(key, salt)
@@ -122,8 +122,8 @@ impl CllwOpeEncrypt for String {
 
 /// Owned counterpart of the `&[u8]` impl; byte-identical ciphertext. Wipes
 /// its operand, as the ORE `Vec<u8>` impl does.
-impl CllwOpeEncrypt for Vec<u8> {
-    type Output = OpeCllw8VariableV1;
+impl ClwwOpeEncrypt for Vec<u8> {
+    type Output = OpeClww8VariableV1;
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         Zeroizing::new(self).encrypt_ope_with_salt(key, salt)
@@ -135,35 +135,35 @@ impl CllwOpeEncrypt for Vec<u8> {
 /// nothing has to remember to wrap it at the boundary. `'static` and `Send`
 /// like the bare owned impls, so they satisfy the same visitor bounds.
 /// Byte-identical ciphertext to `&str` / `&[u8]`.
-impl CllwOreEncrypt for Zeroizing<String> {
-    type Output = OreCllw8VariableV1;
+impl ClwwOreEncrypt for Zeroizing<String> {
+    type Output = OreClww8VariableV1;
 
     fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         self.as_str().encrypt_with_salt(key, salt)
     }
 }
 
-/// See the [`Zeroizing<String>`](CllwOreEncrypt#impl-CllwOreEncrypt-for-Zeroizing<String>) impl.
-impl CllwOreEncrypt for Zeroizing<Vec<u8>> {
-    type Output = OreCllw8VariableV1;
+/// See the [`Zeroizing<String>`](ClwwOreEncrypt#impl-ClwwOreEncrypt-for-Zeroizing<String>) impl.
+impl ClwwOreEncrypt for Zeroizing<Vec<u8>> {
+    type Output = OreClww8VariableV1;
 
     fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         self.as_slice().encrypt_with_salt(key, salt)
     }
 }
 
-/// See the [`Zeroizing<String>`](CllwOreEncrypt#impl-CllwOreEncrypt-for-Zeroizing<String>) impl.
-impl CllwOpeEncrypt for Zeroizing<String> {
-    type Output = OpeCllw8VariableV1;
+/// See the [`Zeroizing<String>`](ClwwOreEncrypt#impl-ClwwOreEncrypt-for-Zeroizing<String>) impl.
+impl ClwwOpeEncrypt for Zeroizing<String> {
+    type Output = OpeClww8VariableV1;
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         self.as_str().encrypt_ope_with_salt(key, salt)
     }
 }
 
-/// See the [`Zeroizing<String>`](CllwOreEncrypt#impl-CllwOreEncrypt-for-Zeroizing<String>) impl.
-impl CllwOpeEncrypt for Zeroizing<Vec<u8>> {
-    type Output = OpeCllw8VariableV1;
+/// See the [`Zeroizing<String>`](ClwwOreEncrypt#impl-ClwwOreEncrypt-for-Zeroizing<String>) impl.
+impl ClwwOpeEncrypt for Zeroizing<Vec<u8>> {
+    type Output = OpeClww8VariableV1;
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         self.as_slice().encrypt_ope_with_salt(key, salt)
@@ -209,7 +209,7 @@ fn orderize_secret(input: &str) -> Zeroizing<String> {
 #[cfg(test)]
 mod tests {
     use super::orderize_string;
-    use crate::impls::variable::{OpeCllw8VariableV1, OreCllw8VariableV1};
+    use crate::impls::variable::{OpeClww8VariableV1, OreClww8VariableV1};
     use crate::{Error, Key};
     use quickcheck::{quickcheck, Arbitrary, Gen};
     use std::cmp::Ordering;
@@ -434,7 +434,7 @@ mod tests {
 
     #[test]
     fn test_string_different_salts_produce_different_ciphertexts() {
-        use crate::CllwOreEncrypt;
+        use crate::ClwwOreEncrypt;
 
         let key = Key::from([0; 32]);
         let plaintext = "hello";
@@ -450,7 +450,7 @@ mod tests {
 
     #[test]
     fn test_string_wrong_salt_fails_or_produces_garbage() {
-        use crate::{CllwOreDecrypt, CllwOreEncrypt};
+        use crate::{ClwwOreDecrypt, ClwwOreEncrypt};
 
         let key = Key::from([0; 32]);
         let plaintext = "hello";
@@ -472,7 +472,7 @@ mod tests {
 
     #[test]
     fn test_string_correct_salt_decrypts_correctly() {
-        use crate::{CllwOreDecrypt, CllwOreEncrypt};
+        use crate::{ClwwOreDecrypt, ClwwOreEncrypt};
 
         let key = Key::from([0; 32]);
         let plaintext = "hello world";
@@ -487,7 +487,7 @@ mod tests {
 
     #[test]
     fn test_string_no_salt_and_none_salt_are_equivalent() {
-        use crate::CllwOreEncrypt;
+        use crate::ClwwOreEncrypt;
 
         let key = Key::from([0; 32]);
         let plaintext = "hello";
@@ -501,7 +501,7 @@ mod tests {
 
     #[test]
     fn test_string_empty_salt_same_as_no_salt() {
-        use crate::CllwOreEncrypt;
+        use crate::ClwwOreEncrypt;
 
         let key = Key::from([0; 32]);
         let plaintext = "hello";
@@ -515,7 +515,7 @@ mod tests {
 
     #[test]
     fn test_string_salt_preserves_ordering() {
-        use crate::CllwOreEncrypt;
+        use crate::ClwwOreEncrypt;
 
         let key = Key::from([0; 32]);
         let salt = b"domain";
@@ -531,7 +531,7 @@ mod tests {
 
     #[test]
     fn test_bytes_different_salts_produce_different_ciphertexts() {
-        use crate::CllwOreEncrypt;
+        use crate::ClwwOreEncrypt;
 
         let key = Key::from([0; 32]);
         let data: &[u8] = b"hello";
@@ -547,7 +547,7 @@ mod tests {
 
     #[test]
     fn test_bytes_wrong_salt_produces_wrong_plaintext() {
-        use crate::CllwOreEncrypt;
+        use crate::ClwwOreEncrypt;
 
         let key = Key::from([0; 32]);
         let data: &[u8] = b"hello";
@@ -563,7 +563,7 @@ mod tests {
 
     #[test]
     fn test_bytes_correct_salt_decrypts_correctly() {
-        use crate::CllwOreEncrypt;
+        use crate::ClwwOreEncrypt;
 
         let key = Key::from([0; 32]);
         let data: &[u8] = &[0xFF, 0x00, 0xAB, 0xCD];
@@ -578,7 +578,7 @@ mod tests {
 
     #[test]
     fn test_bytes_no_salt_and_none_salt_are_equivalent() {
-        use crate::CllwOreEncrypt;
+        use crate::ClwwOreEncrypt;
 
         let key = Key::from([0; 32]);
         let data: &[u8] = b"hello";
@@ -592,7 +592,7 @@ mod tests {
 
     #[test]
     fn test_bytes_empty_salt_same_as_no_salt() {
-        use crate::CllwOreEncrypt;
+        use crate::ClwwOreEncrypt;
 
         let key = Key::from([0; 32]);
         let data: &[u8] = b"hello";
@@ -606,7 +606,7 @@ mod tests {
 
     #[test]
     fn test_bytes_salt_preserves_ordering() {
-        use crate::CllwOreEncrypt;
+        use crate::ClwwOreEncrypt;
 
         let key = Key::from([0; 32]);
         let salt = b"domain";
@@ -633,7 +633,7 @@ mod tests {
         // Truncate to make length not a multiple of 8
         // Valid length would be 32 (4 bytes * 8 bits), so try 30
         let invalid_bytes = ciphertext.as_ref()[..30].to_vec();
-        let malformed_ct = OreCllw8VariableV1::from_bytes_unchecked(invalid_bytes);
+        let malformed_ct = OreClww8VariableV1::from_bytes_unchecked(invalid_bytes);
 
         // Decryption should fail with Unspecified error
         let result = malformed_ct.decrypt_to_bytes(&key, None);
@@ -646,7 +646,7 @@ mod tests {
 
         // Create a ciphertext with length 7 (not multiple of 8)
         let invalid_bytes = vec![0u8; 7];
-        let malformed_ct = OreCllw8VariableV1::from_bytes_unchecked(invalid_bytes);
+        let malformed_ct = OreClww8VariableV1::from_bytes_unchecked(invalid_bytes);
 
         // Decryption should fail
         let result = malformed_ct.decrypt_to_bytes(&key, None);
@@ -658,7 +658,7 @@ mod tests {
         let key = Key::from([0; 32]);
 
         // Empty ciphertext (length 0) is valid - represents empty input
-        let empty_ct = OreCllw8VariableV1::from_bytes_unchecked(vec![]);
+        let empty_ct = OreClww8VariableV1::from_bytes_unchecked(vec![]);
 
         let result = empty_ct.decrypt_to_bytes(&key, None);
         assert!(result.is_ok());
@@ -685,7 +685,7 @@ mod tests {
 
         // Create a malformed ciphertext (length not multiple of 8)
         let invalid_bytes = vec![0u8; 15];
-        let malformed_ct = OreCllw8VariableV1::from_bytes_unchecked(invalid_bytes);
+        let malformed_ct = OreClww8VariableV1::from_bytes_unchecked(invalid_bytes);
 
         // String decryption should also fail with the same error
         let result = key.decrypt(malformed_ct);
@@ -799,7 +799,7 @@ mod tests {
     // --- Variable-length OPE property tests ---
     //
     // The MSB-bit backward-carry encoding gives exact ordering (see
-    // `OpeCllw8VariableV1` rustdoc and the numeric exactness test in
+    // `OpeClww8VariableV1` rustdoc and the numeric exactness test in
     // `impls/num.rs`); the property tests below exercise that guarantee on
     // random `Vec<u8>` and `SafeString` inputs.
 
@@ -838,7 +838,7 @@ mod tests {
             use hex::FromHex;
             let ct = key.encrypt_ope(a.as_slice()).unwrap();
             let hex_str = hex::encode(ct.as_ref());
-            let ct2 = OpeCllw8VariableV1::from_hex(&hex_str).unwrap();
+            let ct2 = OpeClww8VariableV1::from_hex(&hex_str).unwrap();
             ct == ct2
         }
 

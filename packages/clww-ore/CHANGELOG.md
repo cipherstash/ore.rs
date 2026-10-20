@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Renamed from `cllw-ore` to `clww-ore`**, the authors' initials as they are (Chenette,
+  Lewi, Weis and Wu), and moved from cipherstash-suite to the ore.rs workspace with its
+  history. The version starts at 0.6.0. The Rust identifiers follow: `CllwOreEncrypt`,
+  `CllwOreDecrypt` and `CllwOpeEncrypt` are `ClwwOreEncrypt`, `ClwwOreDecrypt` and
+  `ClwwOpeEncrypt`; `OreCllw8V1`, `OreCllw8VariableV1`, `OpeCllw8V1` and
+  `OpeCllw8VariableV1` are `OreClww8V1`, `OreClww8VariableV1`, `OpeClww8V1` and
+  `OpeClww8VariableV1`. A caller renames the dependency and the imports; nothing else
+  changes.
+- **No ciphertext, SQL or Postgres type changes.** No key derivation or encoding names the
+  crate. The SQL objects in `install.sql` and `uninstall.sql` and the Postgres type names
+  the `postgres-types` feature maps to (`ore_cllw_8_v1`, `ore_cllw_8_variable_v1`,
+  `ore_cllw_8_ope_v1`, `ore_cllw_8_ope_variable_v1`) keep their spelling: they are
+  installed in databases and named by EQL, so renaming them would break every
+  installation.
+
 
 ### Documentation
 

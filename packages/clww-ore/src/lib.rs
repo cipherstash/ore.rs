@@ -48,7 +48,7 @@
 //! ## Basic Usage
 //!
 //! ```
-//! use cllw_ore::Key;
+//! use clww_ore::Key;
 //! use std::cmp::Ordering;
 //!
 //! // Create an encryption key
@@ -71,7 +71,7 @@
 //! ### Unsigned Integers
 //!
 //! ```
-//! use cllw_ore::Key;
+//! use clww_ore::Key;
 //!
 //! let key = Key::from([0u8; 32]);
 //!
@@ -87,7 +87,7 @@
 //! ### Strings
 //!
 //! ```
-//! use cllw_ore::Key;
+//! use clww_ore::Key;
 //!
 //! let key = Key::from([0u8; 32]);
 //!
@@ -101,7 +101,7 @@
 //! ### Byte Slices
 //!
 //! ```
-//! use cllw_ore::Key;
+//! use clww_ore::Key;
 //!
 //! let key = Key::from([0u8; 32]);
 //! let data: &[u8] = &[0xFF, 0x00, 0xAB];
@@ -115,7 +115,7 @@
 //! ## Using Salts for Domain Separation
 //!
 //! ```
-//! use cllw_ore::{Key, CllwOreEncrypt, CllwOreDecrypt};
+//! use clww_ore::{Key, ClwwOreEncrypt, ClwwOreDecrypt};
 //!
 //! let key = Key::from([0u8; 32]);
 //! let salt = b"my-domain";
@@ -133,9 +133,9 @@ mod biterator;
 mod impls;
 mod nibble_iterator;
 
-pub use impls::primitives::{OpeCllw8V1, OreCllw8V1};
+pub use impls::primitives::{OpeClww8V1, OreClww8V1};
 pub use impls::string::orderize_string;
-pub use impls::variable::{OpeCllw8VariableV1, OreCllw8VariableV1};
+pub use impls::variable::{OpeClww8VariableV1, OreClww8VariableV1};
 pub use impls::{encrypt_ope_bits, string::encrypt_ore_bits};
 
 /// An error occurred during encryption or decryption.
@@ -160,7 +160,7 @@ pub struct Error;
 /// # Examples
 ///
 /// ```
-/// use cllw_ore::Key;
+/// use clww_ore::Key;
 ///
 /// // Create a key from a 32-byte array
 /// let key = Key::from([0u8; 32]);
@@ -185,7 +185,7 @@ impl Key {
     /// # Examples
     ///
     /// ```
-    /// use cllw_ore::Key;
+    /// use clww_ore::Key;
     /// use std::cmp::Ordering;
     ///
     /// let key = Key::from([0u8; 32]);
@@ -199,9 +199,9 @@ impl Key {
     /// let c = key.encrypt(10u32).unwrap();
     /// assert_eq!(a, c);
     /// ```
-    pub fn encrypt<T>(&self, input: T) -> Result<<T as CllwOreEncrypt>::Output, Error>
+    pub fn encrypt<T>(&self, input: T) -> Result<<T as ClwwOreEncrypt>::Output, Error>
     where
-        T: CllwOreEncrypt,
+        T: ClwwOreEncrypt,
     {
         input.encrypt(self)
     }
@@ -211,7 +211,7 @@ impl Key {
     /// # Examples
     ///
     /// ```
-    /// use cllw_ore::Key;
+    /// use clww_ore::Key;
     ///
     /// let key = Key::from([0u8; 32]);
     /// let plaintext = 12345u64;
@@ -221,9 +221,9 @@ impl Key {
     ///
     /// assert_eq!(plaintext, decrypted);
     /// ```
-    pub fn decrypt<T>(&self, input: T) -> Result<<T as CllwOreDecrypt>::Output, Error>
+    pub fn decrypt<T>(&self, input: T) -> Result<<T as ClwwOreDecrypt>::Output, Error>
     where
-        T: CllwOreDecrypt,
+        T: ClwwOreDecrypt,
     {
         input.decrypt(self)
     }
@@ -239,7 +239,7 @@ impl Key {
     /// Ordering is **exact**: lex compare on the ciphertext always matches the
     /// plaintext order. At the first differing byte the `+128` signal dominates any
     /// backward-carry noise (±1 per byte), so there's no PRF outcome that can flip
-    /// the comparison. See `packages/cllw-ore/docs/backward-carry-ope.md` for the
+    /// the comparison. See `packages/clww-ore/docs/backward-carry-ope.md` for the
     /// derivation and the naive-OPE / `+1`-variant history.
     ///
     /// **Encrypt-only**: OPE ciphertexts cannot be decrypted. If round-trip is
@@ -249,7 +249,7 @@ impl Key {
     /// # Examples
     ///
     /// ```
-    /// use cllw_ore::Key;
+    /// use clww_ore::Key;
     ///
     /// let key = Key::from([0u8; 32]);
     ///
@@ -257,9 +257,9 @@ impl Key {
     /// let b = key.encrypt_ope(20u32).unwrap();
     /// assert!(a < b);
     /// ```
-    pub fn encrypt_ope<T>(&self, input: T) -> Result<<T as CllwOpeEncrypt>::Output, Error>
+    pub fn encrypt_ope<T>(&self, input: T) -> Result<<T as ClwwOpeEncrypt>::Output, Error>
     where
-        T: CllwOpeEncrypt,
+        T: ClwwOpeEncrypt,
     {
         input.encrypt_ope(self)
     }
@@ -284,7 +284,7 @@ impl From<[u8; 32]> for Key {
 /// # Examples
 ///
 /// ```
-/// use cllw_ore::{Key, CllwOreEncrypt};
+/// use clww_ore::{Key, ClwwOreEncrypt};
 ///
 /// let key = Key::from([0u8; 32]);
 ///
@@ -295,7 +295,7 @@ impl From<[u8; 32]> for Key {
 /// let ciphertext2 = key.encrypt(42u32).unwrap();
 /// assert_eq!(ciphertext, ciphertext2);
 /// ```
-pub trait CllwOreEncrypt: Sized {
+pub trait ClwwOreEncrypt: Sized {
     /// The output type of the encryption operation.
     type Output;
 
@@ -310,12 +310,12 @@ pub trait CllwOreEncrypt: Sized {
 
 /// Trait for types that can be decrypted from CLWW Order-Revealing Encryption.
 ///
-/// This trait is implemented for the ciphertext types `OreCllw8V1<N>` and `OreCllw8VariableV1`.
+/// This trait is implemented for the ciphertext types `OreClww8V1<N>` and `OreClww8VariableV1`.
 ///
 /// # Examples
 ///
 /// ```
-/// use cllw_ore::{Key, CllwOreDecrypt};
+/// use clww_ore::{Key, ClwwOreDecrypt};
 ///
 /// let key = Key::from([0u8; 32]);
 /// let ciphertext = key.encrypt(100u32).unwrap();
@@ -324,7 +324,7 @@ pub trait CllwOreEncrypt: Sized {
 /// let plaintext = ciphertext.decrypt(&key).unwrap();
 /// assert_eq!(plaintext, 100u32);
 /// ```
-pub trait CllwOreDecrypt: Sized {
+pub trait ClwwOreDecrypt: Sized {
     /// The output type of the decryption operation.
     type Output;
 
@@ -350,13 +350,13 @@ pub trait CllwOreDecrypt: Sized {
 /// # Examples
 ///
 /// ```
-/// use cllw_ore::{Key, CllwOpeEncrypt};
+/// use clww_ore::{Key, ClwwOpeEncrypt};
 ///
 /// let key = Key::from([0u8; 32]);
 ///
 /// let ct = 42u32.encrypt_ope(&key).unwrap();
 /// ```
-pub trait CllwOpeEncrypt: Sized {
+pub trait ClwwOpeEncrypt: Sized {
     /// The output type of the encryption operation.
     type Output;
 

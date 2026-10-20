@@ -1,11 +1,11 @@
 mod common;
-use cllw_ore::{Key, OreCllw8V1};
+use clww_ore::{Key, OreClww8V1};
 use common::*;
 use quickcheck::quickcheck;
 use std::cmp::Ordering;
 
 /// Compare two values using a SQL function.
-fn sql_compare<const N: usize>(a: &OreCllw8V1<N>, b: &OreCllw8V1<N>) -> i32 {
+fn sql_compare<const N: usize>(a: &OreClww8V1<N>, b: &OreClww8V1<N>) -> i32 {
     let response = setup_db()
         .query("SELECT compare_ore_cllw_8_v1($1, $2)", &[&a, &b])
         .expect("Failed to execute query");
@@ -16,7 +16,7 @@ fn sql_compare<const N: usize>(a: &OreCllw8V1<N>, b: &OreCllw8V1<N>) -> i32 {
 }
 
 /// Compare two values using a SQL operator.
-fn sql_compare_op<const N: usize>(a: &OreCllw8V1<N>, b: &OreCllw8V1<N>, op: SqlOp) -> bool {
+fn sql_compare_op<const N: usize>(a: &OreClww8V1<N>, b: &OreClww8V1<N>, op: SqlOp) -> bool {
     let query = format!("SELECT $1::ore_cllw_8_v1 {op} $2::ore_cllw_8_v1");
 
     let response = setup_db()

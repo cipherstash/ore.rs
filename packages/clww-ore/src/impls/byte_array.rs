@@ -1,10 +1,10 @@
-//! `CllwOpeEncrypt` for fixed-size byte arrays produced by the
+//! `ClwwOpeEncrypt` for fixed-size byte arrays produced by the
 //! [`orderable_bytes`] encoders.
 //!
 //! Each `[u8; N]` is treated as an opaque canonical byte form whose lex
 //! order is the property the caller wants to preserve under encryption.
 //! The bytes are fed through the shared [`super::encrypt_ope_bits`]
-//! primitive, producing a fixed-size [`OpeCllw8V1<{N * 8 + 1}>`]
+//! primitive, producing a fixed-size [`OpeClww8V1<{N * 8 + 1}>`]
 //! ciphertext. This is the building block used by the `decimal` and
 //! `chrono` impls — the type-specific encoders just convert their value
 //! to a `[u8; N]` via [`orderable_bytes`] and delegate here.
@@ -16,17 +16,17 @@
 
 use crate::biterator::Biterator;
 use crate::impls::encrypt_ope_bits;
-use crate::{CllwOpeEncrypt, Error, Key, OpeCllw8V1};
+use crate::{ClwwOpeEncrypt, Error, Key, OpeClww8V1};
 
-/// Generates a `CllwOpeEncrypt` impl for `[u8; $n]` whose ciphertext is
-/// `OpeCllw8V1<{ $n * 8 + 1 }>`. The `$n` substitution must be a literal
+/// Generates a `ClwwOpeEncrypt` impl for `[u8; $n]` whose ciphertext is
+/// `OpeClww8V1<{ $n * 8 + 1 }>`. The `$n` substitution must be a literal
 /// (or other compile-time integer), since stable Rust does not yet
-/// accept `OpeCllw8V1<{ N * 8 + 1 }>` for a generic `const N: usize` —
+/// accept `OpeClww8V1<{ N * 8 + 1 }>` for a generic `const N: usize` —
 /// that needs `feature(generic_const_exprs)`.
-macro_rules! impl_cllw_ope_byte_array {
+macro_rules! impl_clww_ope_byte_array {
     ($n:literal) => {
-        impl CllwOpeEncrypt for [u8; $n] {
-            type Output = OpeCllw8V1<{ $n * 8 + 1 }>;
+        impl ClwwOpeEncrypt for [u8; $n] {
+            type Output = OpeClww8V1<{ $n * 8 + 1 }>;
 
             fn encrypt_ope_with_salt(
                 self,
@@ -37,18 +37,18 @@ macro_rules! impl_cllw_ope_byte_array {
                 let vec = encrypt_ope_bits(bits, $n * 8, key, salt);
                 let mut bytes = [0u8; { $n * 8 + 1 }];
                 bytes.copy_from_slice(&vec);
-                Ok(OpeCllw8V1::from_bytes(bytes))
+                Ok(OpeClww8V1::from_bytes(bytes))
             }
         }
     };
 }
 
 // `chrono::NaiveDate` (orderable_bytes::chrono::naive_date::ENCODED_LEN).
-impl_cllw_ope_byte_array!(4);
+impl_clww_ope_byte_array!(4);
 // `chrono::DateTime<Utc>` (orderable_bytes::chrono::datetime_utc::ENCODED_LEN).
-impl_cllw_ope_byte_array!(12);
+impl_clww_ope_byte_array!(12);
 // `rust_decimal::Decimal` (orderable_bytes::decimal::ENCODED_LEN).
-impl_cllw_ope_byte_array!(14);
+impl_clww_ope_byte_array!(14);
 
 #[cfg(test)]
 mod tests {
@@ -131,7 +131,7 @@ mod tests {
     #[test]
     fn hex_round_trip_14() {
         let ct = key().encrypt_ope([42u8; 14]).unwrap();
-        let parsed = OpeCllw8V1::<{ 14 * 8 + 1 }>::from_hex(hex::encode(ct.as_ref())).unwrap();
+        let parsed = OpeClww8V1::<{ 14 * 8 + 1 }>::from_hex(hex::encode(ct.as_ref())).unwrap();
         assert_eq!(ct, parsed);
     }
 

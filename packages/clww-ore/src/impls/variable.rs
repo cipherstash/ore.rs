@@ -2,9 +2,9 @@
 //!
 //! This module owns both:
 //!
-//! - [`OreCllw8VariableV1`] — Order-Revealing Encryption ciphertext for
+//! - [`OreClww8VariableV1`] — Order-Revealing Encryption ciphertext for
 //!   variable-length plaintexts (strings, byte slices). Supports decryption.
-//! - [`OpeCllw8VariableV1`] — Order-Preserving Encryption ciphertext for
+//! - [`OpeClww8VariableV1`] — Order-Preserving Encryption ciphertext for
 //!   variable-length plaintexts (strings, byte slices). Encrypt-only.
 //!
 //! The actual encryption logic for `&str` / `&[u8]` lives in
@@ -12,7 +12,7 @@
 //! their construction helpers, comparison/equality semantics, and the
 //! ORE → bytes/UTF-8 decryption path.
 
-use crate::{CllwOreDecrypt, Error, Key};
+use crate::{ClwwOreDecrypt, Error, Key};
 use hex::{FromHex, FromHexError};
 #[cfg(feature = "postgres-types")]
 use postgres_types::ToSql;
@@ -30,24 +30,24 @@ const BITS_PER_BYTE: usize = 8;
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "postgres-types", derive(ToSql))]
 #[cfg_attr(feature = "postgres-types", postgres(name = "ore_cllw_8_variable_v1"))]
-pub struct OreCllw8VariableV1 {
+pub struct OreClww8VariableV1 {
     bytes: Vec<u8>,
 }
 
-impl AsRef<[u8]> for OreCllw8VariableV1 {
+impl AsRef<[u8]> for OreClww8VariableV1 {
     fn as_ref(&self) -> &[u8] {
         &self.bytes
     }
 }
 
 /// Deliberately **not** length-checked, unlike
-/// [`from_bytes`](OreCllw8VariableV1::from_bytes) and the `TryFrom` impl: this
+/// [`from_bytes`](OreClww8VariableV1::from_bytes) and the `TryFrom` impl: this
 /// is the wire decoder (`#[serde(with = "hex::serde")]`) for consumers whose
 /// plaintext is a *tagged bit stream* rather than whole bytes, whose
 /// ciphertexts are legitimately not a multiple of 8 bytes long. Rejecting
 /// them here would reject real stored terms. See
-/// [`from_bytes_unchecked`](OreCllw8VariableV1::from_bytes_unchecked).
-impl FromHex for OreCllw8VariableV1 {
+/// [`from_bytes_unchecked`](OreClww8VariableV1::from_bytes_unchecked).
+impl FromHex for OreClww8VariableV1 {
     type Error = FromHexError;
 
     fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
@@ -57,9 +57,9 @@ impl FromHex for OreCllw8VariableV1 {
     }
 }
 
-/// Slice-borrowing counterpart of [`OreCllw8VariableV1::from_bytes`], with
+/// Slice-borrowing counterpart of [`OreClww8VariableV1::from_bytes`], with
 /// the same length check.
-impl TryFrom<&[u8]> for OreCllw8VariableV1 {
+impl TryFrom<&[u8]> for OreClww8VariableV1 {
     type Error = Error;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
@@ -67,7 +67,7 @@ impl TryFrom<&[u8]> for OreCllw8VariableV1 {
     }
 }
 
-impl OreCllw8VariableV1 {
+impl OreClww8VariableV1 {
     /// The one length rule, shared by [`from_bytes`](Self::from_bytes) and
     /// the `TryFrom` impl: encryption emits one byte per plaintext *bit*, so
     /// a ciphertext over whole-byte plaintext is a multiple of 8 bytes long
@@ -140,7 +140,7 @@ impl OreCllw8VariableV1 {
     }
 }
 
-impl CllwOreDecrypt for OreCllw8VariableV1 {
+impl ClwwOreDecrypt for OreClww8VariableV1 {
     type Output = String;
 
     fn decrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
@@ -151,30 +151,30 @@ impl CllwOreDecrypt for OreCllw8VariableV1 {
     }
 }
 
-impl Ord for OreCllw8VariableV1 {
+impl Ord for OreClww8VariableV1 {
     fn cmp(&self, other: &Self) -> Ordering {
         compare_lex(self, other)
     }
 }
 
-impl PartialOrd for OreCllw8VariableV1 {
+impl PartialOrd for OreClww8VariableV1 {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl PartialEq for OreCllw8VariableV1 {
+impl PartialEq for OreClww8VariableV1 {
     fn eq(&self, other: &Self) -> bool {
         self.bytes.ct_eq(&other.bytes).into()
     }
 }
 
-impl Eq for OreCllw8VariableV1 {}
+impl Eq for OreClww8VariableV1 {}
 
 /// Compare two outputs lexicographically in constant time.
 /// This is useful for strings where the length of the output is not necessarily the same.
 /// A shorter string is considered less than a longer string if it is a prefix of the longer string.
-fn compare_lex(a: &OreCllw8VariableV1, b: &OreCllw8VariableV1) -> Ordering {
+fn compare_lex(a: &OreClww8VariableV1, b: &OreClww8VariableV1) -> Ordering {
     let a_len = a.bytes.len();
     let b_len = b.bytes.len();
     let slice_len = a_len.min(b_len);
@@ -208,7 +208,7 @@ fn compare_lex(a: &OreCllw8VariableV1, b: &OreCllw8VariableV1) -> Ordering {
 /// with the plaintext byte-lex order. The `+128` signal at the first
 /// differing byte exceeds any backward-carry noise (±1 per byte), so no
 /// PRF choice can flip the comparison. See
-/// `packages/cllw-ore/docs/backward-carry-ope.md` for the derivation.
+/// `packages/clww-ore/docs/backward-carry-ope.md` for the derivation.
 ///
 /// **Encrypt-only**: this type intentionally does not support decryption.
 /// OPE is used for ordered lookups; if round-trip is required, pair the OPE
@@ -223,11 +223,11 @@ fn compare_lex(a: &OreCllw8VariableV1, b: &OreCllw8VariableV1) -> Ordering {
     feature = "postgres-types",
     postgres(name = "ore_cllw_8_ope_variable_v1")
 )]
-pub struct OpeCllw8VariableV1 {
+pub struct OpeClww8VariableV1 {
     bytes: Vec<u8>,
 }
 
-impl OpeCllw8VariableV1 {
+impl OpeClww8VariableV1 {
     /// The one length rule, shared by [`from_bytes`](Self::from_bytes) and
     /// the `TryFrom` impl: a ciphertext over whole-byte plaintext is
     /// `8 * plaintext_bytes + 1` long (one byte per plaintext bit plus the
@@ -261,9 +261,9 @@ impl OpeCllw8VariableV1 {
     }
 }
 
-/// Slice-borrowing counterpart of [`OpeCllw8VariableV1::from_bytes`], with
+/// Slice-borrowing counterpart of [`OpeClww8VariableV1::from_bytes`], with
 /// the same length check.
-impl TryFrom<&[u8]> for OpeCllw8VariableV1 {
+impl TryFrom<&[u8]> for OpeClww8VariableV1 {
     type Error = Error;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
@@ -271,7 +271,7 @@ impl TryFrom<&[u8]> for OpeCllw8VariableV1 {
     }
 }
 
-impl AsRef<[u8]> for OpeCllw8VariableV1 {
+impl AsRef<[u8]> for OpeClww8VariableV1 {
     fn as_ref(&self) -> &[u8] {
         &self.bytes
     }
@@ -280,7 +280,7 @@ impl AsRef<[u8]> for OpeCllw8VariableV1 {
 /// Deliberately **not** length-checked, for the same reason as the ORE impl
 /// above: it is the wire decoder for tagged-bit-stream ciphertexts, whose
 /// lengths the `8n + 1` rule does not describe.
-impl FromHex for OpeCllw8VariableV1 {
+impl FromHex for OpeClww8VariableV1 {
     type Error = FromHexError;
 
     fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
@@ -303,11 +303,11 @@ mod tests {
     #[test]
     fn ore_rejects_impossible_length_on_the_checked_entry_points() {
         let short = vec![0u8; 7];
-        assert!(OreCllw8VariableV1::from_bytes(short.clone()).is_err());
-        assert!(OreCllw8VariableV1::try_from(short.as_slice()).is_err());
+        assert!(OreClww8VariableV1::from_bytes(short.clone()).is_err());
+        assert!(OreClww8VariableV1::try_from(short.as_slice()).is_err());
         // `from_hex` and `from_bytes_unchecked` are the documented escape
         // hatches for tagged-bit-stream ciphertexts, so they accept it.
-        assert!(OreCllw8VariableV1::from_hex(hex::encode(&short)).is_ok());
+        assert!(OreClww8VariableV1::from_hex(hex::encode(&short)).is_ok());
     }
 
     #[test]
@@ -316,19 +316,19 @@ mod tests {
         let hex_str = hex::encode(&valid);
 
         assert_eq!(
-            OreCllw8VariableV1::from_bytes(valid.clone())
+            OreClww8VariableV1::from_bytes(valid.clone())
                 .expect("from_bytes")
                 .as_ref(),
             valid.as_slice()
         );
         assert_eq!(
-            OreCllw8VariableV1::try_from(valid.as_slice())
+            OreClww8VariableV1::try_from(valid.as_slice())
                 .expect("try_from")
                 .as_ref(),
             valid.as_slice()
         );
         assert_eq!(
-            OreCllw8VariableV1::from_hex(&hex_str)
+            OreClww8VariableV1::from_hex(&hex_str)
                 .expect("from_hex")
                 .as_ref(),
             valid.as_slice()
@@ -340,10 +340,10 @@ mod tests {
         // A multiple of 8 is exactly what an OPE ciphertext cannot be: the
         // carry byte makes every valid length `8 * n + 1`.
         let short = vec![0u8; 8];
-        assert!(OpeCllw8VariableV1::from_bytes(short.clone()).is_err());
-        assert!(OpeCllw8VariableV1::try_from(short.as_slice()).is_err());
+        assert!(OpeClww8VariableV1::from_bytes(short.clone()).is_err());
+        assert!(OpeClww8VariableV1::try_from(short.as_slice()).is_err());
         // As for ORE: the hex wire decoder stays permissive on purpose.
-        assert!(OpeCllw8VariableV1::from_hex(hex::encode(&short)).is_ok());
+        assert!(OpeClww8VariableV1::from_hex(hex::encode(&short)).is_ok());
     }
 
     #[test]
@@ -352,19 +352,19 @@ mod tests {
         let hex_str = hex::encode(&valid);
 
         assert_eq!(
-            OpeCllw8VariableV1::from_bytes(valid.clone())
+            OpeClww8VariableV1::from_bytes(valid.clone())
                 .expect("from_bytes")
                 .as_ref(),
             valid.as_slice()
         );
         assert_eq!(
-            OpeCllw8VariableV1::try_from(valid.as_slice())
+            OpeClww8VariableV1::try_from(valid.as_slice())
                 .expect("try_from")
                 .as_ref(),
             valid.as_slice()
         );
         assert_eq!(
-            OpeCllw8VariableV1::from_hex(&hex_str)
+            OpeClww8VariableV1::from_hex(&hex_str)
                 .expect("from_hex")
                 .as_ref(),
             valid.as_slice()

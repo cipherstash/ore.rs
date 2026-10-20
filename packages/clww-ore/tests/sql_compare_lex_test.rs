@@ -1,9 +1,9 @@
 mod common;
-use cllw_ore::{Key, OreCllw8VariableV1};
+use clww_ore::{Key, OreClww8VariableV1};
 use common::*;
 use quickcheck::{quickcheck, TestResult};
 
-fn sql_compare_lex(a: &OreCllw8VariableV1, b: &OreCllw8VariableV1) -> i32 {
+fn sql_compare_lex(a: &OreClww8VariableV1, b: &OreClww8VariableV1) -> i32 {
     let response = setup_db()
         .query("SELECT compare_lex_ore_cllw_8_v1($1, $2)", &[&a, &b])
         .expect("Failed to execute query");
@@ -14,7 +14,7 @@ fn sql_compare_lex(a: &OreCllw8VariableV1, b: &OreCllw8VariableV1) -> i32 {
 }
 
 /// Compare two values using a SQL operator.
-fn sql_compare_lex_op(a: &OreCllw8VariableV1, b: &OreCllw8VariableV1, op: SqlOp) -> bool {
+fn sql_compare_lex_op(a: &OreClww8VariableV1, b: &OreClww8VariableV1, op: SqlOp) -> bool {
     let query = format!("SELECT $1::ore_cllw_8_variable_v1 {op} $2::ore_cllw_8_variable_v1");
 
     let response = setup_db()

@@ -1,14 +1,21 @@
 [package]
-name = "cllw-ore"
-version = "0.5.1"
+name = "clww-ore"
+# The crate was `cllw-ore` up to 0.5.1 (cipherstash-suite); it is published
+# fresh under the authors' initials, Chenette, Lewi, Weis and Wu, from 0.6.0.
+version = "0.6.0"
 description = "Fast, efficient Order-Revealing and Order-Preserving Encryption using CLWW schemes"
-documentation = "https://docs.rs/cllw-ore"
+documentation = "https://docs.rs/clww-ore"
+# PolyForm Internal Use, as in cipherstash-suite. Adopting the workspace's
+# licence needs sign-off, and until it has it the crate is not published:
+# release-plz publishes every workspace crate whose version is not on
+# crates.io.
 license-file = "LICENSE"
-edition.workspace = true
-repository.workspace = true
-homepage.workspace = true
-keywords.workspace = true
-categories.workspace = true
+publish = false
+edition = "2021"
+repository = "https://github.com/cipherstash/ore.rs"
+homepage = "https://cipherstash.com"
+keywords = ["cryptography", "security", "databases", "encryption", "sql"]
+categories = ["cryptography", "database"]
 
 [features]
 # WARNING: The postgres-types feature is currently enabled by default for backwards compatibility,
@@ -23,18 +30,18 @@ chrono = ["dep:chrono", "dep:orderable-bytes", "orderable-bytes/chrono"]
 [dependencies]
 blake3 = "1.5.4"
 chrono = { version = "0.4.42", default-features = false, optional = true }
-hex = { workspace = true }
+hex = "0.4.3"
 orderable-bytes = { version = "0.1.1", default-features = false, optional = true }
 postgres-types = { version = "0.2.8", features = ["derive", "array-impls"], optional = true }
 rust_decimal = { version = "1.28", default-features = false, optional = true }
 subtle = "2.6.1"
-thiserror.workspace = true
+thiserror = "1.0.56"
 unicode-normalization = "0.1.24"
-zeroize = { workspace = true }
+zeroize = { version = "1.8.1", features = ["derive"] }
 
 [dev-dependencies]
 criterion = "0.5.1"
-hex.workspace = true
+hex = "0.4.3"
 paste = "1.0.15"
 postgres = "0.19.9"
 quickcheck = "1.0.3"

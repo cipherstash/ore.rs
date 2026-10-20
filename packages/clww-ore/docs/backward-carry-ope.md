@@ -512,8 +512,7 @@ adjacent `u16` pair (65 535 of them) under 20 random keys — 1 310 700
 comparisons total — and asserts zero ordering errors:
 
 ```bash
-mise x --env test -- cargo nextest run -p cllw-ore -- \
-    --ignored ope_exactness
+cargo test -p clww-ore --release -- --ignored ope_exactness
 ```
 
 Most recent run: **0 / 1 310 700** errors. Under the first-fix variant
@@ -611,9 +610,9 @@ bit per ciphertext).
 - **Determinism.** Encryption is deterministic under a given
   `(key, salt, plaintext)`. This is the right behaviour for an index
   column.
-- **When to reach for this vs. ORE.** Use `CllwOpeEncrypt` when you want
+- **When to reach for this vs. ORE.** Use `ClwwOpeEncrypt` when you want
   to put ciphertexts into an off-the-shelf ordered index. Use
-  `CllwOreEncrypt` when you're happy with a custom comparator (no
+  `ClwwOreEncrypt` when you're happy with a custom comparator (no
   reserved-byte overhead, slightly smaller ciphertexts).
 
 ---
@@ -632,6 +631,6 @@ bit per ciphertext).
   EUROCRYPT 2009. The classical baseline; different leakage/security
   trade-off.
 - **Implementation.** The encryption and its tests live in
-  `packages/cllw-ore/src/impls/mod.rs::encrypt_ope_bits`. The exhaustive
+  `packages/clww-ore/src/impls/mod.rs::encrypt_ope_bits`. The exhaustive
   exactness check is
-  `packages/cllw-ore/src/impls/num.rs::ope_exactness_adjacent_u16`.
+  `packages/clww-ore/src/impls/primitives.rs::ope_exactness_adjacent_u16`.

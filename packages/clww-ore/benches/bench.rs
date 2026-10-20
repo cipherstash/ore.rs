@@ -1,4 +1,4 @@
-use cllw_ore::Key;
+use clww_ore::Key;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 fn criterion_benchmark(c: &mut Criterion) {

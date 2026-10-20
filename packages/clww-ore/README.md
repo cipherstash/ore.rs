@@ -1,7 +1,7 @@
 # CLWW ORE
 
-[![Crates.io Version](https://img.shields.io/crates/v/cllw-ore?style=for-the-badge)](https://crates.io/crates/cllw-ore)
-[![docs.rs](https://img.shields.io/docsrs/cllw-ore?style=for-the-badge)](https://docs.rs/cllw-ore/)
+[![Crates.io Version](https://img.shields.io/crates/v/clww-ore?style=for-the-badge)](https://crates.io/crates/clww-ore)
+[![docs.rs](https://img.shields.io/docsrs/clww-ore?style=for-the-badge)](https://docs.rs/clww-ore/)
 [![Built by CipherStash](https://raw.githubusercontent.com/cipherstash/meta/refs/heads/main/csbadge.svg)](https://cipherstash.com)
 
  [Website](https://cipherstash.com) | [Docs](https://cipherstash.com/docs) | [Discussions](https://github.com/orgs/cipherstash/discussions)
