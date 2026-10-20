@@ -25,7 +25,7 @@ let query = prices.encrypt_query(dec!(20))?;
 prices.compare_query(&query, &term);
 ```
 
-ore-rs exports one v2 scheme, `vitaminc::BlockOre`, which implements `OrderScheme`, `OrderQuery` and `Supports` for every target. It routes inside: targets of up to ten bytes (`I16` to `U64`, `F64`, `Date`) go to the Bit6 packed-prefix engine; `I128`, `U128`, `Uuid`, `Timestamp`, `Decimal`, `Text` and `Bytes` go to the chained engine. `compare` dispatches on the wire header, which carries the scheme id. The stored bytes of both engines are unchanged from 0.9.
+ore-rs exports one v2 scheme, `BlockOre` (at the crate root: with vitaminc mandatory, a `vitaminc` module would name every path), which implements `OrderScheme`, `OrderQuery` and `Supports` for every target. It routes inside: targets of up to ten bytes (`I16` to `U64`, `F64`, `Date`) go to the Bit6 packed-prefix engine; `I128`, `U128`, `Uuid`, `Timestamp`, `Decimal`, `Text` and `Bytes` go to the chained engine. `compare` dispatches on the wire header, which carries the scheme id. The stored bytes of both engines are unchanged from 0.9.
 
 Type separation comes from vitaminc's salt, `PAE("vitaminc/ore/v1", "block-ore", domain, context)`, whose domain is the target's. No ore-rs label is added.
 

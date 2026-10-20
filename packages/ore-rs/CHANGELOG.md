@@ -11,15 +11,17 @@ way in is `vitaminc-ore`'s `OrderSpace` chain, and ore-rs implements its `OrderS
 and `OrderQuery` traits. The design and its reasons are in
 `docs/plans/2026-10-19-ore-0-10-vitaminc-front-door.md`. **No stored ciphertext changes:**
 the Bit6, chained and legacy wire formats are the frozen 0.9.0 formats, and the
-compatibility vectors now go in through the public path, so they pin that too. Two
-exceptions sit in the encodings, not the formats: an `f32` and a sub-microsecond
-`DateTime<Utc>` (see below). The
+compatibility vectors now go in through the public path, so they pin that too. Three
+exceptions sit in the encodings, not the formats: an `f32`, a sub-microsecond
+`DateTime<Utc>`, and a string stored with the chained scheme's `encrypt_str` (see below).
+The
 `vitaminc` feature of 0.9 was unreleased, so nothing stored depends on the adapters it
 had.
 
 ### Changed
 
-- **`vitaminc` is a dependency, not a feature.** `vitaminc::BlockOre` is the one scheme:
+- **`vitaminc` is a dependency, not a feature.** `BlockOre`, at the crate root, is the one
+  scheme (there is no `vitaminc` module, since every path goes through vitaminc):
   it implements `OrderScheme` and `OrderQuery` for every target, and routes a space to
   the Bit6 engine (up to ten bytes: `I16` to `U64`, `F64`, `Date`) or the chained engine
   (the rest, text and bytes included) when the space is opened. Text is padded under
@@ -44,6 +46,24 @@ had.
   timestamp with a non-zero sub-microsecond part, or of a leap second, has other bytes
   from a 0.10 term for the same instant: they do not compare equal. Timestamps on whole
   microseconds, which is everything PostgreSQL stores, are unchanged.
+- **Strings go in through vitaminc's `Text` encoding.** It puts a marker byte before the
+  text and folds case and accents, and the marker can move a string into the next padding
+  bucket, so a 0.10 term or query of a string encrypts other bytes than 0.9's
+  `OreAes128Bit6Chained::encrypt_str` did for it, and the two compare as noise.
+  Re-encrypt stored chained strings through a `Text` space. Fixed-width values on the
+  chained scheme (`u128`, `i128`) are unchanged.
+- **Ceilings and fixed lengths are non-zero.** `Options::with_max_bytes`,
+  `BlockOre::with_max_bytes` and their getters take and give a `NonZeroUsize`, and
+  `DEFAULT_MAX_STR_BYTES` is one; `Padding::Fixed { max_bytes }` is a `NonZeroU16`. A
+  zero, which no value could fit, no longer compiles, and a chained ciphertext whose
+  header names `Fixed { max_bytes: 0 }` (which only the empty string could make) no
+  longer parses.
+- **`Term` is not `PartialEq`.** A term carries a random nonce, so `==` on two terms of
+  one value was `false`; compare through the scheme. `Query`, which is deterministic,
+  keeps it.
+- **vitaminc-ore's `chrono`, `rust_decimal` and `uuid` features are the dependant's.**
+  ore-rs no longer turns them on; a dependant that encrypts those types turns them on in
+  its own `vitaminc-ore` dependency.
 - **MSRV is 1.88**, vitaminc's floor.
 - `OreError::RandError` is `OreError::Random(vitaminc_random::RandomError)`, and
   `OreError::VariableLength` is new: text or bytes on a fixed-width scheme.
@@ -55,7 +75,8 @@ had.
 
 - The `OreEncrypt` trait and every per-type implementation, `encrypt_str`,
   `encrypt_left_str`, `encrypt_fixed` and `encrypt_left_fixed`. Typed values enter through
-  vitaminc's `FitsIn` table.
+  vitaminc's `FitsIn` table; strings stored with `encrypt_str` need re-encrypting (see
+  Changed).
 - `CipherText<S, N>`, `Left<S, N>`, `Right<S, N>`, `ChainedCipherText<N>`, `ChainedLeft<N>`,
   `VarCipherText`, `VarLeft`, `OreOutput`, `WireHeader`, `CipherTextBlock`, `ParseError`
   and `PlainText<N>` from the public API. A term's plaintext type lives on vitaminc's
@@ -73,8 +94,9 @@ had.
 - `f32` as a type of its own. vitaminc widens an `f32` exactly to its `F64` target, so a
   new term encrypts eight bytes where a 0.9 `f32` ciphertext (legacy or Bit6) encrypted four, and
   the two never compare. Re-encrypt stored `f32` data as `F64`.
-- `vitaminc::Bit6BlockOre`, `vitaminc::ChainedBlockOre`, the legacy adapter and
-  `vitaminc::VARIABLE_WIDTH_MARKER` (vitaminc's encodings carry the marker now).
+- The `vitaminc` module: `BlockOre`, `BlockOreSpace` and `ORE_KEY` are at the crate root.
+  `vitaminc::Bit6BlockOre`, `vitaminc::ChainedBlockOre`, the legacy adapter and
+  `vitaminc::VARIABLE_WIDTH_MARKER` are gone (vitaminc's encodings carry the marker now).
 
 ## [0.9.0] - 2026-10-19
 
