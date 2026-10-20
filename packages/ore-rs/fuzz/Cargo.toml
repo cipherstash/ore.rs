@@ -20,14 +20,12 @@ libfuzzer-sys = "0.4"
 [dependencies.ore-rs]
 path = ".."
 
-# The sealed plaintexts the schemes take, from the same branch as the crate.
+# The sealed plaintexts the schemes take.
 [dependencies.vitaminc-ore]
-git = "https://github.com/cipherstash/vitaminc"
-branch = "feat/ore-order-query"
+version = "0.7.0"
 
 [dependencies.vitaminc-protected]
-git = "https://github.com/cipherstash/vitaminc"
-branch = "feat/ore-order-query"
+version = "0.7.0"
 
 [[bin]]
 name = "chained_parse"

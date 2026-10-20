@@ -63,14 +63,14 @@ thiserror = "1.0.38"
 rand = { version = "0.10.1", features = ["chacha"] }
 # vitaminc is the typed front door (docs/plans/2026-10-19-ore-0-10-vitaminc-front-door.md):
 # vitaminc-ore seals every plaintext and owns the encodings, and the
-# schemes here implement its traits. Taken from the branch that carries
-# the 0.7 changes (`open` per space, `OrderQuery`) until 0.7 is published.
-vitaminc-ore = { git = "https://github.com/cipherstash/vitaminc", branch = "feat/ore-order-query", features = ["chrono", "rust_decimal", "uuid"] }
-vitaminc-hmac = { git = "https://github.com/cipherstash/vitaminc", branch = "feat/ore-order-query" }
-vitaminc-prf = { git = "https://github.com/cipherstash/vitaminc", branch = "feat/ore-order-query" }
-vitaminc-protected = { git = "https://github.com/cipherstash/vitaminc", branch = "feat/ore-order-query" }
-vitaminc-random = { git = "https://github.com/cipherstash/vitaminc", branch = "feat/ore-order-query" }
-vitaminc-context = { git = "https://github.com/cipherstash/vitaminc", branch = "feat/ore-order-query" }
+# schemes here implement its traits. 0.7 is the release that brings
+# `open` per space and `OrderQuery`.
+vitaminc-ore = { version = "0.7.0", features = ["chrono", "rust_decimal", "uuid"] }
+vitaminc-hmac = "0.7.0"
+vitaminc-prf = "0.7.0"
+vitaminc-protected = "0.7.0"
+vitaminc-random = "0.7.0"
+vitaminc-context = "0.7.0"
 
 # `cfg(kani)` gates the Kani proof harnesses (compiled only by `cargo kani`).
 [lints.rust]
