@@ -20,8 +20,9 @@
 /// header. What a scheme stores. Compared with the scheme's
 /// `compare_raw_slices`, or against a [`Query`] with
 /// `compare_left_to_full`; never byte by byte, since a full ciphertext
-/// carries a random nonce and one value has many.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// carries a random nonce and one value has many. So no `PartialEq`:
+/// `==` on two terms of one value would be `false`.
+#[derive(Debug, Clone)]
 pub struct Term(Vec<u8>);
 
 /// A left (query) ciphertext, serialised: the per-block permuted
