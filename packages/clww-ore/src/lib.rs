@@ -131,6 +131,8 @@ use thiserror::Error;
 use zeroize::Zeroize;
 mod biterator;
 mod impls;
+#[cfg(test)]
+mod known_answers;
 mod nibble_iterator;
 
 pub use impls::primitives::{OpeClww8V1, OreClww8V1};
