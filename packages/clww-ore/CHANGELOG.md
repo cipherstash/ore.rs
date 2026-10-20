@@ -23,7 +23,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ore_cllw_8_ope_v1`, `ore_cllw_8_ope_variable_v1`) keep their spelling: they are
   installed in databases and named by EQL, so renaming them would break every
   installation.
+- **`encrypt_ope_bits` counts its bits.** It took the count as `n` and checked it against
+  the iterator only in debug builds, so a wrong `n` gave a ciphertext of another length in
+  release. The parameter is gone: `encrypt_ope_bits(bits, key, salt)`.
+- **The PRF state and plaintext bits are wiped.** The keyed BLAKE3 hasher, each keystream
+  block and `encrypt_ope_bits`' copy of the plaintext bits are zeroized on drop (blake3's
+  `zeroize` feature is on). Ciphertexts are unchanged: known-answer digests of every
+  encrypt path, recorded from 0.5.1, pin them.
+- The e2e SQL tests declare `required-features = ["postgres-types"]`, so a build without
+  default features skips them.
 
+## Up to 0.4.2
+
+release-plz wrote the sections below without a version heading. All of them shipped by
+0.4.2.
 
 ### Documentation
 
