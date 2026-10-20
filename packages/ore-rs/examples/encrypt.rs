@@ -3,7 +3,7 @@
 
 use std::cmp::Ordering;
 
-use ore_rs::vitaminc::BlockOre;
+use ore_rs::BlockOre;
 use vitaminc_ore::target::{Text, I64};
 use vitaminc_ore::{OrderEncrypt, OrderKeyInit};
 use vitaminc_protected::Protected;

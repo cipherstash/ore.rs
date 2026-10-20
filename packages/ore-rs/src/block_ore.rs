@@ -1,71 +1,8 @@
-//! [`OrderScheme`] and [`OrderQuery`] for block ORE: the typed front door.
-//!
-//! vitaminc decides the encoding of every kind of value and seals it as an
-//! [`OrderPlaintext`] that only it can build, so a scheme here is never
-//! handed bytes that skipped the encoding. A caller opens a space on
-//! [`BlockOre`] with a target and a context, encrypts values there, and
-//! compares terms and queries through the space; it never names an engine.
-//!
-//! One scheme, two engines. [`BlockOre`] routes a space to an engine by
-//! its target's width, once, when the space is opened:
-//!
-//! - up to ten bytes, the packed-prefix Bit6 engine
-//!   ([`OreAes128Bit6`]): the integers to 64 bits, `f64` and dates;
-//! - wider, or of no fixed width, the chained engine
-//!   ([`OreAes128Bit6Chained`]): 128-bit integers, uuids, timestamps,
-//!   decimals, text and bytes.
-//!
-//! Every term carries its engine in its wire header, so a comparison
-//! dispatches on the bytes and refuses a pair from two engines, which no
-//! space produces. The legacy scheme has no adapter: it is for stored data,
-//! and the README says not to put new data on it.
-//!
-//! **Keys.** [`OrderKeyInit`] keys the scheme from a 32-byte key, from
-//! which one 16-byte ORE key is derived with HMAC-SHA256 under
-//! [`ORE_KEY`] when the scheme is made. Each space is then keyed from that
-//! key under the salt vitaminc derives, `PAE("vitaminc/ore/v1",
-//! "block-ore", domain, context)`, through the engines' own salt stage, so
-//! two targets or two contexts never share key material.
-//!
-//! **Padding.** Text is padded under the scheme's policy
-//! ([`BlockOre::with_text_padding`], [`Padding::default`] unless set), so a
-//! text term reveals a length bucket, and text that ends in NUL is refused
-//! ([`OreError::TrailingNul`]). Bytes are never padded, since NUL padding
-//! would refuse every value that ends in a zero byte, so a bytes term
-//! reveals the exact length. Fixed-width targets have nothing to hide.
-//! Text and bytes are refused past the scheme's ceiling
-//! ([`BlockOre::with_max_bytes`], [`DEFAULT_MAX_STR_BYTES`] unless set),
-//! which counts the marker byte vitaminc puts before them.
-//!
-//! # Examples
-//!
-//! ```
-//! use std::cmp::Ordering;
-//! use ore_rs::vitaminc::BlockOre;
-//! use vitaminc_ore::target::{I32, Text};
-//! use vitaminc_ore::{OrderEncrypt, OrderKeyInit};
-//! use vitaminc_protected::Protected;
-//! # let key_bytes = [7u8; 32];
-//!
-//! let scheme = BlockOre::new(Protected::new(key_bytes));
-//!
-//! // A space of `i32`s under one context, keyed once for all its terms.
-//! let quantity = scheme.target(I32).context(("orders", "quantity"));
-//! let stored = quantity.encrypt(42i16)?;
-//! let query = quantity.encrypt_query(41i16)?;
-//! assert_eq!(quantity.compare_query(&query, &stored), Some(Ordering::Less));
-//! let bytes: &[u8] = stored.as_ref();
-//!
-//! // Text goes to the chained engine; the caller does not choose.
-//! let names = scheme.target(Text).context("names");
-//! let alice = names.encrypt_checked("alice")?;
-//! let bob = names.encrypt_checked("bob")?;
-//! assert_eq!(names.compare(&alice, &bob), Some(Ordering::Less));
-//! # let _ = bytes;
-//! # Ok::<(), Box<dyn std::error::Error>>(())
-//! ```
+//! [`BlockOre`]: block ORE as a vitaminc order scheme, and the routing of
+//! each space to an engine.
 
 use std::cmp::Ordering;
+use std::num::NonZeroUsize;
 
 use vitaminc_context::Context;
 use vitaminc_hmac::{HmacSha256Prf, WeakKeyError};
@@ -103,17 +40,82 @@ fn ore_key(prf: &HmacSha256Prf) -> Option<Zeroizing<[u8; 16]>> {
     Some(key)
 }
 
-/// Block ORE as a vitaminc order scheme: every target, routed to the
-/// engine its width wants when a space is opened.
+/// Block ORE as a vitaminc order scheme, the typed front door: every
+/// target, routed to the engine its width wants when a space is opened.
+///
+/// vitaminc decides the encoding of every kind of value and seals it as an
+/// [`OrderPlaintext`] that only it can build, so a scheme here is never
+/// handed bytes that skipped the encoding. A caller opens a space on
+/// [`BlockOre`] with a target and a context, encrypts values there, and
+/// compares terms and queries through the space; it never names an engine.
+///
+/// One scheme, two engines. [`BlockOre`] routes a space to an engine by
+/// its target's width, once, when the space is opened:
+///
+/// - up to ten bytes, the packed-prefix Bit6 engine
+///   ([`OreAes128Bit6`]): the integers to 64 bits, `f64` and dates;
+/// - wider, or of no fixed width, the chained engine
+///   ([`OreAes128Bit6Chained`]): 128-bit integers, uuids, timestamps,
+///   decimals, text and bytes.
+///
+/// Every term carries its engine in its wire header, so a comparison
+/// dispatches on the bytes and refuses a pair from two engines, which no
+/// space produces. The legacy scheme has no adapter: it is for stored data,
+/// and the README says not to put new data on it.
+///
+/// **Keys.** [`OrderKeyInit`] keys the scheme from a 32-byte key, from
+/// which one 16-byte ORE key is derived with HMAC-SHA256 under
+/// [`ORE_KEY`] when the scheme is made. Each space is then keyed from that
+/// key under the salt vitaminc derives, `PAE("vitaminc/ore/v1",
+/// "block-ore", domain, context)`, through the engines' own salt stage, so
+/// two targets or two contexts never share key material.
+///
+/// **Padding.** Text is padded under the scheme's policy
+/// ([`BlockOre::with_text_padding`], [`Padding::default`] unless set), so a
+/// text term reveals a length bucket, and text that ends in NUL is refused
+/// ([`OreError::TrailingNul`]). Bytes are never padded, since NUL padding
+/// would refuse every value that ends in a zero byte, so a bytes term
+/// reveals the exact length. Fixed-width targets have nothing to hide.
+/// Text and bytes are refused past the scheme's ceiling
+/// ([`BlockOre::with_max_bytes`], [`DEFAULT_MAX_STR_BYTES`] unless set),
+/// which counts the marker byte vitaminc puts before them.
 ///
 /// A term is the serialised ciphertext, left and right halves; a query is
 /// the left half alone. Both are compared by the scheme, never byte by
 /// byte: a term carries a random nonce, so one value has many terms,
 /// which compare `Equal`.
+///
+/// # Examples
+///
+/// ```
+/// use std::cmp::Ordering;
+/// use ore_rs::BlockOre;
+/// use vitaminc_ore::target::{I32, Text};
+/// use vitaminc_ore::{OrderEncrypt, OrderKeyInit};
+/// use vitaminc_protected::Protected;
+/// # let key_bytes = [7u8; 32];
+///
+/// let scheme = BlockOre::new(Protected::new(key_bytes));
+///
+/// // A space of `i32`s under one context, keyed once for all its terms.
+/// let quantity = scheme.target(I32).context(("orders", "quantity"));
+/// let stored = quantity.encrypt(42i16)?;
+/// let query = quantity.encrypt_query(41i16)?;
+/// assert_eq!(quantity.compare_query(&query, &stored), Some(Ordering::Less));
+/// let bytes: &[u8] = stored.as_ref();
+///
+/// // Text goes to the chained engine; the caller does not choose.
+/// let names = scheme.target(Text).context("names");
+/// let alice = names.encrypt_checked("alice")?;
+/// let bob = names.encrypt_checked("bob")?;
+/// assert_eq!(names.compare(&alice, &bob), Some(Ordering::Less));
+/// # let _ = bytes;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 pub struct BlockOre {
     key: Option<Zeroizing<[u8; 16]>>,
     text_padding: Padding,
-    max_bytes: usize,
+    max_bytes: NonZeroUsize,
 }
 
 impl BlockOre {
@@ -131,21 +133,20 @@ impl BlockOre {
     /// [`DEFAULT_MAX_STR_BYTES`] unless set. A longer one is refused
     /// ([`OreError::TooLong`]). Fixed-width spaces are not bounded by it.
     ///
-    /// The ceiling must be one the chained engine accepts: at least 1, and
-    /// no longer than the space's padding can pad within the wire format's
-    /// limit, [`MAX_STR_BYTES`](crate::scheme::chained::MAX_STR_BYTES)
+    /// The ceiling must be one the chained engine accepts: no longer than
+    /// the space's padding can pad within the wire format's limit, [`MAX_STR_BYTES`](crate::scheme::chained::MAX_STR_BYTES)
     /// (49151 bytes). A `Bytes` space is unpadded, so it takes any ceiling
     /// from 1 to 49151. A `Text` space pads the ceiling under
     /// [`Self::with_text_padding`]. Under [`Padding::PowerOfTwo`], the
     /// default, the longest is 32768 (or the floor, if that is higher),
     /// since a longer value would pad to 65536 bytes. Under
     /// [`Padding::Fixed`] the lower of the ceiling and the fixed length
-    /// applies, so any ceiling from 1 opens while the fixed length is
-    /// itself within the wire format's limit. Outside that range a `Text`
+    /// applies, so any ceiling opens while the fixed length is itself
+    /// within the wire format's limit. Outside that range a `Text`
     /// or `Bytes` space fails to open ([`OreError::InitFailed`]), and so
     /// does every encryption in it; the scheme does not check the ceiling
     /// when it is set.
-    pub fn with_max_bytes(mut self, max_bytes: usize) -> Self {
+    pub fn with_max_bytes(mut self, max_bytes: NonZeroUsize) -> Self {
         self.max_bytes = max_bytes;
         self
     }
@@ -156,7 +157,7 @@ impl BlockOre {
     }
 
     /// The ceiling on text and bytes values.
-    pub fn max_bytes(&self) -> usize {
+    pub fn max_bytes(&self) -> NonZeroUsize {
         self.max_bytes
     }
 
@@ -254,23 +255,21 @@ impl OrderScheme for BlockOre {
     type Error = OreError;
     type Space = BlockOreSpace;
 
-    /// Key the engine the target's width wants under `salt`. A `Text`
-    /// space pads under the scheme's policy and a `Bytes` space never
-    /// pads; both keep the scheme's ceiling, and either fails to open
-    /// ([`OreError::InitFailed`]) under a ceiling the chained engine
-    /// refuses (see [`BlockOre::with_max_bytes`]). A fixed-width space on
-    /// the chained engine takes neither the padding nor the ceiling, so
-    /// no setting of either keeps it from opening.
+    /// Key the engine the target's width wants under `salt`. A `Bytes`
+    /// space never pads, and a `Text` space pads under the scheme's
+    /// policy, as does any other target of no fixed width, so one vitaminc
+    /// adds later cannot reveal its exact length. All of them keep the
+    /// scheme's ceiling, and fail to open ([`OreError::InitFailed`]) under
+    /// a ceiling the chained engine refuses (see
+    /// [`BlockOre::with_max_bytes`]). A fixed-width space on the chained
+    /// engine takes neither the padding nor the ceiling, so no setting of
+    /// either keeps it from opening.
     fn open(&self, target: OrderTarget, salt: &Context<'_>) -> Result<BlockOreSpace, OreError> {
         let key = self.key()?;
         let engine = match engine_for(target) {
             EngineKind::Bit6 => Engine::Bit6(Box::new(OreAes128Bit6::init_with_salt(key, salt)?)),
             EngineKind::Chained => {
                 let options = match target {
-                    OrderTarget::Text => Options::default()
-                        .with_salt(salt)
-                        .with_padding(self.text_padding)
-                        .with_max_bytes(self.max_bytes),
                     OrderTarget::Bytes => Options::default()
                         .with_salt(salt)
                         .with_padding(Padding::None)
@@ -278,7 +277,12 @@ impl OrderScheme for BlockOre {
                     // A fixed width: the engine goes in unpadded with no
                     // ceiling, so the defaults are only there to pass
                     // the engine's own check.
-                    _ => Options::default().with_salt(salt),
+                    target if target.width().is_some() => Options::default().with_salt(salt),
+                    // Text, and any target of no fixed width.
+                    _ => Options::default()
+                        .with_salt(salt)
+                        .with_padding(self.text_padding)
+                        .with_max_bytes(self.max_bytes),
                 };
                 Engine::Chained(Box::new(OreAes128Bit6Chained::init_with(key, options)?))
             }
@@ -374,6 +378,7 @@ mod tests {
     use super::*;
     use crate::scheme::chained::MAX_STR_BYTES;
     use crate::scheme::decompose::num_blocks_6bit;
+    use crate::testing::ceiling;
     use vitaminc_ore::target::{Bytes, Date, Decimal, Text, I32, I64, U128};
     use vitaminc_ore::{test_support, OrderEncrypt, OrderError, OrderTerm, QueryTerm};
 
@@ -590,8 +595,8 @@ mod tests {
             chained_len(6)
         );
 
-        let small = BlockOre::new(key()).with_max_bytes(8);
-        assert_eq!(small.max_bytes(), 8);
+        let small = BlockOre::new(key()).with_max_bytes(ceiling(8));
+        assert_eq!(small.max_bytes().get(), 8);
         let text = small.target(Text).context("c");
         let bytes = small.target(Bytes).context("c");
         assert!(text.encrypt_checked("1234567").is_ok());
@@ -613,11 +618,11 @@ mod tests {
     /// take no ceiling.
     #[test]
     fn a_ceiling_out_of_range_closes_only_text_and_bytes_spaces() {
-        for ceiling in [0, MAX_STR_BYTES + 1, 60000] {
-            let s = BlockOre::new(key()).with_max_bytes(ceiling);
+        for max in [MAX_STR_BYTES + 1, 60000] {
+            let s = BlockOre::new(key()).with_max_bytes(ceiling(max));
             for t in [T::U128, T::I128, T::Uuid, T::Timestamp, T::Decimal] {
                 if let Err(e) = s.target(t).context("c").open() {
-                    panic!("{:?} under {}: {:?}", t, ceiling, e);
+                    panic!("{:?} under {}: {:?}", t, max, e);
                 }
             }
             assert!(s.target(U128).context("c").encrypt(u128::MAX).is_ok());
@@ -626,13 +631,13 @@ mod tests {
                     matches!(s.target(t).context("c").open(), Err(OreError::InitFailed)),
                     "{:?} under {}",
                     t,
-                    ceiling
+                    max
                 );
             }
         }
         // The edges the docs give: unpadded bytes take up to 49151, text
         // under the default padding up to 32768.
-        let s = BlockOre::new(key()).with_max_bytes(MAX_STR_BYTES);
+        let s = BlockOre::new(key()).with_max_bytes(ceiling(MAX_STR_BYTES));
         s.target(Bytes)
             .context("c")
             .open()
@@ -641,9 +646,9 @@ mod tests {
             s.target(Text).context("c").open(),
             Err(OreError::InitFailed)
         ));
-        let s = BlockOre::new(key()).with_max_bytes(32768);
+        let s = BlockOre::new(key()).with_max_bytes(ceiling(32768));
         s.target(Text).context("c").open().expect("text at 32768");
-        let s = BlockOre::new(key()).with_max_bytes(32769);
+        let s = BlockOre::new(key()).with_max_bytes(ceiling(32769));
         assert!(matches!(
             s.target(Text).context("c").open(),
             Err(OreError::InitFailed)

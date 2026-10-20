@@ -1,5 +1,5 @@
 //! Concrete BlockORE schemes. The two v2 schemes are the engines behind
-//! [`crate::vitaminc::BlockOre`], which routes a plaintext to one of them by
+//! [`crate::BlockOre`], which routes a plaintext to one of them by
 //! its width: [`bit2_w6`] for fixed-width values up to 10 bytes, and
 //! [`chained`] for wider values, text and bytes. The legacy [`bit2`] scheme
 //! remains for compatibility with existing data.

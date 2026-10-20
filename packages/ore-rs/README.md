@@ -38,7 +38,7 @@ ore-rs requires Rust 1.88 or later.
 
 ```rust
 use std::cmp::Ordering;
-use ore_rs::vitaminc::BlockOre;
+use ore_rs::BlockOre;
 use vitaminc_ore::target::{I64, Text};
 use vitaminc_ore::{OrderEncrypt, OrderKeyInit};
 use vitaminc_protected::Protected;
@@ -88,15 +88,16 @@ Text is padded with NUL bytes to a length bucket before encryption, so a text te
 Text and bytes are refused past a ceiling, 1024 bytes by default, counting the marker byte vitaminc puts before them. Encryption time and term size grow with the padded length, so the ceiling bounds what one value can cost. Set both on the scheme:
 
 ```rust
+use std::num::NonZeroUsize;
 use ore_rs::scheme::chained::Padding;
-use ore_rs::vitaminc::BlockOre;
+use ore_rs::BlockOre;
 use vitaminc_ore::target::Text;
 use vitaminc_ore::{OrderEncrypt, OrderKeyInit};
 use vitaminc_protected::Protected;
 
 let scheme = BlockOre::new(Protected::new([0x2b; 32]))
     .with_text_padding(Padding::PowerOfTwo { min_bytes: 32 })
-    .with_max_bytes(256);
+    .with_max_bytes(NonZeroUsize::new(256).unwrap());
 let emails = scheme.target(Text).context("customers");
 let term = emails.encrypt_checked("alice@example.com")?;
 # let _ = term;

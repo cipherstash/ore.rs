@@ -2,6 +2,8 @@
 //! each kind, made the way a caller makes them, through
 //! `vitaminc_ore::order`.
 
+use std::num::{NonZeroU16, NonZeroUsize};
+
 use vitaminc_context::Context;
 use vitaminc_ore::{order, Float, Int, Logical, OrderPlaintext, OrderTarget, Physical};
 use vitaminc_protected::Protected;
@@ -28,6 +30,18 @@ pub(crate) fn fixed_key(byte: u8) -> Protected<[u8; 16]> {
 /// 0.9 caller's `init_with_salt(key, bytes)` had them.
 pub(crate) fn salt(bytes: &[u8]) -> Context<'static> {
     Context::from_encoded(bytes.to_vec())
+}
+
+/// `n` as a ceiling on text and bytes.
+pub(crate) const fn ceiling(n: usize) -> NonZeroUsize {
+    NonZeroUsize::new(n).unwrap()
+}
+
+/// The fixed padding policy at `n` bytes.
+pub(crate) const fn fixed_padding(n: u16) -> crate::scheme::chained::Padding {
+    crate::scheme::chained::Padding::Fixed {
+        max_bytes: NonZeroU16::new(n).unwrap(),
+    }
 }
 
 /// A sealed plaintext of `value` as `target`.

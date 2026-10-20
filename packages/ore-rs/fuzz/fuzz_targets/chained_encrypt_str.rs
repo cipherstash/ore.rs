@@ -35,7 +35,7 @@ fn encrypt(ore: &C, s: &str) -> Option<(Vec<u8>, Vec<u8>, Vec<u8>)> {
         assert!(matches!(left, Err(OreError::TooManyBlocks)), "{s:?}");
         return None;
     };
-    if encoded.len() > DEFAULT_MAX_STR_BYTES {
+    if encoded.len() > DEFAULT_MAX_STR_BYTES.get() {
         assert!(matches!(full, Err(OreError::TooLong)), "{s:?}");
         assert!(matches!(left, Err(OreError::TooLong)), "{s:?}");
         return None;

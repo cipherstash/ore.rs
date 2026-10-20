@@ -16,13 +16,14 @@
     )
 )]
 
+mod block_ore;
 mod ciphertext;
 mod primitives;
 pub mod scheme;
 mod term;
 #[cfg(test)]
 pub(crate) mod testing;
-pub mod vitaminc;
+pub use crate::block_ore::{BlockOre, BlockOreSpace, ORE_KEY};
 pub(crate) use crate::ciphertext::*;
 pub use crate::term::{Query, Term};
 
@@ -233,7 +234,7 @@ mod sealed {
 ///
 /// The plaintext comes from vitaminc-ore, which owns the encodings:
 /// `vitaminc_ore::order()` makes one from a value and a target, and
-/// [`vitaminc::BlockOre`] is the typed way in, which routes a plaintext to
+/// [`BlockOre`] is the typed way in, which routes a plaintext to
 /// the right engine by its width. A scheme here takes nothing else, so no
 /// caller can hand it bytes that skipped the encoding.
 ///

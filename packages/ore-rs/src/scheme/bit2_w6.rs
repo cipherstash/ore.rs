@@ -14,7 +14,7 @@
 //! vitaminc target up to 64 bits, `f64` and dates. A timestamp (12
 //! bytes), a decimal (14), a 128-bit integer or uuid (16), text and bytes
 //! are refused ([`crate::OreError::TooManyBlocks`], [`crate::OreError::VariableLength`])
-//! and belong to [`crate::scheme::chained`]; [`crate::vitaminc::BlockOre`]
+//! and belong to [`crate::scheme::chained`]; [`crate::BlockOre`]
 //! routes between the two by width.
 //!
 //! The scheme takes a sealed `OrderPlaintext` through [`crate::OreScheme`]. The

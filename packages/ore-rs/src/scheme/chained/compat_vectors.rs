@@ -35,7 +35,9 @@ const K1: [u8; 16] = [
 ];
 
 /// The fixed length pinned beside the default and `None`.
-const FIXED: Padding = Padding::Fixed { max_bytes: 40 };
+const FIXED: Padding = Padding::Fixed {
+    max_bytes: std::num::NonZeroU16::new(40).unwrap(),
+};
 
 type C = OreAes128Bit6Chained;
 
