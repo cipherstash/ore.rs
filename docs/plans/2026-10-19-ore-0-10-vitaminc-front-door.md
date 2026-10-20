@@ -91,6 +91,6 @@ And one change to PR 482: `open` takes the target, `fn open(&self, target: Order
 ## Roadmap
 
 1. vitaminc: amend PR 482 (`open` takes the target); add the `OrderQuery` PR to the 0.7 stack.
-2. ore-rs: land #123; ship 0.9.1 with it; close #126, #124, #122 and #103.
+2. ore-rs: close #126, #124, #122 and #103. #123 closed without a 0.9.1: its Bit6 `compare_left_to_full` ships in 0.10, carried by #130.
 3. ore-rs 0.10, stacked: (a) sealed `OreScheme`, sealed-plaintext entry points, deletions, `Mutex<SafeRand>`, `Protected` keys, MSRV; (b) the single `BlockOre` adapter with routing, padding config and `OrderQuery`; (c) README, crate docs and CHANGELOG.
 4. clww-ore: the move and rename; the 0.10 treatment; remove orderable-bytes.
