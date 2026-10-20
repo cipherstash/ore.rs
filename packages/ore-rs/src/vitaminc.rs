@@ -72,7 +72,7 @@ use vitaminc_hmac::{HmacSha256Prf, WeakKeyError};
 use vitaminc_ore::{OrderKeyInit, OrderPlaintext, OrderQuery, OrderScheme, OrderTarget};
 use vitaminc_prf::{BlockVisitor, Prf, PrfEncoding, PrfKeyInit};
 use vitaminc_protected::Protected;
-use zeroize::Zeroizing;
+use zeroize::{ZeroizeOnDrop, Zeroizing};
 
 use crate::ciphertext::parse_header;
 use crate::scheme::bit2_w6::{OreAes128Bit6, MAX_BYTES};
@@ -181,7 +181,8 @@ impl std::fmt::Debug for BlockOre {
 
 /// What [`BlockOre`] keeps for one space: the engine the space's target
 /// wants, keyed under the space's salt. `Send + Sync`, so a space is
-/// shared across threads as it is.
+/// shared across threads as it is. Wiped on drop: each engine wipes its
+/// keys.
 pub struct BlockOreSpace(Engine);
 
 enum Engine {
@@ -189,6 +190,20 @@ enum Engine {
     // a space is opened once, so the pointer costs nothing per term.
     Bit6(Box<OreAes128Bit6>),
     Chained(Box<OreAes128Bit6Chained>),
+}
+
+// Dropping a space drops its boxed engine, which wipes its own keys. The
+// derive cannot see through the `Box`, so the match below names every
+// engine instead: one added without `ZeroizeOnDrop` does not compile.
+impl ZeroizeOnDrop for BlockOreSpace {}
+
+#[allow(dead_code)]
+fn engines_wipe_on_drop(engine: &Engine) {
+    fn wipes<T: ZeroizeOnDrop>(_: &T) {}
+    match engine {
+        Engine::Bit6(e) => wipes(&**e),
+        Engine::Chained(e) => wipes(&**e),
+    }
 }
 
 impl std::fmt::Debug for BlockOreSpace {

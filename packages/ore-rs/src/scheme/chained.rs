@@ -115,7 +115,7 @@ use vitaminc_context::Context;
 use vitaminc_ore::{OrderPlaintext, OrderTarget};
 use vitaminc_protected::{Controlled, Protected};
 use vitaminc_random::SafeRand;
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 #[cfg(test)]
 use crate::ciphertext::ParseError;
@@ -1037,6 +1037,9 @@ impl Drop for OreAes128Bit6Chained {
         self.k_acc.zeroize();
     }
 }
+
+// The marker for the wipe above, which vitaminc-ore asks of a space's engine.
+impl ZeroizeOnDrop for OreAes128Bit6Chained {}
 
 /// Whether every `xt` symbol of a serialised view is inside the 64-element
 /// domain. The comparator reads the right block at `xt[l]`; a symbol of 64 or
