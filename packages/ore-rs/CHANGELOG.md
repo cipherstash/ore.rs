@@ -11,7 +11,9 @@ way in is `vitaminc-ore`'s `OrderSpace` chain, and ore-rs implements its `OrderS
 and `OrderQuery` traits. The design and its reasons are in
 `docs/plans/2026-10-19-ore-0-10-vitaminc-front-door.md`. **No stored ciphertext changes:**
 the Bit6, chained and legacy wire formats are the frozen 0.9.0 formats, and the
-compatibility vectors now go in through the public path, so they pin that too. The
+compatibility vectors now go in through the public path, so they pin that too. Two
+exceptions sit in the encodings, not the formats: an `f32` and a sub-microsecond
+`DateTime<Utc>` (see below). The
 `vitaminc` feature of 0.9 was unreleased, so nothing stored depends on the adapters it
 had.
 
@@ -36,6 +38,12 @@ had.
   aliases are gone: `OreAes128Bit6`, `OreAes128Bit6Chained` and `OreAes128` are concrete,
   draw nonces from a `vitaminc_random::SafeRand` behind a mutex, and are `Send + Sync`.
   `init_seeded`, behind the `test-support` feature, pins a nonce stream for tests.
+- **Timestamps are truncated to microseconds.** vitaminc's `Timestamp` target keeps the
+  0.9 `DateTime<Utc>` layout (sign-flipped seconds, then the sub-second nanoseconds) but
+  rounds the nanoseconds down to whole microseconds. A 0.9 legacy ciphertext of a
+  timestamp with a non-zero sub-microsecond part, or of a leap second, has other bytes
+  from a 0.10 term for the same instant: they do not compare equal. Timestamps on whole
+  microseconds, which is everything PostgreSQL stores, are unchanged.
 - **MSRV is 1.88**, vitaminc's floor.
 - `OreError::RandError` is `OreError::Random(vitaminc_random::RandomError)`, and
   `OreError::VariableLength` is new: text or bytes on a fixed-width scheme.
@@ -57,9 +65,14 @@ had.
   `scheme::bit2` and `scheme::bit2_w6`: the only trait they implemented is crate-private
   now.
 - The `chrono` and `decimal` features and the `orderable-bytes` dependency: vitaminc owns
-  the encodings, ported byte for byte.
+  the encodings, ported byte for byte except for timestamps (below).
 - The 8-bit plaintext types (`bool`, `u8`, `i8`), which vitaminc has no target for: 256
   values make an order term a frequency table.
+- `char`, which vitaminc has no target for. A 0.9 `char` ciphertext (legacy or Bit6)
+  still parses and compares against another, but 0.10 cannot make a term to query it.
+- `f32` as a type of its own. vitaminc widens an `f32` exactly to its `F64` target, so a
+  new term encrypts eight bytes where a 0.9 `f32` ciphertext (legacy or Bit6) encrypted four, and
+  the two never compare. Re-encrypt stored `f32` data as `F64`.
 - `vitaminc::Bit6BlockOre`, `vitaminc::ChainedBlockOre`, the legacy adapter and
   `vitaminc::VARIABLE_WIDTH_MARKER` (vitaminc's encodings carry the marker now).
 
