@@ -10,7 +10,8 @@ use std::cmp::Ordering;
 // from the length, so every length must be handled: never panic on
 // untrusted bytes, a ciphertext is `Equal` to itself whenever it is
 // accepted, and the left-to-full comparator agrees with the full-to-full
-// one on a full ciphertext's left prefix.
+// one on a full ciphertext's left prefix. A zero-block pair (an empty left,
+// a nonce-only full) has always been accepted and is checked like any other.
 fn consistent(a: &[u8], b: &[u8]) {
     let full = OreAes128::compare_raw_slices(a, b);
     let body = a.len().saturating_sub(16);

@@ -91,7 +91,12 @@
 //! would refuse every value that ends in a zero byte, but are refused past
 //! the ceiling as text is; a fixed-width target is neither padded nor
 //! bounded, its length being the target's. vitaminc's text and bytes encodings start with a marker byte, so
-//! no plaintext is empty and every term has a keyed block.
+//! no plaintext is empty and every term this version makes has a keyed block.
+//! Version 0.9 encrypted the empty string under [`Padding::None`](crate::scheme::chained::Padding::None) or
+//! `Padding::PowerOfTwo { min_bytes: 0 }` to a term with no blocks: the
+//! header, and a nonce in a full ciphertext. Such terms can be in stored
+//! data, so the comparators still accept a block count of 0: the term is
+//! `Equal` to itself and below every other term under the same policy.
 //!
 //! **Stored rows compare offline.** A full ciphertext carries its
 //! deterministic left half (`xt`, `f`), so anyone holding two stored full
@@ -625,9 +630,9 @@ impl OreAes128Bit6Chained {
     /// Ciphertexts under different salts share no key material, but
     /// nothing on the wire records the salt, so the comparators cannot
     /// refuse a mismatched pair: they return a confident, meaningless
-    /// result, `Equal` included (the unpadded empty string has no blocks
-    /// and compares `Equal` under any salts), so no result confirms that
-    /// two salts match. Keep the salt with the identity of the stored
+    /// result, `Equal` included (a zero-block term, which 0.9 made for the
+    /// empty string, has no key material and compares `Equal` under any
+    /// salts), so no result confirms that two salts match. Keep the salt with the identity of the stored
     /// data, as you keep the key.
     ///
     /// Fails ([`OreError::Random`]) if the OS random number generator could
@@ -1375,7 +1380,8 @@ mod tests {
     }
 
     /// A cross-salt comparison can answer `Equal`: the unpadded empty
-    /// string has no blocks, so there is no key material to differ.
+    /// string (a 0.9 term; vitaminc's marker byte means 0.10 makes none)
+    /// has no blocks, so there is no key material to differ.
     /// The docs therefore promise nothing about cross-salt results.
     #[test]
     fn cross_salt_empty_strings_compare_equal() {

@@ -9,6 +9,8 @@ use std::cmp::Ordering;
 // bytes: they must never panic (the block count is read from the header and
 // drives every slice index), and anything accepted as a full ciphertext is
 // `Equal` to itself, and to its own left prefix through the query comparator.
+// A block count of 0 is a real input, not a vacuous one: 0.9 stored the
+// empty string under `Padding::None` or a zero floor as a header-only term.
 fuzz_target!(|data: &[u8]| {
     let Some(order) = OreAes128Bit6Chained::compare_raw_slices(data, data) else {
         return;
