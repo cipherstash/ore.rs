@@ -456,7 +456,9 @@ impl OreScheme for OreAes128Bit6 {
     /// one: the order of `left`'s plaintext against `full`'s, as
     /// `compare_raw_slices` gives it for two full ciphertexts. A query
     /// needs only the left half; the comparison reads `full`'s left and
-    /// right halves.
+    /// right halves. This does not make stored data safe at rest: a stored
+    /// full ciphertext carries its left half, so two stored rows compare
+    /// offline.
     ///
     /// `None` if either input is malformed (including a full ciphertext
     /// passed as `left`, or a left one as `full`), if their headers or
@@ -896,6 +898,41 @@ mod tests {
         let mut bad = left.clone();
         bad[4] = 64;
         assert_eq!(Ore::compare_left_to_full(&bad, &full), None);
+        // The same on `full`'s side: a bad symbol, truncated, extended.
+        let mut bad = full.clone();
+        bad[4] = 64;
+        assert_eq!(Ore::compare_left_to_full(&left, &bad), None);
+        assert_eq!(
+            Ore::compare_left_to_full(&left, &full[..full.len() - 1]),
+            None
+        );
+        let mut longer = full.clone();
+        longer.push(0);
+        assert_eq!(Ore::compare_left_to_full(&left, &longer), None);
+        let mut longer = left.clone();
+        longer.push(0);
+        assert_eq!(Ore::compare_left_to_full(&longer, &full), None);
+        // Every header byte (version, scheme id, block count) altered on
+        // either side, and on both alike.
+        for i in 0..4 {
+            let (mut l, mut f) = (left.clone(), full.clone());
+            l[i] ^= 0xff;
+            f[i] ^= 0xff;
+            assert_eq!(Ore::compare_left_to_full(&l, &full), None, "left byte {i}");
+            assert_eq!(Ore::compare_left_to_full(&left, &f), None, "full byte {i}");
+            assert_eq!(Ore::compare_left_to_full(&l, &f), None, "both byte {i}");
+        }
+        // A 0-block pair, and one past `MAX_BLOCKS`, each with consistent
+        // headers and lengths.
+        for count in [0, MAX_BLOCKS + 1] {
+            let mut l = vec![0u8; 4 + left_body_len(count)];
+            let mut f = vec![0u8; 4 + full_body_len(count)];
+            let mut header = Vec::new();
+            WIRE.write(count as u16, &mut header);
+            l[..4].copy_from_slice(&header);
+            f[..4].copy_from_slice(&header);
+            assert_eq!(Ore::compare_left_to_full(&l, &f), None, "{count} blocks");
+        }
     }
 
     /// The scheme is shared across threads as it is: one instance, one
