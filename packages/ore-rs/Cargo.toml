@@ -27,6 +27,10 @@ quickcheck = "1.0.3"
 chrono = { version = "0.4.44", default-features = false, features = ["std"] }
 rust_decimal = { version = "1.41", default-features = false, features = ["std"] }
 uuid = { version = "1", default-features = false }
+# vitaminc-ore's typed rows for those three, for the tests only. A
+# dependant that encrypts them turns the features on in its own
+# vitaminc-ore dependency, so one that does not never pulls them in.
+vitaminc-ore = { version = "0.7.0", features = ["chrono", "rust_decimal", "uuid"] }
 # This crate's own `test-support` feature, on for its tests, and the
 # conformance checks vitaminc-ore runs against a real scheme.
 ore-rs = { path = ".", features = ["test-support"] }
@@ -65,7 +69,7 @@ rand = { version = "0.10.1", features = ["chacha"] }
 # vitaminc-ore seals every plaintext and owns the encodings, and the
 # schemes here implement its traits. 0.7 is the release that brings
 # `open` per space and `OrderQuery`.
-vitaminc-ore = { version = "0.7.0", features = ["chrono", "rust_decimal", "uuid"] }
+vitaminc-ore = "0.7.0"
 vitaminc-hmac = "0.7.0"
 vitaminc-prf = "0.7.0"
 vitaminc-protected = "0.7.0"
