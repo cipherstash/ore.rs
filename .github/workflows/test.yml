@@ -57,6 +57,11 @@ jobs:
       - name: clippy (no features)
         run: cargo clippy --no-deps -p ore-rs --all-targets -- -D warnings
 
+      # clww-ore's default features include `postgres-types`, so its
+      # no-features build is a separate one.
+      - name: clippy (clww-ore, no features)
+        run: cargo clippy --no-deps -p clww-ore --all-targets --no-default-features -- -D warnings
+
       - name: format
         run: cargo fmt -- --check
 
@@ -99,5 +104,7 @@ jobs:
       - name: setup rust 1.88
         uses: dtolnay/rust-toolchain@1.88.0
 
+      # ore-rs only: clww-ore's criterion suite runs locally, with
+      # `cargo bench -p clww-ore`, rather than on every PR.
       - name: "Benchmark"
-        run: cargo bench
+        run: cargo bench -p ore-rs

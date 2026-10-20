@@ -52,3 +52,12 @@ rust_decimal_macros = "1.28"
 [[bench]]
 name = "bench"
 harness = false
+
+# The e2e SQL tests bind ciphertexts as Postgres parameters.
+[[test]]
+name = "sql_compare_test"
+required-features = ["postgres-types"]
+
+[[test]]
+name = "sql_compare_lex_test"
+required-features = ["postgres-types"]
