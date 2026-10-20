@@ -59,7 +59,8 @@ pub(crate) fn f64_pt(x: f64) -> OrderPlaintext {
     plaintext(OrderTarget::F64, None, Physical::Float(Float::F64(x)))
 }
 
-/// A date, as days from the Common Era, as vitaminc's `Date` target.
+/// A date, as days since the Unix epoch (1970-01-01), as vitaminc's
+/// `Date` target.
 pub(crate) fn date_pt(days: i32) -> OrderPlaintext {
     plaintext(
         OrderTarget::Date,
