@@ -228,22 +228,41 @@ fn strings_and_bytes() {
     );
 }
 
+/// The digest of fixed byte arrays under the crate-private OPE the `chrono`
+/// and `decimal` encodings go through, unsalted then salted.
+#[cfg(any(feature = "chrono", feature = "decimal"))]
+fn ope_array<A>(values: &[A]) -> String
+where
+    A: crate::impls::byte_array::OpeByteArray + Copy,
+    A::Output: AsRef<[u8]>,
+{
+    let key = key();
+    let mut digest = Digest::new();
+    for salt in [None, Some(SALT)] {
+        for value in values {
+            let ct = value.encrypt_ope_array(&key, salt).expect("encrypts");
+            digest.add(ct.as_ref());
+        }
+    }
+    digest.hex()
+}
+
 /// The fixed byte arrays the `chrono` and `decimal` encodings go through.
 #[cfg(any(feature = "chrono", feature = "decimal"))]
 #[test]
 fn byte_arrays() {
     assert_eq!(
-        ope(&[[0u8; 4], [1, 2, 3, 4]]),
+        ope_array(&[[0u8; 4], [1, 2, 3, 4]]),
         "d34cc406f9be4456666b7796194cbb2d498743569b82b94dc63c0fcc8a634db4",
         "OPE [u8; 4]"
     );
     assert_eq!(
-        ope(&[[0u8; 12], [7; 12]]),
+        ope_array(&[[0u8; 12], [7; 12]]),
         "2f39e3ffd333a8ead867852dab8841e2ea3193bbc8314f24fc10d94eef6f6c35",
         "OPE [u8; 12]"
     );
     assert_eq!(
-        ope(&[[0u8; 14], [9; 14]]),
+        ope_array(&[[0u8; 14], [9; 14]]),
         "5bfe5e87e002b9f8e2289a0d34372172d456044169f9ce12f4077234f979b0a4",
         "OPE [u8; 14]"
     );

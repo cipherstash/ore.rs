@@ -9,6 +9,7 @@
 //! - `NaiveDate` → `OpeClww8V1<33>` (4 plaintext bytes × 8 + 1)
 //! - `DateTime<Utc>` → `OpeClww8V1<97>` (12 plaintext bytes × 8 + 1)
 
+use super::byte_array::OpeByteArray;
 use crate::{ClwwOpeEncrypt, Error, Key, OpeClww8V1};
 use ::chrono::{DateTime, NaiveDate, Utc};
 use orderable_bytes::ToOrderableBytes;
@@ -17,7 +18,7 @@ impl ClwwOpeEncrypt for NaiveDate {
     type Output = OpeClww8V1<{ <Self as ToOrderableBytes>::ENCODED_LEN * 8 + 1 }>;
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
-        self.to_orderable_bytes().encrypt_ope_with_salt(key, salt)
+        self.to_orderable_bytes().encrypt_ope_array(key, salt)
     }
 }
 
@@ -25,7 +26,7 @@ impl ClwwOpeEncrypt for DateTime<Utc> {
     type Output = OpeClww8V1<{ <Self as ToOrderableBytes>::ENCODED_LEN * 8 + 1 }>;
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
-        self.to_orderable_bytes().encrypt_ope_with_salt(key, salt)
+        self.to_orderable_bytes().encrypt_ope_array(key, salt)
     }
 }
 

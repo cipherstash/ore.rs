@@ -55,6 +55,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ore_cllw_8_ope_v1`, `ore_cllw_8_ope_variable_v1`) keep their spelling: they are
   installed in databases and named by EQL, so renaming them would break every
   installation.
+- **No public OPE for `[u8; 4]`, `[u8; 12]` or `[u8; 14]`.** Those `ClwwOpeEncrypt` impls
+  encrypted any bytes of those widths, so bytes a caller encoded by hand (little-endian
+  integers, an unflipped sign bit) encrypted without error and then sorted wrong. They are
+  crate-private now, for the `chrono` and `decimal` impls that go through them, and those
+  impls' output is unchanged. As in cipherstash-suite#2308.
 - **`encrypt_ope_bits` counts its bits.** It took the count as `n` and checked it against
   the iterator only in debug builds, so a wrong `n` gave a ciphertext of another length in
   release. The parameter is gone: `encrypt_ope_bits(bits, key, salt)`.

@@ -6,6 +6,7 @@
 //! See that module for the encoding details, ordering guarantees, and
 //! constant-time properties.
 
+use super::byte_array::OpeByteArray;
 use crate::{ClwwOpeEncrypt, Error, Key, OpeClww8V1};
 use orderable_bytes::ToOrderableBytes;
 use rust_decimal::Decimal;
@@ -14,7 +15,7 @@ impl ClwwOpeEncrypt for Decimal {
     type Output = OpeClww8V1<{ <Self as ToOrderableBytes>::ENCODED_LEN * 8 + 1 }>;
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
-        self.to_orderable_bytes().encrypt_ope_with_salt(key, salt)
+        self.to_orderable_bytes().encrypt_ope_array(key, salt)
     }
 }
 
