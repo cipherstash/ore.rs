@@ -30,7 +30,7 @@ uuid = { version = "1", default-features = false }
 # vitaminc-ore's typed rows for those three, for the tests only. A
 # dependant that encrypts them turns the features on in its own
 # vitaminc-ore dependency, so one that does not never pulls them in.
-vitaminc-ore = { version = "0.7.0", features = ["chrono", "rust_decimal", "uuid"] }
+vitaminc-ore = { version = "0.8.0", features = ["chrono", "rust_decimal", "uuid"] }
 # This crate's own `test-support` feature, on for its tests, and the
 # conformance checks vitaminc-ore runs against a real scheme.
 ore-rs = { path = ".", features = ["test-support"] }
@@ -67,14 +67,14 @@ thiserror = "1.0.38"
 rand = { version = "0.10.1", features = ["chacha"] }
 # vitaminc is the typed front door (docs/plans/2026-10-19-ore-0-10-vitaminc-front-door.md):
 # vitaminc-ore seals every plaintext and owns the encodings, and the
-# schemes here implement its traits. 0.7 is the release that brings
-# `open` per space and `OrderQuery`.
-vitaminc-ore = "0.7.0"
-vitaminc-hmac = "0.7.0"
-vitaminc-prf = "0.7.0"
-vitaminc-protected = "0.7.0"
-vitaminc-random = "0.7.0"
-vitaminc-context = "0.7.0"
+# schemes here implement its traits. 0.7 brought `open` per space and
+# `OrderQuery`; 0.8 adds null placement, which needs nothing of a scheme.
+vitaminc-ore = "0.8.0"
+vitaminc-hmac = "0.8.0"
+vitaminc-prf = "0.8.0"
+vitaminc-protected = "0.8.0"
+vitaminc-random = "0.8.0"
+vitaminc-context = "0.8.0"
 
 # `cfg(kani)` gates the Kani proof harnesses (compiled only by `cargo kani`).
 [lints.rust]

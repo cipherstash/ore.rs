@@ -27,10 +27,10 @@ path = "../ore-rs"
 
 # The sealed plaintexts the schemes take.
 [dependencies.vitaminc-ore]
-version = "0.7.0"
+version = "0.8.0"
 
 [dependencies.vitaminc-protected]
-version = "0.7.0"
+version = "0.8.0"
 
 # Frames must resolve for the suppressions to match by function name, so keep
 # debug info in the optimised build. Optimisation is required: the question is

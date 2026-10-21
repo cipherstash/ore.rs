@@ -22,10 +22,10 @@ path = ".."
 
 # The sealed plaintexts the schemes take.
 [dependencies.vitaminc-ore]
-version = "0.7.0"
+version = "0.8.0"
 
 [dependencies.vitaminc-protected]
-version = "0.7.0"
+version = "0.8.0"
 
 [[bin]]
 name = "chained_parse"

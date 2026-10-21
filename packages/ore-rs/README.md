@@ -30,8 +30,8 @@ Both engines are the v2 schemes from 0.9.0 and their ciphertext formats are froz
 ```toml
 [dependencies]
 ore-rs = "0.10"
-vitaminc-ore = "0.7"
-vitaminc-protected = "0.7"
+vitaminc-ore = "0.8"
+vitaminc-protected = "0.8"
 ```
 
 ore-rs requires Rust 1.88 or later.
@@ -106,7 +106,7 @@ let term = emails.encrypt_checked("alice@example.com")?;
 
 ## Using the engines directly
 
-The engines and the legacy scheme are public, through the `OreScheme` trait, for compatibility tests, the stored-bytes comparators and anyone who holds serialised ciphertexts. They take a sealed plaintext, made with `vitaminc_ore::order`, and nothing else, and they take the key and salt a space would derive for them. The salt is a `vitaminc_context::Context`, so this path also needs `vitaminc-context = "0.7"` alongside the quick start's dependencies.
+The engines and the legacy scheme are public, through the `OreScheme` trait, for compatibility tests, the stored-bytes comparators and anyone who holds serialised ciphertexts. They take a sealed plaintext, made with `vitaminc_ore::order`, and nothing else, and they take the key and salt a space would derive for them. The salt is a `vitaminc_context::Context`, so this path also needs `vitaminc-context = "0.8"` alongside the quick start's dependencies.
 
 ```rust
 use std::cmp::Ordering;
