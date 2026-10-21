@@ -132,6 +132,8 @@ use zeroize::Zeroize;
 mod biterator;
 mod impls;
 #[cfg(test)]
+mod keystream_separation;
+#[cfg(test)]
 mod known_answers;
 mod nibble_iterator;
 

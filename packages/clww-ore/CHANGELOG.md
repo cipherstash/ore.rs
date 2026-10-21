@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **ORE and OPE draw from separate keystreams.** Up to 0.5 the ORE and OPE terms of one
+  value under one key and salt were built on one keystream. Their byte-wise difference is 0
+  or 1 where a plaintext bit is 0 and 127 or 128 where it is 1, so anyone holding both terms
+  of a value could read the value off them without the key. Each scheme now opens the keyed
+  PRF with a tag of its own (`clww-ore/ore/v1` or `clww-ore/ope/v1`, NUL-padded to sixteen
+  bytes), so the two keystreams are independent. Nothing for the caller to choose: every
+  encrypt and decrypt path takes its scheme's tag.
+- **Salts are length-prefixed.** The salt went into the PRF as it is, directly ahead of the
+  plaintext bits, so the keystream for salt `s` after a first bit `b` was the keystream for
+  salt `s ‖ b`, and terms under the two salts were linked. The salt now goes in behind its
+  length as a big-endian `u64`. No salt and an empty salt remain the same domain.
+- **Every ciphertext changes.** ORE and OPE terms written by `cllw-ore` 0.5 or earlier do not
+  compare with, or decrypt under, this release: re-encrypt them. The known-answer digests
+  were recorded again, and `keystream_separation` runs both attacks against the old
+  construction, where they succeed, and against this one, where they fail.
+
 ### Changed
 
 - **Renamed from `cllw-ore` to `clww-ore`**, the authors' initials as they are (Chenette,
@@ -17,8 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `OpeCllw8VariableV1` are `OreClww8V1`, `OreClww8VariableV1`, `OpeClww8V1` and
   `OpeClww8VariableV1`. A caller renames the dependency and the imports; nothing else
   changes.
-- **No ciphertext, SQL or Postgres type changes.** No key derivation or encoding names the
-  crate. The SQL objects in `install.sql` and `uninstall.sql` and the Postgres type names
+- **No SQL or Postgres type changes.** The rename changes no key derivation or encoding.
+  The SQL objects in `install.sql` and `uninstall.sql` and the Postgres type names
   the `postgres-types` feature maps to (`ore_cllw_8_v1`, `ore_cllw_8_variable_v1`,
   `ore_cllw_8_ope_v1`, `ore_cllw_8_ope_variable_v1`) keep their spelling: they are
   installed in databases and named by EQL, so renaming them would break every
@@ -28,8 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   release. The parameter is gone: `encrypt_ope_bits(bits, key, salt)`.
 - **The PRF state and plaintext bits are wiped.** The keyed BLAKE3 hasher, each keystream
   block and `encrypt_ope_bits`' copy of the plaintext bits are zeroized on drop (blake3's
-  `zeroize` feature is on). Ciphertexts are unchanged: known-answer digests of every
-  encrypt path, recorded from 0.5.1, pin them.
+  `zeroize` feature is on). This changes no ciphertext: the known-answer digests of every
+  encrypt path, recorded from 0.5.1, held through it.
 - The e2e SQL tests declare `required-features = ["postgres-types"]`, so a build without
   default features skips them.
 

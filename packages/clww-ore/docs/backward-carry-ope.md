@@ -66,7 +66,8 @@ the current bit:
 
 ```text
 fn encrypt_ore(K, p):              # returns n ciphertext bytes
-    hasher = keyed_hasher(K)       # e.g. BLAKE3::new_keyed(K)
+    hasher = keyed_hasher(K, "ore") # BLAKE3::new_keyed(K), then the
+                                    # scheme tag and the framed salt
     out = []
     for bit in bits_msb_first(p):
         prf = hasher.next_byte()   # PRFᵢ = F_K(b₀ ‖ … ‖ bᵢ₋₁)
@@ -551,13 +552,24 @@ analyses at this block size.
 
 ### 9.1 Leakage relative to CLWW ORE
 
-The OPE ciphertext is a deterministic function of the same PRF chain and
-plaintext bits as the ORE ciphertext — both the backward carry and the
-MSB-bit placement are plaintext-independent public transforms. Everything
-the ORE comparator reveals (ordering, first differing bit position) is
-derivable from the OPE ciphertext via plain lex compare. In the other
-direction, the OPE ciphertext reveals nothing the ORE ciphertext doesn't.
+The OPE ciphertext has the shape of an ORE ciphertext over a PRF chain of
+its own — both the backward carry and the MSB-bit placement are
+plaintext-independent public transforms. Everything the ORE comparator
+reveals (ordering, first differing bit position) is derivable from the OPE
+ciphertext via plain lex compare. In the other direction, the OPE
+ciphertext reveals nothing the ORE ciphertext doesn't.
 **OPE leakage ≤ ORE leakage.**
+
+The chain must be its own. ORE and OPE terms of one value built on one PRF
+chain differ byte by byte by `{0, 1}` where a plaintext bit is 0 and by
+`{127, 128}` where it is 1, so the pair gives the plaintext away without
+the key. clww-ore up to 0.5 had that flaw. From 0.6 the keyed PRF input
+opens with a sixteen-byte tag for the scheme (`clww-ore/ore/v1` or
+`clww-ore/ope/v1`, NUL-padded), then the salt's length as a big-endian
+`u64`, then the salt, then the plaintext bits. The tag keeps the two
+chains independent under one key and salt, and the length keeps one salt
+from being a shifted copy of another (`s` after a 1 bit against
+`s ‖ 0x01`).
 
 ### 9.2 IND-OCPA
 

@@ -63,7 +63,7 @@ macro_rules! impl_clww_ore_uint {
                 key: &Key,
                 salt: Option<&[u8]>,
             ) -> Result<Self::Output, Error> {
-                let mut hasher = super::keyed_hasher(key, salt);
+                let mut hasher = super::keyed_hasher(key, super::Scheme::Ore, salt);
 
                 let mut bytes: [u8; $array_size] = [0; $array_size];
                 Biterator::new(self).enumerate().for_each(|(i, bit)| {
@@ -83,7 +83,7 @@ macro_rules! impl_clww_ore_uint {
                 key: &Key,
                 salt: Option<&[u8]>,
             ) -> Result<Self::Output, Error> {
-                let mut hasher = super::keyed_hasher(key, salt);
+                let mut hasher = super::keyed_hasher(key, super::Scheme::Ore, salt);
 
                 let mut result: $uint_type = 0;
                 for (i, &ciphertext_byte) in self.bytes.iter().enumerate() {

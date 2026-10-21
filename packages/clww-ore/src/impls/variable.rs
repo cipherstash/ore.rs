@@ -107,7 +107,7 @@ impl OreClww8VariableV1 {
             return Err(Error);
         }
 
-        let mut hasher = super::keyed_hasher(key, salt);
+        let mut hasher = super::keyed_hasher(key, super::Scheme::Ore, salt);
 
         let mut result_bytes = Vec::with_capacity(self.bytes.len() / BITS_PER_BYTE);
         let mut current_byte: u8 = 0;

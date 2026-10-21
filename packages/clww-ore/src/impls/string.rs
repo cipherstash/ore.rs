@@ -24,7 +24,7 @@ pub fn encrypt_ore_bits<I>(bits: I, key: &Key, salt: Option<&[u8]>) -> Vec<u8>
 where
     I: IntoIterator<Item = u8>,
 {
-    let mut hasher = crate::impls::keyed_hasher(key, salt);
+    let mut hasher = crate::impls::keyed_hasher(key, crate::impls::Scheme::Ore, salt);
     bits.into_iter().fold(Vec::new(), |mut out, bit| {
         out.push(crate::impls::prf_byte(&hasher).wrapping_add(bit));
         let _ = hasher.update(&[bit]);

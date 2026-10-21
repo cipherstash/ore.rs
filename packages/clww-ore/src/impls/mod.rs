@@ -13,14 +13,47 @@ pub(crate) mod primitives;
 pub(crate) mod string;
 pub(crate) mod variable;
 
-/// The keyed PRF every scheme here draws from: BLAKE3 keyed with `key`, then
-/// the salt if there is one. Wiped on drop, so the key words and chaining
-/// values do not outlive the call.
-pub(crate) fn keyed_hasher(key: &Key, salt: Option<&[u8]>) -> Zeroizing<blake3::Hasher> {
-    let mut hasher = Zeroizing::new(blake3::Hasher::new_keyed(&key.0));
-    if let Some(salt) = salt {
-        let _ = hasher.update(salt);
+/// The scheme a keystream is drawn for. ORE and OPE each read their own
+/// domain of the keyed PRF, so their terms of one value under one key and
+/// salt share no keystream. If they shared one, the byte-wise difference of
+/// the two terms would be `{0, 1}` where a plaintext bit is 0 and
+/// `{127, 128}` where it is 1, and anyone holding both terms would read the
+/// plaintext off them without the key.
+#[derive(Clone, Copy)]
+pub(crate) enum Scheme {
+    Ore,
+    Ope,
+}
+
+impl Scheme {
+    /// The tag that opens the scheme's PRF input. Both tags are the same
+    /// length, so neither scheme's input is a prefix of the other's.
+    const fn tag(self) -> &'static [u8; 16] {
+        match self {
+            Scheme::Ore => b"clww-ore/ore/v1\0",
+            Scheme::Ope => b"clww-ore/ope/v1\0",
+        }
     }
+}
+
+/// The keyed PRF every scheme here draws from: BLAKE3 keyed with `key`, then
+/// the scheme's tag, the salt's length as a big-endian `u64`, and the salt.
+/// The plaintext bits follow, one byte each. The length prefix keeps salts
+/// apart: without it the input for salt `s` after a 1 bit would be the input
+/// for salt `s ‖ 0x01`. No salt and an empty salt are the same domain.
+///
+/// Wiped on drop, so the key words and chaining values do not outlive the
+/// call.
+pub(crate) fn keyed_hasher(
+    key: &Key,
+    scheme: Scheme,
+    salt: Option<&[u8]>,
+) -> Zeroizing<blake3::Hasher> {
+    let salt = salt.unwrap_or_default();
+    let mut hasher = Zeroizing::new(blake3::Hasher::new_keyed(&key.0));
+    let _ = hasher.update(scheme.tag());
+    let _ = hasher.update(&(salt.len() as u64).to_be_bytes());
+    let _ = hasher.update(salt);
     hasher
 }
 
@@ -63,7 +96,7 @@ where
 {
     let bits = bits.into_iter();
     let n = bits.size_hint().0;
-    let mut hasher = keyed_hasher(key, salt);
+    let mut hasher = keyed_hasher(key, Scheme::Ope, salt);
 
     let mut out: Vec<u8> = Vec::with_capacity(n + 1);
     out.push(0);

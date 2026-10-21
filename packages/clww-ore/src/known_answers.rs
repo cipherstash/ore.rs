@@ -3,9 +3,11 @@
 //! Stored ORE and OPE terms are built on this crate's output, and the order
 //! and round-trip tests elsewhere pass for a changed encoding just as well.
 //! These pin the bytes: a BLAKE3 digest of each type's ciphertexts, unsalted
-//! and salted, under a fixed key. The digests were recorded from the code as
-//! it came over from cipherstash-suite (`cllw-ore` 0.5.1), so a change here
-//! is a change to every stored term.
+//! and salted, under a fixed key. A change here is a change to every stored
+//! term. The digests were recorded from the code as it came over from
+//! cipherstash-suite (`cllw-ore` 0.5.1), and recorded again when 0.6.0 gave
+//! ORE and OPE their own keystreams and framed the salt (see
+//! `keystream_separation`), which changed every term.
 
 use crate::{encrypt_ope_bits, encrypt_ore_bits, ClwwOpeEncrypt, ClwwOreEncrypt, Key};
 
@@ -92,53 +94,53 @@ fn integers() {
     let want = [
         (
             "u8",
-            "af9ff6ad05e6b831c5e38d38ca5ff520913114c81db8c04acf44c7e81a822d62",
-            "87b997a0b67285253fac6dc04f09f77a1e9a4c039ae96172e4c0383fd910a8b3",
+            "b8cb2da864ad317a8d1b61b12d285d544e7aad16a9ab5a4a8089720045636440",
+            "1ddc2081671d48a70c2ac86a31d0c59768b2b279d181d41d28a65da17df88734",
         ),
         (
             "u16",
-            "6d43253d5dbb442352673c81fc98f24453a048a014029229aa2603c5d5f6179f",
-            "66f417f7c9ec3aa4cf8a380de1453d10dc4eecf21a7dd1087504d9804e7aa2c7",
+            "fd9b0578e39e8828f0224fe210349b217ed507607400c41dca3f10d3460750c4",
+            "78b320eb24e5ed717cf2d154a2b6dee4af54681392ae2f9bbabd41d7d799c826",
         ),
         (
             "u32",
-            "3d02dd383d3fc11f22f48c658ae09790d45b841965da97a943ab885cfb1fb806",
-            "e19fb6fb74cdd3cf53beaac662e268439e9b43aef74bedf968b090eb262ca509",
+            "eccc0d903767325eb92970b97df890a0bfbb157bab2c414a21307cb5c3a8a99b",
+            "f03c3eb33391f6a97450ec31f664adc4da60587e0835c25f0c250448aa118350",
         ),
         (
             "u64",
-            "cc0cc567b2e9ec2ad514ede4df01ea3632100bc38c5c8ce76bf5603d9cb54900",
-            "ced26531d8bca3763678f0ebf18fae51ada9a03d294a3f1eb76cdd49efcbf683",
+            "9ddcd6fabce8eb5c0c8eee6349a261ac27ab4d8c9f6984f45fb0086f2f5a8598",
+            "a081ad0f0fec5d962e595291a2fda48d06a5281fd33e3e600a5ddc58e24be726",
         ),
         (
             "u128",
-            "11fcbc0540cbee481b5483a48c77d290fbaba29ce9522a62dea851e2f0f57998",
-            "372890ef81a30f8c78ffaa3148f964cd59760cea5199c5ce006c9d2e0136366d",
+            "6c09004da921239f111ee73463621bd24438f61d7bd7580ffeed24534a4f1dcd",
+            "ba0b2be66415e0a2a362f9ad72f34b8e6031dd01d658ce5e7bc0cecf83b74bd1",
         ),
         (
             "i8",
-            "1edeac5e1d41419c634fc0cfb4801a394d3dc2ff2a895a34b5fb85ae7d7615d7",
-            "e63e4e242234156a805b84a47f2385215bfdd0805c2a2c4d9e6e81373424f454",
+            "7c5819e9c06713e2639f6370a7f51d2b808d61edec0e0c208d98673d740028d6",
+            "e5991563eac894d44b150a6528e671f1b6e0b7be9eb8a086dd45f86e0b447003",
         ),
         (
             "i16",
-            "b9854c082964234a64e5a7e2c03723a863835162a554c4b9fed23d25a77fcdb5",
-            "ab45fd61c3dd2e3d48f06be4f594f5fb28cff61020a35064e4006fcacdda1a2b",
+            "d82f1958c6baa7a2d63199209fcf75f7da94fdf5394676b93b57920a416657af",
+            "f3d1d8ee2b113103fe54de71dde3cd0aaa3afa577bb6dab4cd254c1ae34e3095",
         ),
         (
             "i32",
-            "3cb7031ae6ed4a32db4fb4eb323c2ceb540c5c08bcf631bbdd8307c826f6b00e",
-            "aa5a7b520b488dc276c33c3e794105a7656cd659a123aed87a4399ce47a885eb",
+            "ced1616bf6a6866cc9cfb905f84e666e1d0590f5af33774e654919812feb20bb",
+            "96ebe264d5b399eeaa35a5d6c9c8a18b5d5d29f8de73f42fc1484206272af64c",
         ),
         (
             "i64",
-            "4e668760934924ed412c6e13bbffa601e66d051be540eebc5c5e33bbef5b8a95",
-            "6da6c9d5dc3ef9fa7742a7f6a4d3d8d6b0268d96f5dc86253dbba180a51e4033",
+            "ae8afe114f4fbdf64dde4045fc814f09b11b92be167cd8c711f8ce7a85b40b4c",
+            "9377f94f357f7d8665f4a72a7fb8d9cc65d7c5647106d999ce1a425eb1269ea8",
         ),
         (
             "i128",
-            "4aadaf5b4456bb243343262ba4173c7484bf7b5213879eac71817d65ecc649ea",
-            "2fd997ff5b54c161a623156f0a6be61fdfd60c3dbf02587cc0a122ce82486349",
+            "332c82ab41de4d401d2492a7ad3fefa8c9ca90c719b3997e34a811cc3d74faf6",
+            "a6eddd23311e417e332f2dc3bb4b8b43d74734e08eec551ad944ce1c37f2e74d",
         ),
     ];
     for ((name, ore, ope), (want_name, want_ore, want_ope)) in got.iter().zip(want.iter()) {
@@ -170,32 +172,32 @@ fn floats_and_bool() {
     ];
     assert_eq!(
         ore(&f32s),
-        "46bf22263acc51cca40bb079afd16bd335b3806a6f2f59251274abcdefb804ea",
+        "8835cc5e62f4be3116312579ee0485edaa852b20e084479e3e64b545f6d55041",
         "ORE f32"
     );
     assert_eq!(
         ope(&f32s),
-        "9386fddb701348fa99a8015e530beda4527ab852cac30cd8ec6afe4daca1e8a3",
+        "3bc6e9ea8dcfac42401b56344fd2fbd6d0e8a80b9b9ea1309c4ec758d10d309e",
         "OPE f32"
     );
     assert_eq!(
         ore(&f64s),
-        "9f270222c5ce413e38a79223c642972a149f0fc40b440b055021cd1bdc254149",
+        "b4d83e7eab24cec8bfacb37b69b08602ba64e724005d9805aecc5802872b503c",
         "ORE f64"
     );
     assert_eq!(
         ope(&f64s),
-        "382d9e7365b45e77b7930c9cb623361e5dca418fe4a85f4763d5ca47513688d3",
+        "22c2edffdf75c08471b213a8395caad43ffde3b3ebbc4d4f55ae8eac31fbe117",
         "OPE f64"
     );
     assert_eq!(
         ore(&[false, true]),
-        "af26103e68beaf44d406d76734376e04e1faed94d398168c268aa937ac510b17",
+        "8b8d0d0cd04acd410e38a6478cc26b6c2af14b05a6f609e984ce8bdbf5363b22",
         "ORE bool"
     );
     assert_eq!(
         ope(&[false, true]),
-        "30b35e2b1599edf3c525c79498b3d48e57cb8759bf79661f316544090b7b9b5c",
+        "9e642dc3893a953c4f2cb714011f4cb54bff5b2eea77524ce9d0891c53406f44",
         "OPE bool"
     );
 }
@@ -205,23 +207,23 @@ fn strings_and_bytes() {
     let strs = ["", "a", "Alice", "alice", "hello world", "Émile"];
     assert_eq!(
         ore(&strs),
-        "7dec47d2bccd1421d0da28d62a0fea52dc167e5160392cc83a760a8d90f33359",
+        "5e94affec000d89d63f45f2addd4e401e3510779a54e133c4d6a51ff357b8e69",
         "ORE &str"
     );
     assert_eq!(
         ope(&strs),
-        "0b87cc782f68260e5e94ed4bfaaa6137e7e23da037dcedc9177658ec5272e281",
+        "97c8386aec6d90b59c374fc713c03bb044bb52ff413296d5d4621e6d1c88cb72",
         "OPE &str"
     );
     let bytes: [&[u8]; 4] = [&[], &[0], &[1, 2, 3], &[255, 0, 255, 0, 1]];
     assert_eq!(
         ore(&bytes),
-        "82fca3427b6ca013d879c884beaac57e86935bdd0f8d24ed225a1f24bcc89909",
+        "47303e361f959d1e0ea4421b06f6d75a2f2dec23b97c8e3c8b0e0b956a91f0e6",
         "ORE &[u8]"
     );
     assert_eq!(
         ope(&bytes),
-        "b5c2fb4bfdbde0467cadda56dd4555a25c7dd1d0708e19671376bfef297d085e",
+        "0ffb08bf9d472f2577edce7bc56e3f5f43df28dce9ffd1ab7c1fbcc77b2b4ff3",
         "OPE &[u8]"
     );
 }
@@ -232,17 +234,17 @@ fn strings_and_bytes() {
 fn byte_arrays() {
     assert_eq!(
         ope(&[[0u8; 4], [1, 2, 3, 4]]),
-        "32b47ca391fc49261f959fe0ef31e29da642124b1b29c3346bbff2210a404211",
+        "d34cc406f9be4456666b7796194cbb2d498743569b82b94dc63c0fcc8a634db4",
         "OPE [u8; 4]"
     );
     assert_eq!(
         ope(&[[0u8; 12], [7; 12]]),
-        "e62bfbcb8ec1562f6b918d0cc0c59c65779c15586bf8597394cc59a9ceb99460",
+        "2f39e3ffd333a8ead867852dab8841e2ea3193bbc8314f24fc10d94eef6f6c35",
         "OPE [u8; 12]"
     );
     assert_eq!(
         ope(&[[0u8; 14], [9; 14]]),
-        "23c7233a8aaac6a5e53aa451ceb21b10952604180e389ed4dc89de26e81ecc69",
+        "5bfe5e87e002b9f8e2289a0d34372172d456044169f9ce12f4077234f979b0a4",
         "OPE [u8; 14]"
     );
 }
@@ -258,7 +260,7 @@ fn bit_streams() {
     }
     assert_eq!(
         digest.hex(),
-        "d333141fb1a8ee19cbb50157f62da59741f59634197b786133453b8b7b61e912"
+        "d58e2ee9a850583789886a0b54159522589b831be92553e4f513604fbdf5b1ae"
     );
 }
 
@@ -275,7 +277,7 @@ fn decimals() {
     ];
     assert_eq!(
         ope(&values),
-        "6c8447b0742b00f2fdc74d1d1f6070b00e234017b8407c1458571491497949b1",
+        "2f64ba05658e57885cb9924a458b09e3fd6ad4a8d4c879d61a53b4ba5ab71078",
         "OPE Decimal"
     );
 }
@@ -292,7 +294,7 @@ fn dates_and_times() {
     ];
     assert_eq!(
         ope(&dates),
-        "0d4d5e664a7a1bf53225550233db99c8638a1722ae379016faf9ffd919c12e94",
+        "3e1b39d8f9da7d60a195551bc3ce7bde8f035d14e456f80450ebba8b97fe92ba",
         "OPE NaiveDate"
     );
     let times = [
@@ -301,7 +303,7 @@ fn dates_and_times() {
     ];
     assert_eq!(
         ope(&times),
-        "8cca83832115f59edbded43b424c134a2440c0d9f0ad43cd9a4778fcf9965bbd",
+        "8f9f5d6f96ec82a358f98c7b456faef67d41c25ba108492b17d2090a0ced8714",
         "OPE DateTime<Utc>"
     );
 }
