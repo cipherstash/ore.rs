@@ -1,4 +1,4 @@
-use crate::{biterator::Biterator, ClwwOpeEncrypt, ClwwOreDecrypt, ClwwOreEncrypt, Error, Key};
+use crate::{biterator::Biterator, ClwwOpeEncrypt, ClwwOreEncrypt, Error, Key};
 use hex::FromHex;
 #[cfg(feature = "postgres-types")]
 use postgres_types::ToSql;
@@ -52,7 +52,7 @@ impl<const N: usize> TryFrom<&[u8]> for OreClww8V1<N> {
     }
 }
 
-/// Macro to implement ClwwOreEncrypt and ClwwOreDecrypt for unsigned integer types
+/// Macro to implement ClwwOreEncrypt for unsigned integer types
 macro_rules! impl_clww_ore_uint {
     ($uint_type:ty, $array_size:expr) => {
         impl ClwwOreEncrypt for $uint_type {
@@ -74,34 +74,10 @@ macro_rules! impl_clww_ore_uint {
                 Ok(OreClww8V1 { bytes })
             }
         }
-
-        impl ClwwOreDecrypt for OreClww8V1<$array_size> {
-            type Output = $uint_type;
-
-            fn decrypt_with_salt(
-                self,
-                key: &Key,
-                salt: Option<&[u8]>,
-            ) -> Result<Self::Output, Error> {
-                let mut hasher = super::keyed_hasher(key, super::Scheme::Ore, salt);
-
-                let mut result: $uint_type = 0;
-                for (i, &ciphertext_byte) in self.bytes.iter().enumerate() {
-                    // Recover the bit by subtracting ciphertext from PRF block
-                    let bit = ciphertext_byte.wrapping_sub(super::prf_byte(&hasher)) & 0x01;
-                    let _ = hasher.update(&[bit]);
-                    // Set the bit in the result (MSB first)
-                    // Use constant-time operation to avoid timing side-channel
-                    result |= (bit as $uint_type) << ((<$uint_type>::BITS - 1) - i as u32);
-                }
-
-                Ok(result)
-            }
-        }
     };
 }
 
-// Generate encrypt/decrypt implementations for all unsigned integer types
+// Generate encrypt implementations for all unsigned integer types
 impl_clww_ore_uint!(u8, 8);
 impl_clww_ore_uint!(u16, 16);
 impl_clww_ore_uint!(u32, 32);
@@ -136,10 +112,6 @@ impl<const N: usize> Eq for OreClww8V1<N> {}
 /// is shared with the unsigned variant (`OreClww8V1<N>`) — the bytes are
 /// identical and `compare_slice` is byte-level, so a separate type would
 /// add no information.
-///
-/// **Decryption note**: there is no `ClwwOreDecrypt` impl for the signed
-/// case. To round-trip, decrypt to `uN` (using the existing unsigned impl)
-/// and reverse the bias yourself: `(biased ^ (1 << (N-1))) as iN`.
 macro_rules! impl_clww_ore_iint {
     ($iint_type:ty, $uint_type:ty, $array_size:expr) => {
         impl ClwwOreEncrypt for $iint_type {
@@ -185,11 +157,6 @@ impl ClwwOreEncrypt for bool {
 ///
 /// **`−0.0` vs `+0.0`**: distinguished — `−0.0` ciphertext is strictly less
 /// than `+0.0`. IEEE-754 `==` considers them equal; the encoding does not.
-///
-/// **Decryption note**: there is no [`ClwwOreDecrypt`] impl for floats. To
-/// round-trip, decrypt to the matching `uN` and reverse the bias yourself:
-/// `let mask = (bits >> (BITS-1)).wrapping_neg() | (1 << (BITS-1));`
-/// `let f = fN::from_bits(bits ^ mask);`.
 macro_rules! impl_clww_ore_float {
     ($float_type:ty, $uint_type:ty, $array_size:expr) => {
         impl ClwwOreEncrypt for $float_type {
@@ -228,10 +195,9 @@ impl_clww_ore_float!(f64, u64, 64);
 /// PRF choice can flip the comparison. See
 /// `packages/clww-ore/docs/backward-carry-ope.md` for the derivation.
 ///
-/// **Encrypt-only**: this type intentionally does not support decryption.
-/// OPE is used for ordered lookups; if round-trip is required, pair the OPE
-/// ciphertext with an authenticated symmetric cipher (e.g. AES-GCM) over the
-/// same plaintext.
+/// **Encrypt-only**, as every term in this crate is: if round-trip is
+/// required, pair the term with an authenticated symmetric cipher (e.g.
+/// AES-GCM) over the same plaintext.
 ///
 /// The size `N` is the ciphertext byte length: one byte per plaintext bit
 /// plus one reserved leading byte that absorbs the carry.
@@ -308,7 +274,7 @@ impl_clww_ope_uint!(u128);
 
 /// Implements [`ClwwOpeEncrypt`] for signed integer types by sign-flipping to
 /// the matching unsigned width and delegating to the unsigned OPE impl.
-/// The output ciphertext type is shared with the unsigned variant — OPE has
+/// The output ciphertext type is shared with the unsigned variant: there is
 /// no decrypt path, so there is no type ambiguity.
 macro_rules! impl_clww_ope_iint {
     ($iint_type:ty, $uint_type:ty) => {
@@ -512,13 +478,6 @@ mod tests {
                         let x2 = key.encrypt(x).unwrap();
                         TestResult::from_bool(x1.cmp(&x2) == Ordering::Less)
                     }
-
-                    /// Test that decryption correctly recovers the original plaintext value
-                    fn [<prop_decrypt_ $ty>](key: Key, x: $ty) -> bool {
-                        let ciphertext = key.encrypt(x).unwrap();
-                        let decrypted = key.decrypt(ciphertext).unwrap();
-                        x == decrypted
-                    }
                 }
             }
         };
@@ -545,37 +504,6 @@ mod tests {
 
         // Different salts should produce different ciphertexts
         assert_ne!(ct1, ct2);
-    }
-
-    #[test]
-    fn test_u64_wrong_salt_produces_wrong_plaintext() {
-        use crate::{ClwwOreDecrypt, ClwwOreEncrypt};
-
-        let key = Key::from([0; 32]);
-        let value: u64 = 12345;
-        let salt1 = b"domain1";
-        let salt2 = b"domain2";
-
-        let ciphertext = value.encrypt_with_salt(&key, Some(salt1)).unwrap();
-        let decrypted = ciphertext.decrypt_with_salt(&key, Some(salt2)).unwrap();
-
-        // Using wrong salt should produce incorrect plaintext
-        assert_ne!(value, decrypted);
-    }
-
-    #[test]
-    fn test_u128_correct_salt_decrypts_correctly() {
-        use crate::{ClwwOreDecrypt, ClwwOreEncrypt};
-
-        let key = Key::from([0; 32]);
-        let value: u128 = 999999;
-        let salt = b"my-domain";
-
-        let ciphertext = value.encrypt_with_salt(&key, Some(salt)).unwrap();
-        let decrypted = ciphertext.decrypt_with_salt(&key, Some(salt)).unwrap();
-
-        // Using correct salt should decrypt correctly
-        assert_eq!(value, decrypted);
     }
 
     #[test]
@@ -901,7 +829,7 @@ mod tests {
     // signed-aware properties (no `1 << (BITS-1)`, anchors at MIN/-1/0/1/MAX).
 
     macro_rules! quickcheck_iint_type {
-        ($ty:ident, $uty:ident) => {
+        ($ty:ident) => {
             paste! {
                 quickcheck! {
                     /// Determinism: same plaintext encrypts to equal ciphertexts.
@@ -967,25 +895,15 @@ mod tests {
                         let b = key.encrypt(x).unwrap();
                         TestResult::from_bool(a.cmp(&b) == Ordering::Less)
                     }
-
-                    /// Round-trip: decrypt to the unsigned bias and reverse the
-                    /// XOR to recover the signed plaintext. Documents the
-                    /// expected unbias pattern alongside verifying it.
-                    fn [<prop_decrypt_ $ty>](key: Key, x: $ty) -> bool {
-                        let ciphertext = key.encrypt(x).unwrap();
-                        let biased: $uty = key.decrypt(ciphertext).unwrap();
-                        let recovered = (biased ^ (1 << (<$uty>::BITS - 1))) as $ty;
-                        x == recovered
-                    }
                 }
             }
         };
     }
 
-    quickcheck_iint_type!(i16, u16);
-    quickcheck_iint_type!(i32, u32);
-    quickcheck_iint_type!(i64, u64);
-    quickcheck_iint_type!(i128, u128);
+    quickcheck_iint_type!(i16);
+    quickcheck_iint_type!(i32);
+    quickcheck_iint_type!(i64);
+    quickcheck_iint_type!(i128);
 
     macro_rules! ope_quickcheck_iint_type {
         ($ty:ident, $bits:expr) => {
@@ -1054,19 +972,6 @@ mod tests {
         assert!(neg_one < zero);
         assert!(zero < one);
         assert!(one < max);
-    }
-
-    #[test]
-    fn signed_ore_decrypt_i64_anchors() {
-        // Round-trip pattern for signed: decrypt to the unsigned bias, then
-        // reverse the sign-flip XOR to recover the signed plaintext.
-        let key = Key::from([7u8; 32]);
-        for x in [i64::MIN, -1_000_000_000, -1, 0, 1, 1_000_000_000, i64::MAX] {
-            let ct = key.encrypt(x).unwrap();
-            let biased: u64 = key.decrypt(ct).unwrap();
-            let recovered = (biased ^ (1u64 << 63)) as i64;
-            assert_eq!(recovered, x);
-        }
     }
 
     #[test]

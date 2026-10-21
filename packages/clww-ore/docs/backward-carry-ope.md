@@ -602,8 +602,9 @@ bit per ciphertext).
 
 - **Decryption.** The MSB-bit placement and backward carry entangle the
   plaintext bits with adjacent PRF bytes in a way that makes recovering
-  the exact plaintext cost O(N²) in the worst case. We don't support
-  decryption; pair with AES-GCM when round-trip is required.
+  the exact plaintext cost O(N²) in the worst case. The crate supports
+  decryption for neither scheme, ORE included; pair with AES-GCM when
+  round-trip is required.
 - **Homomorphic updates.** Incrementing or adding ciphertexts is not
   supported. The PRF chain is plaintext-dependent, which means any update
   that flips plaintext bits re-randomizes downstream PRFs.

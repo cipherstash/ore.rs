@@ -29,23 +29,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of a value could read the value off them without the key. Each scheme now opens the keyed
   PRF with a tag of its own (`clww-ore/ore/v1` or `clww-ore/ope/v1`, NUL-padded to sixteen
   bytes), so the two keystreams are independent. Nothing for the caller to choose: every
-  encrypt and decrypt path takes its scheme's tag.
+  encrypt path takes its scheme's tag.
 - **Salts are length-prefixed.** The salt went into the PRF as it is, directly ahead of the
   plaintext bits, so the keystream for salt `s` after a first bit `b` was the keystream for
   salt `s ‖ b`, and terms under the two salts were linked. The salt now goes in behind its
   length as a big-endian `u64`. No salt and an empty salt remain the same domain.
 - **Every ciphertext changes.** ORE and OPE terms written by `cllw-ore` 0.5 or earlier do not
-  compare with, or decrypt under, this release: re-encrypt them. The known-answer digests
+  compare with terms of this release: re-encrypt them. The known-answer digests
   were recorded again, and `keystream_separation` runs both attacks against the old
   construction, where they succeed, and against this one, where they fail.
+
+### Removed
+
+- **Decryption.** `Key::decrypt`, the `ClwwOreDecrypt` trait (for `OreClww8V1` and
+  `OreClww8VariableV1`) and `OreClww8VariableV1::decrypt_to_bytes` are gone, so neither
+  scheme can be reversed. An order term is an index term, not a store of the value: a
+  decrypt path made the order key a decryption key for every term, and with no
+  authenticity check a corrupted or forged term decrypted to a wrong plaintext without
+  error. A caller that needs the plaintext back stores it under an authenticated cipher
+  such as AES-GCM alongside the term, as OPE callers already had to. No ciphertext
+  changes.
 
 ### Changed
 
 - **Renamed from `cllw-ore` to `clww-ore`**, the authors' initials as they are (Chenette,
   Lewi, Weis and Wu), and moved from cipherstash-suite to the ore.rs workspace with its
   history. The version starts at 0.6.0. The Rust identifiers follow: `CllwOreEncrypt`,
-  `CllwOreDecrypt` and `CllwOpeEncrypt` are `ClwwOreEncrypt`, `ClwwOreDecrypt` and
-  `ClwwOpeEncrypt`; `OreCllw8V1`, `OreCllw8VariableV1`, `OpeCllw8V1` and
+  and `CllwOpeEncrypt` are `ClwwOreEncrypt` and `ClwwOpeEncrypt` (`CllwOreDecrypt` is
+  gone, see below); `OreCllw8V1`, `OreCllw8VariableV1`, `OpeCllw8V1` and
   `OpeCllw8VariableV1` are `OreClww8V1`, `OreClww8VariableV1`, `OpeClww8V1` and
   `OpeClww8VariableV1`. A caller renames the dependency and the imports; nothing else
   changes.

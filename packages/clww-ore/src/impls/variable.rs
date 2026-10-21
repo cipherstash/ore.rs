@@ -3,16 +3,15 @@
 //! This module owns both:
 //!
 //! - [`OreClww8VariableV1`] — Order-Revealing Encryption ciphertext for
-//!   variable-length plaintexts (strings, byte slices). Supports decryption.
+//!   variable-length plaintexts (strings, byte slices).
 //! - [`OpeClww8VariableV1`] — Order-Preserving Encryption ciphertext for
-//!   variable-length plaintexts (strings, byte slices). Encrypt-only.
+//!   variable-length plaintexts (strings, byte slices).
 //!
-//! The actual encryption logic for `&str` / `&[u8]` lives in
-//! [`super::string`]; this module only defines the ciphertext types,
-//! their construction helpers, comparison/equality semantics, and the
-//! ORE → bytes/UTF-8 decryption path.
+//! Both are encrypt-only. The actual encryption logic for `&str` / `&[u8]`
+//! lives in [`super::string`]; this module only defines the ciphertext
+//! types, their construction helpers and comparison/equality semantics.
 
-use crate::{ClwwOreDecrypt, Error, Key};
+use crate::Error;
 use hex::{FromHex, FromHexError};
 #[cfg(feature = "postgres-types")]
 use postgres_types::ToSql;
@@ -70,9 +69,7 @@ impl TryFrom<&[u8]> for OreClww8VariableV1 {
 impl OreClww8VariableV1 {
     /// The one length rule, shared by [`from_bytes`](Self::from_bytes) and
     /// the `TryFrom` impl: encryption emits one byte per plaintext *bit*, so
-    /// a ciphertext over whole-byte plaintext is a multiple of 8 bytes long
-    /// (the same check [`decrypt_to_bytes`](Self::decrypt_to_bytes) applies
-    /// before decrypting).
+    /// a ciphertext over whole-byte plaintext is a multiple of 8 bytes long.
     fn is_byte_aligned_len(len: usize) -> bool {
         len.is_multiple_of(BITS_PER_BYTE)
     }
@@ -96,52 +93,6 @@ impl OreClww8VariableV1 {
             return Err(Error);
         }
         Ok(Self { bytes })
-    }
-
-    /// Decrypt the ciphertext to raw bytes
-    pub fn decrypt_to_bytes(&self, key: &Key, salt: Option<&[u8]>) -> Result<Vec<u8>, Error> {
-        // Validate that ciphertext length is a multiple of 8
-        // Each plaintext byte requires exactly 8 ciphertext bytes (one per bit)
-        // Use Unspecified error to avoid oracle attacks that could exploit specific error messages
-        if !self.bytes.len().is_multiple_of(BITS_PER_BYTE) {
-            return Err(Error);
-        }
-
-        let mut hasher = super::keyed_hasher(key, super::Scheme::Ore, salt);
-
-        let mut result_bytes = Vec::with_capacity(self.bytes.len() / BITS_PER_BYTE);
-        let mut current_byte: u8 = 0;
-
-        for (i, &ciphertext_byte) in self.bytes.iter().enumerate() {
-            // Recover the bit by subtracting ciphertext from PRF block
-            let bit = ciphertext_byte.wrapping_sub(super::prf_byte(&hasher)) & 0x01;
-            let _ = hasher.update(&[bit]);
-
-            // Build up the byte MSB-first (8 bits per byte)
-            // Use constant-time operation to avoid timing side-channel
-            let bit_position = i % BITS_PER_BYTE;
-            current_byte |= bit << (7 - bit_position);
-
-            // Push the byte when we've collected 8 bits (every 8th iteration)
-            // Check using modulo which is constant-time for the bit position
-            if bit_position == 7 {
-                result_bytes.push(current_byte);
-                current_byte = 0;
-            }
-        }
-
-        Ok(result_bytes)
-    }
-}
-
-impl ClwwOreDecrypt for OreClww8VariableV1 {
-    type Output = String;
-
-    fn decrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
-        let result_bytes = self.decrypt_to_bytes(key, salt)?;
-        // Convert bytes back to string
-        // Use Unspecified error to avoid oracle attacks that could exploit specific error messages
-        String::from_utf8(result_bytes).map_err(|_| Error)
     }
 }
 
@@ -204,10 +155,9 @@ fn compare_lex(a: &OreClww8VariableV1, b: &OreClww8VariableV1) -> Ordering {
 /// PRF choice can flip the comparison. See
 /// `packages/clww-ore/docs/backward-carry-ope.md` for the derivation.
 ///
-/// **Encrypt-only**: this type intentionally does not support decryption.
-/// OPE is used for ordered lookups; if round-trip is required, pair the OPE
-/// ciphertext with an authenticated symmetric cipher (e.g. AES-GCM) over the
-/// same plaintext.
+/// **Encrypt-only**, as every term in this crate is: if round-trip is
+/// required, pair the term with an authenticated symmetric cipher (e.g.
+/// AES-GCM) over the same plaintext.
 ///
 /// The ciphertext length is `8 * plaintext_bytes + 1` (one reserved leading
 /// byte plus one byte per plaintext bit).

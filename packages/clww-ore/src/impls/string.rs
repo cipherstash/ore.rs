@@ -2,7 +2,7 @@
 //! the `orderize_string` collation step.
 //!
 //! The variable-length ciphertext types ([`OreClww8VariableV1`] /
-//! [`OpeClww8VariableV1`]) and their construction/decryption machinery
+//! [`OpeClww8VariableV1`]) and their construction machinery
 //! live in [`super::variable`].
 
 use crate::biterator::{string_biter, Biterator};
@@ -214,8 +214,8 @@ fn orderize_secret(input: &str) -> Zeroizing<String> {
 #[cfg(test)]
 mod tests {
     use super::orderize_string;
-    use crate::impls::variable::{OpeClww8VariableV1, OreClww8VariableV1};
-    use crate::{Error, Key};
+    use crate::impls::variable::OpeClww8VariableV1;
+    use crate::Key;
     use quickcheck::{quickcheck, Arbitrary, Gen};
     use std::cmp::Ordering;
     use zeroize::Zeroizing;
@@ -354,69 +354,6 @@ mod tests {
     }
 
     #[test]
-    fn test_decrypt_string() {
-        let key = Key::from([0; 32]);
-        let plaintext = "hello";
-        let ciphertext = key.encrypt(plaintext).unwrap();
-        let decrypted = key.decrypt(ciphertext).unwrap();
-        assert_eq!(plaintext, decrypted);
-    }
-
-    #[test]
-    fn test_decrypt_string_with_whitespace() {
-        let key = Key::from([0; 32]);
-        let plaintext = "hello world";
-        let ciphertext = key.encrypt(plaintext).unwrap();
-        let decrypted = key.decrypt(ciphertext).unwrap();
-        assert_eq!(plaintext, decrypted);
-    }
-
-    #[test]
-    fn test_decrypt_string_with_numbers() {
-        let key = Key::from([0; 32]);
-        let plaintext = "hello123";
-        let ciphertext = key.encrypt(plaintext).unwrap();
-        let decrypted = key.decrypt(ciphertext).unwrap();
-        assert_eq!(plaintext, decrypted);
-    }
-
-    #[test]
-    fn test_decrypt_empty_string() {
-        let key = Key::from([0; 32]);
-        let plaintext = "";
-        let ciphertext = key.encrypt(plaintext).unwrap();
-        let decrypted = key.decrypt(ciphertext).unwrap();
-        assert_eq!(plaintext, decrypted);
-    }
-
-    #[test]
-    fn test_encrypt_bytes() {
-        let key = Key::from([0; 32]);
-        let data: &[u8] = b"hello";
-        let ciphertext = key.encrypt(data).unwrap();
-        let decrypted_bytes = ciphertext.decrypt_to_bytes(&key, None).unwrap();
-        assert_eq!(data, decrypted_bytes.as_slice());
-    }
-
-    #[test]
-    fn test_encrypt_bytes_with_zeros() {
-        let key = Key::from([0; 32]);
-        let data: &[u8] = &[0, 1, 2, 3, 4];
-        let ciphertext = key.encrypt(data).unwrap();
-        let decrypted_bytes = ciphertext.decrypt_to_bytes(&key, None).unwrap();
-        assert_eq!(data, decrypted_bytes.as_slice());
-    }
-
-    #[test]
-    fn test_encrypt_empty_bytes() {
-        let key = Key::from([0; 32]);
-        let data: &[u8] = &[];
-        let ciphertext = key.encrypt(data).unwrap();
-        let decrypted_bytes = ciphertext.decrypt_to_bytes(&key, None).unwrap();
-        assert_eq!(data, decrypted_bytes.as_slice());
-    }
-
-    #[test]
     fn test_encrypt_bytes_preserves_order() {
         let key = Key::from([0; 32]);
         let data1: &[u8] = b"abc";
@@ -424,15 +361,6 @@ mod tests {
         let ct1 = key.encrypt(data1).unwrap();
         let ct2 = key.encrypt(data2).unwrap();
         assert_eq!(ct1.cmp(&ct2), Ordering::Less);
-    }
-
-    #[test]
-    fn test_encrypt_bytes_binary_data() {
-        let key = Key::from([0; 32]);
-        let data: &[u8] = &[0xFF, 0x00, 0xAB, 0xCD];
-        let ciphertext = key.encrypt(data).unwrap();
-        let decrypted_bytes = ciphertext.decrypt_to_bytes(&key, None).unwrap();
-        assert_eq!(data, decrypted_bytes.as_slice());
     }
 
     // Salt tests for strings
@@ -451,43 +379,6 @@ mod tests {
 
         // Different salts should produce different ciphertexts
         assert_ne!(ct1, ct2);
-    }
-
-    #[test]
-    fn test_string_wrong_salt_fails_or_produces_garbage() {
-        use crate::{ClwwOreDecrypt, ClwwOreEncrypt};
-
-        let key = Key::from([0; 32]);
-        let plaintext = "hello";
-        let salt1 = b"domain1";
-        let salt2 = b"domain2";
-
-        let ciphertext = plaintext.encrypt_with_salt(&key, Some(salt1)).unwrap();
-
-        // Using wrong salt typically produces invalid UTF-8 and fails
-        // or in rare cases produces garbage if it happens to be valid UTF-8
-        match ciphertext.decrypt_with_salt(&key, Some(salt2)) {
-            Err(_) => {} // Expected: invalid UTF-8
-            Ok(decrypted) => {
-                // If it succeeds, it should be garbage (not the original)
-                assert_ne!(plaintext, decrypted);
-            }
-        }
-    }
-
-    #[test]
-    fn test_string_correct_salt_decrypts_correctly() {
-        use crate::{ClwwOreDecrypt, ClwwOreEncrypt};
-
-        let key = Key::from([0; 32]);
-        let plaintext = "hello world";
-        let salt = b"my-domain";
-
-        let ciphertext = plaintext.encrypt_with_salt(&key, Some(salt)).unwrap();
-        let decrypted = ciphertext.decrypt_with_salt(&key, Some(salt)).unwrap();
-
-        // Using correct salt should decrypt correctly
-        assert_eq!(plaintext, decrypted);
     }
 
     #[test]
@@ -551,37 +442,6 @@ mod tests {
     }
 
     #[test]
-    fn test_bytes_wrong_salt_produces_wrong_plaintext() {
-        use crate::ClwwOreEncrypt;
-
-        let key = Key::from([0; 32]);
-        let data: &[u8] = b"hello";
-        let salt1 = b"domain1";
-        let salt2 = b"domain2";
-
-        let ciphertext = data.encrypt_with_salt(&key, Some(salt1)).unwrap();
-        let decrypted = ciphertext.decrypt_to_bytes(&key, Some(salt2)).unwrap();
-
-        // Using wrong salt should produce incorrect plaintext
-        assert_ne!(data, decrypted.as_slice());
-    }
-
-    #[test]
-    fn test_bytes_correct_salt_decrypts_correctly() {
-        use crate::ClwwOreEncrypt;
-
-        let key = Key::from([0; 32]);
-        let data: &[u8] = &[0xFF, 0x00, 0xAB, 0xCD];
-        let salt = b"my-domain";
-
-        let ciphertext = data.encrypt_with_salt(&key, Some(salt)).unwrap();
-        let decrypted = ciphertext.decrypt_to_bytes(&key, Some(salt)).unwrap();
-
-        // Using correct salt should decrypt correctly
-        assert_eq!(data, decrypted.as_slice());
-    }
-
-    #[test]
     fn test_bytes_no_salt_and_none_salt_are_equivalent() {
         use crate::ClwwOreEncrypt;
 
@@ -625,78 +485,6 @@ mod tests {
         assert!(ct1 < ct2);
     }
 
-    // Ciphertext validation tests
-
-    #[test]
-    fn test_malformed_ciphertext_length_not_multiple_of_8() {
-        let key = Key::from([0; 32]);
-
-        // Create a valid ciphertext and then truncate it to an invalid length
-        let data: &[u8] = b"test";
-        let ciphertext = key.encrypt(data).unwrap();
-
-        // Truncate to make length not a multiple of 8
-        // Valid length would be 32 (4 bytes * 8 bits), so try 30
-        let invalid_bytes = ciphertext.as_ref()[..30].to_vec();
-        let malformed_ct = OreClww8VariableV1::from_bytes_unchecked(invalid_bytes);
-
-        // Decryption should fail with Unspecified error
-        let result = malformed_ct.decrypt_to_bytes(&key, None);
-        assert!(matches!(result, Err(Error)));
-    }
-
-    #[test]
-    fn test_malformed_ciphertext_length_7() {
-        let key = Key::from([0; 32]);
-
-        // Create a ciphertext with length 7 (not multiple of 8)
-        let invalid_bytes = vec![0u8; 7];
-        let malformed_ct = OreClww8VariableV1::from_bytes_unchecked(invalid_bytes);
-
-        // Decryption should fail
-        let result = malformed_ct.decrypt_to_bytes(&key, None);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_valid_ciphertext_length_0() {
-        let key = Key::from([0; 32]);
-
-        // Empty ciphertext (length 0) is valid - represents empty input
-        let empty_ct = OreClww8VariableV1::from_bytes_unchecked(vec![]);
-
-        let result = empty_ct.decrypt_to_bytes(&key, None);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Vec::<u8>::new());
-    }
-
-    #[test]
-    fn test_valid_ciphertext_length_8() {
-        let key = Key::from([0; 32]);
-
-        // Length 8 is valid (represents 1 byte)
-        let data: &[u8] = &[42];
-        let ciphertext = key.encrypt(data).unwrap();
-
-        assert_eq!(ciphertext.as_ref().len(), 8);
-
-        let decrypted = ciphertext.decrypt_to_bytes(&key, None).unwrap();
-        assert_eq!(decrypted.as_slice(), data);
-    }
-
-    #[test]
-    fn test_malformed_string_ciphertext_fails_gracefully() {
-        let key = Key::from([0; 32]);
-
-        // Create a malformed ciphertext (length not multiple of 8)
-        let invalid_bytes = vec![0u8; 15];
-        let malformed_ct = OreClww8VariableV1::from_bytes_unchecked(invalid_bytes);
-
-        // String decryption should also fail with the same error
-        let result = key.decrypt(malformed_ct);
-        assert!(result.is_err());
-    }
-
     #[test]
     fn test_orderize_empty() {
         assert!(orderize_string("").is_empty());
@@ -722,16 +510,6 @@ mod tests {
             let y_ord = orderize_string(&y.0);
 
             a.cmp(&b) == x_ord.cmp(&y_ord)
-        }
-
-        /// Test that decryption correctly recovers the original string
-        fn prop_string_decrypt(key: Key, x: SafeString) -> bool {
-            let ciphertext = key.encrypt(x.0.as_str()).unwrap();
-            let decrypted: String = key.decrypt(ciphertext).unwrap();
-
-            // The decrypted value should match the orderized input
-            let expected = orderize_string(&x.0);
-            decrypted == expected
         }
 
         /// Test that empty string encrypts deterministically
@@ -785,11 +563,9 @@ mod tests {
             a.cmp(&b) == x.cmp(&y)
         }
 
-        /// Test that decryption correctly recovers the original bytes
-        fn prop_bytes_decrypt(key: Key, x: Vec<u8>) -> bool {
-            let ciphertext = key.encrypt(x.as_slice()).unwrap();
-            let decrypted = ciphertext.decrypt_to_bytes(&key, None).unwrap();
-            decrypted == x
+        /// Test that the ciphertext is one byte per plaintext bit
+        fn prop_bytes_length(key: Key, x: Vec<u8>) -> bool {
+            key.encrypt(x.as_slice()).unwrap().as_ref().len() == x.len() * 8
         }
 
         /// Test that empty bytes encrypts deterministically

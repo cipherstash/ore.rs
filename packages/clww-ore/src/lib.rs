@@ -60,11 +60,11 @@
 //!
 //! // Compare encrypted values
 //! assert_eq!(ct1.cmp(&ct2), Ordering::Less);
-//!
-//! // Decrypt values
-//! assert_eq!(key.decrypt(ct1).unwrap(), 10u32);
-//! assert_eq!(key.decrypt(ct2).unwrap(), 20u32);
 //! ```
+//!
+//! Encryption is one-way: there is no decryption. A caller that needs the
+//! plaintext back stores it alongside the term under an authenticated cipher
+//! such as AES-GCM.
 //!
 //! ## Supported Types
 //!
@@ -81,7 +81,7 @@
 //! let ct64 = key.encrypt(10000u64).unwrap();
 //! let ct128 = key.encrypt(100000u128).unwrap();
 //!
-//! assert_eq!(key.decrypt(ct32).unwrap(), 1000u32);
+//! assert!(ct16 < key.encrypt(101u16).unwrap());
 //! ```
 //!
 //! ### Strings
@@ -95,7 +95,6 @@
 //! let ct2 = key.encrypt("bob").unwrap();
 //!
 //! assert!(ct1 < ct2);
-//! assert_eq!(key.decrypt(ct1).unwrap(), "alice");
 //! ```
 //!
 //! ### Byte Slices
@@ -107,25 +106,26 @@
 //! let data: &[u8] = &[0xFF, 0x00, 0xAB];
 //!
 //! let ciphertext = key.encrypt(data).unwrap();
-//! let decrypted = ciphertext.decrypt_to_bytes(&key, None).unwrap();
 //!
-//! assert_eq!(data, decrypted.as_slice());
+//! // One ciphertext byte per plaintext bit
+//! assert_eq!(ciphertext.as_ref().len(), data.len() * 8);
 //! ```
 //!
 //! ## Using Salts for Domain Separation
 //!
 //! ```
-//! use clww_ore::{Key, ClwwOreEncrypt, ClwwOreDecrypt};
+//! use clww_ore::{Key, ClwwOreEncrypt};
 //!
 //! let key = Key::from([0u8; 32]);
-//! let salt = b"my-domain";
 //!
-//! // Encrypt with a salt
-//! let ct = 42u32.encrypt_with_salt(&key, Some(salt)).unwrap();
+//! // Terms under different salts are unrelated, so only terms made
+//! // under the same salt compare
+//! let a = 42u32.encrypt_with_salt(&key, Some(b"my-domain")).unwrap();
+//! let b = 43u32.encrypt_with_salt(&key, Some(b"my-domain")).unwrap();
+//! assert!(a < b);
 //!
-//! // Must use the same salt to decrypt
-//! let pt = ct.decrypt_with_salt(&key, Some(salt)).unwrap();
-//! assert_eq!(pt, 42u32);
+//! let other = 42u32.encrypt_with_salt(&key, Some(b"other-domain")).unwrap();
+//! assert_ne!(a, other);
 //! ```
 use thiserror::Error;
 use zeroize::Zeroize;
@@ -144,7 +144,7 @@ pub use impls::variable::{OpeClww8VariableV1, OreClww8VariableV1};
 pub use impls::{encrypt_ope_bits, string::encrypt_ore_bits};
 pub use order_scheme::{ClwwOpe, ClwwOre, KeyLengthError};
 
-/// An error occurred during encryption or decryption.
+/// An error occurred during encryption, or stored bytes were not a term.
 ///
 /// This error is intentionally vague to prevent oracle attacks where
 /// specific error messages could leak information about the plaintext.
@@ -154,8 +154,9 @@ pub struct Error;
 
 /// A 256-bit encryption key for CLWW Order-Revealing Encryption.
 ///
-/// The key is used to encrypt and decrypt values while preserving their ordering.
-/// All encryption operations are deterministic for a given key.
+/// The key is used to encrypt values while preserving their ordering.
+/// All encryption operations are deterministic for a given key, and none can
+/// be reversed.
 ///
 /// The key material is wiped on drop (`ZeroizeOnDrop`), and
 /// [`Key::from`] wipes the by-value copy it is handed. Each layer is
@@ -172,12 +173,8 @@ pub struct Error;
 /// let key = Key::from([0u8; 32]);
 ///
 /// // Encrypt an integer
-/// let plaintext: u32 = 42;
-/// let ciphertext = key.encrypt(plaintext).unwrap();
-///
-/// // Decrypt back to the original value
-/// let decrypted = key.decrypt(ciphertext).unwrap();
-/// assert_eq!(plaintext, decrypted);
+/// let ciphertext = key.encrypt(42u32).unwrap();
+/// assert!(ciphertext < key.encrypt(43u32).unwrap());
 /// ```
 #[derive(zeroize::Zeroize, zeroize::ZeroizeOnDrop)]
 pub struct Key([u8; 32]);
@@ -212,28 +209,6 @@ impl Key {
         input.encrypt(self)
     }
 
-    /// Decrypts a ciphertext back to its original value.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use clww_ore::Key;
-    ///
-    /// let key = Key::from([0u8; 32]);
-    /// let plaintext = 12345u64;
-    ///
-    /// let ciphertext = key.encrypt(plaintext).unwrap();
-    /// let decrypted = key.decrypt(ciphertext).unwrap();
-    ///
-    /// assert_eq!(plaintext, decrypted);
-    /// ```
-    pub fn decrypt<T>(&self, input: T) -> Result<<T as ClwwOreDecrypt>::Output, Error>
-    where
-        T: ClwwOreDecrypt,
-    {
-        input.decrypt(self)
-    }
-
     /// Encrypts a value using CLWW Order-Preserving Encryption.
     ///
     /// Ciphertexts can be compared with standard lexicographic byte ordering, without
@@ -248,9 +223,9 @@ impl Key {
     /// the comparison. See `packages/clww-ore/docs/backward-carry-ope.md` for the
     /// derivation and the naive-OPE / `+1`-variant history.
     ///
-    /// **Encrypt-only**: OPE ciphertexts cannot be decrypted. If round-trip is
-    /// required, pair the OPE ciphertext with a standard authenticated symmetric
-    /// cipher such as AES-GCM encrypting the same plaintext.
+    /// **Encrypt-only**, like ORE: if round-trip is required, pair the OPE
+    /// ciphertext with a standard authenticated symmetric cipher such as
+    /// AES-GCM encrypting the same plaintext.
     ///
     /// # Examples
     ///
@@ -312,35 +287,6 @@ pub trait ClwwOreEncrypt: Sized {
 
     /// Encrypts the value with an optional salt for domain separation.
     fn encrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error>;
-}
-
-/// Trait for types that can be decrypted from CLWW Order-Revealing Encryption.
-///
-/// This trait is implemented for the ciphertext types `OreClww8V1<N>` and `OreClww8VariableV1`.
-///
-/// # Examples
-///
-/// ```
-/// use clww_ore::{Key, ClwwOreDecrypt};
-///
-/// let key = Key::from([0u8; 32]);
-/// let ciphertext = key.encrypt(100u32).unwrap();
-///
-/// // Using the trait directly
-/// let plaintext = ciphertext.decrypt(&key).unwrap();
-/// assert_eq!(plaintext, 100u32);
-/// ```
-pub trait ClwwOreDecrypt: Sized {
-    /// The output type of the decryption operation.
-    type Output;
-
-    /// Decrypts the ciphertext without a salt.
-    fn decrypt(self, key: &Key) -> Result<Self::Output, Error> {
-        self.decrypt_with_salt(key, None)
-    }
-
-    /// Decrypts the ciphertext with an optional salt (must match the salt used during encryption).
-    fn decrypt_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error>;
 }
 
 /// Trait for types that can be encrypted using CLWW Order-Preserving Encryption.
