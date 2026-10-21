@@ -77,7 +77,8 @@ vitaminc-protected = { version = "0.6.1", optional = true }
 
 # `cfg(kani)` gates the Kani proof harnesses (compiled only by `cargo kani`).
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+# `cfg(aes_armv8)` is the `aes` crate's opt-in, read by `hardware_aes()`.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(aes_armv8)'] }
 
 [[bench]]
 name = "oreaes128"

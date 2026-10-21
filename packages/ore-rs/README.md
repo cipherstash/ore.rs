@@ -202,6 +202,16 @@ rustflags = ["--cfg", "aes_armv8"]
 
 Without this flag, the `aes` crate uses software AES, which is about 60 times slower per block on an M1 Max. This repository already sets the flag for its own builds, but projects that depend on ore-rs need to set it themselves. On x86_64, AES-NI is detected at run time and needs no flag.
 
+A `RUSTFLAGS` environment variable (common in CI, Docker and dev shells)
+replaces the `rustflags` in `.cargo/config.toml`, so the flag can disappear
+without any error. To catch that, assert `ore_rs::hardware_aes()` at
+startup or in a test: it returns `true` only when the build will use
+hardware AES on the current CPU.
+
+`aes` 0.9 removes the need for this flag, but 0.9.3, the current release,
+is 2–2.5x slower per AES call on aarch64 than 0.8 with the flag, so ore-rs
+stays on 0.8 for now. See `docs/benchmarks/2026-10-13-aes-0.9-root-cause.md`.
+
 ## Security
 
 The Lewi-Wu Block-ORE scheme has been well studied, but this implementation has not had a public third-party audit. Evaluate it against your threat model before using it in production. The v2 designs and review notes are in [`docs/`](https://github.com/cipherstash/ore.rs/tree/main/docs).
