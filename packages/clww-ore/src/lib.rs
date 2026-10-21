@@ -136,11 +136,13 @@ mod keystream_separation;
 #[cfg(test)]
 mod known_answers;
 mod nibble_iterator;
+mod order_scheme;
 
 pub use impls::primitives::{OpeClww8V1, OreClww8V1};
 pub use impls::string::orderize_string;
 pub use impls::variable::{OpeClww8VariableV1, OreClww8VariableV1};
 pub use impls::{encrypt_ope_bits, string::encrypt_ore_bits};
+pub use order_scheme::{ClwwOpe, ClwwOre, KeyLengthError};
 
 /// An error occurred during encryption or decryption.
 ///

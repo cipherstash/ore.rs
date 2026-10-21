@@ -22,6 +22,16 @@ ordered range queries on encrypted columns we prefer ORE with a custom operator 
 falling back to the OPE variant only when the database doesn't provide those. For everything else
 we use the Block scheme; see [ore.rs](https://ore.rs) for more information.
 
+## Use from vitaminc
+
+`ClwwOre` and `ClwwOpe` implement [`vitaminc-ore`](https://docs.rs/vitaminc-ore)'s
+`OrderScheme` and `OrderQuery`, so a vitaminc order space can encrypt the sealed plaintexts it
+builds here. A caller opens a space with a target and a context
+(`scheme.target(I32).context(("orders", "quantity"))`), and every value is encoded as that
+target. Both schemes take every target at any length through the byte-slice entry points, with
+the salt the space derives (scheme, domain and the caller's context) as the CLWW salt. A CLWW
+term is its own query. vitaminc-ore 0.8 or later.
+
 ## CipherStash
 
 CLWW ORE is brought to you by the team at [CipherStash](https://cipherstash.com).

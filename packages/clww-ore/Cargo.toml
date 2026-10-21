@@ -38,6 +38,11 @@ rust_decimal = { version = "1.28", default-features = false, optional = true }
 subtle = "2.6.1"
 thiserror = "1.0.56"
 unicode-normalization = "0.1.24"
+# vitaminc-ore's `OrderScheme` and `OrderQuery`, implemented by `ClwwOre`
+# and `ClwwOpe`: vitaminc seals every plaintext and owns the encodings, as
+# it does for ore-rs.
+vitaminc-ore = "0.8.0"
+vitaminc-protected = "0.8.0"
 zeroize = { version = "1.8.1", features = ["derive"] }
 
 [dev-dependencies]
@@ -48,6 +53,8 @@ postgres = "0.19.9"
 quickcheck = "1.0.3"
 # Test-only: macros for constructing `Decimal` literals in unit tests.
 rust_decimal_macros = "1.28"
+# The conformance checks vitaminc-ore runs against a real scheme.
+vitaminc-ore = { version = "0.8.0", features = ["test-support"] }
 
 [[bench]]
 name = "bench"

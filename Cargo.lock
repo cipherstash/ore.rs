@@ -327,6 +327,8 @@ dependencies = [
  "subtle",
  "thiserror 1.0.61",
  "unicode-normalization",
+ "vitaminc-ore",
+ "vitaminc-protected",
  "zeroize",
 ]
 

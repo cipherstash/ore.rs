@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`ClwwOre` and `ClwwOpe`, vitaminc order schemes.** Both implement vitaminc-ore 0.8's
+  `OrderScheme`, `OrderQuery` (a CLWW term is its own query, `Query = Term`), `OrderKeyInit`
+  (from a protected 32-byte key, or bytes of runtime length with a `KeyLengthError` for any
+  other length) and `Supports` for every target. The space's salt,
+  `PAE("vitaminc/ore/v1", NAME, domain, context)`, is the CLWW salt, and the names are
+  `clww-ore` and `clww-ope`. `compare` refuses bytes no term has, and ORE pairs whose first
+  difference is not ±1. Ported from cipherstash-suite#2316, which was written against
+  vitaminc 0.6 behind a `vitaminc` feature (published as `cllw-ore` 0.5.2-rc.1). Here
+  vitaminc is a dependency, as it is for ore-rs 0.10, the names follow the crate's, and the
+  marker byte that suite PR put before text and bytes is gone, since vitaminc 0.7 seals them
+  behind its own.
+
 ### Security
 
 - **ORE and OPE draw from separate keystreams.** Up to 0.5 the ORE and OPE terms of one
