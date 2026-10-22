@@ -5,12 +5,10 @@ name = "clww-ore"
 version = "0.6.0"
 description = "Fast, efficient Order-Revealing and Order-Preserving Encryption using CLWW schemes"
 documentation = "https://docs.rs/clww-ore"
-# PolyForm Internal Use, as in cipherstash-suite. Adopting the workspace's
-# licence needs sign-off, and until it has it the crate is not published:
-# release-plz publishes every workspace crate whose version is not on
-# crates.io.
+# PolyForm Internal Use, as `cllw-ore` was, not the workspace's licence:
+# the CipherStash Client Library Licence ties use to keys from a CipherStash
+# key server.
 license-file = "LICENSE"
-publish = false
 edition = "2021"
 # vitaminc's floor.
 rust-version = "1.88"

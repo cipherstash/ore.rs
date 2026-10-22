@@ -11,7 +11,7 @@ Rust libraries for Order-Revealing Encryption (ORE), used in the [CipherStash](h
 | Crate | Description |
 |-------|-------------|
 | [`ore-rs`](packages/ore-rs) | Order-revealing encryption for numbers and strings, based on [Lewi and Wu (2016)](https://eprint.iacr.org/2016/612.pdf) |
-| [`clww-ore`](packages/clww-ore) | Order-revealing and order-preserving encryption from [Chenette, Lewi, Weis and Wu (2015)](https://eprint.iacr.org/2015/1125.pdf): faster and smaller than `ore-rs`, with more leakage. Formerly `cllw-ore`; not yet published under this name |
+| [`clww-ore`](packages/clww-ore) | Order-revealing and order-preserving encryption from [Chenette, Lewi, Weis and Wu (2015)](https://eprint.iacr.org/2015/1125.pdf): faster and smaller than `ore-rs`, with more leakage. Formerly `cllw-ore` |
 
 See each crate's README for usage, supported types, and feature flags.
 
@@ -30,4 +30,4 @@ Please review our [security policy](SECURITY.md) before reporting vulnerabilitie
 
 Copyright &copy; 2024-2026 CipherStash, Inc. All rights reserved.
 
-Use of this software is governed by the [CipherStash Client Library Licence Agreement](LICENCE). `clww-ore` is under its own licence, [PolyForm Internal Use](packages/clww-ore/LICENSE), for now.
+Use of this software is governed by the [CipherStash Client Library Licence Agreement](LICENCE). `clww-ore` is under its own licence, [PolyForm Internal Use](packages/clww-ore/LICENSE).
