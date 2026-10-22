@@ -44,10 +44,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`encrypt_ope_bits` counts its bits.** It took the count as `n` and checked it against
   the iterator only in debug builds, so a wrong `n` gave a ciphertext of another length in
   release. The parameter is gone: `encrypt_ope_bits(bits, key, salt)`.
+- **`encrypt_ope_bits` and `encrypt_ore_bits` refuse a byte that is not a bit.** Each
+  takes one byte per plaintext bit, and any byte other than 0 or 1 gave terms that sort
+  wrong, with no error. Both now return `Result<Vec<u8>, Error>`, and `Err` for such a
+  stream. A valid stream encrypts as before.
 - **The PRF state and plaintext bits are wiped.** The keyed BLAKE3 hasher, each keystream
-  block and `encrypt_ope_bits`' copy of the plaintext bits are zeroized on drop (blake3's
-  `zeroize` feature is on). This changes no ciphertext: the known-answer digests of every
-  encrypt path, recorded from 0.5.1, held through it.
+  block, and `encrypt_ope_bits`' copy of the plaintext bits and its keystream before the
+  carry pass are zeroized on drop (blake3's `zeroize` feature is on). Both buffers grow by
+  moving to a new one and wiping the old, so no buffer they outgrow is freed with its
+  contents. This changes no ciphertext: the known-answer digests of every encrypt path,
+  recorded from 0.5.1, held through it.
 - The e2e SQL tests declare `required-features = ["postgres-types"]`, so a build without
   default features skips them.
 

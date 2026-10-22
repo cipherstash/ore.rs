@@ -68,6 +68,80 @@ mod unseparated {
     }
 }
 
+/// The construction since 0.6, rebuilt from the layout `keyed_hasher`
+/// documents rather than from its code: BLAKE3 keyed with the key, then a
+/// 16-byte scheme tag, the salt's length as a big-endian `u64`, and the salt.
+mod documented {
+    use super::KEY;
+
+    fn hasher(tag: &[u8; 16], salt: &[u8]) -> blake3::Hasher {
+        let mut hasher = blake3::Hasher::new_keyed(&KEY);
+        hasher.update(tag);
+        hasher.update(&(salt.len() as u64).to_be_bytes());
+        hasher.update(salt);
+        hasher
+    }
+
+    fn prf_byte(hasher: &blake3::Hasher) -> u8 {
+        let mut buf = [0u8; 16];
+        hasher.finalize_xof().fill(&mut buf);
+        buf[15]
+    }
+
+    pub(super) fn ore(bits: &[u8], salt: &[u8]) -> Vec<u8> {
+        let mut hasher = hasher(b"clww-ore/ore/v1\0", salt);
+        bits.iter()
+            .map(|&bit| {
+                let byte = prf_byte(&hasher).wrapping_add(bit);
+                hasher.update(&[bit]);
+                byte
+            })
+            .collect()
+    }
+
+    pub(super) fn ope(bits: &[u8], salt: &[u8]) -> Vec<u8> {
+        let mut hasher = hasher(b"clww-ore/ope/v1\0", salt);
+        let mut out = vec![0];
+        for &bit in bits {
+            out.push(prf_byte(&hasher));
+            hasher.update(&[bit]);
+        }
+        let mut carry = 0u16;
+        for (byte, &bit) in out[1..].iter_mut().rev().zip(bits.iter().rev()) {
+            let sum = *byte as u16 + ((bit as u16) << 7) + carry;
+            *byte = sum as u8;
+            carry = sum >> 8;
+        }
+        out[0] = carry as u8;
+        out
+    }
+}
+
+/// The keystream is the documented one: the known-answer digests were
+/// recorded from the code, so they would hold a wrong tag or a little-endian
+/// length too.
+#[test]
+fn the_keystream_follows_the_documented_layout() {
+    let key = key();
+    for salt in [&[][..], SALT, &[0xab; 300][..]] {
+        for value in values().into_iter().take(8) {
+            let bits = bits_of(value);
+            assert_eq!(
+                encrypt_ore_bits(bits.iter().copied(), &key, Some(salt)).unwrap(),
+                documented::ore(&bits, salt),
+                "ORE, salt of {} bytes",
+                salt.len()
+            );
+            assert_eq!(
+                encrypt_ope_bits(bits.iter().copied(), &key, Some(salt)).unwrap(),
+                documented::ope(&bits, salt),
+                "OPE, salt of {} bytes",
+                salt.len()
+            );
+        }
+    }
+}
+
 /// Attack 1: the plaintext bits read off an ORE term and an OPE term of one
 /// value, assuming they share a keystream. `ope` has its leading carry byte.
 fn read_bits(ore: &[u8], ope: &[u8]) -> Vec<u8> {
@@ -142,8 +216,8 @@ fn attack_1_fails_on_bit_streams() {
     for salt in [None, Some(SALT)] {
         let (bits, read) = attack_1(|v| {
             (
-                encrypt_ore_bits(bits_of(v), &key, salt),
-                encrypt_ope_bits(bits_of(v), &key, salt),
+                encrypt_ore_bits(bits_of(v), &key, salt).unwrap(),
+                encrypt_ope_bits(bits_of(v), &key, salt).unwrap(),
             )
         });
         let (fair, rate) = coin_toss(&bits, &read);
@@ -250,12 +324,12 @@ fn attack_2_fails() {
     for (salt, bit) in SHIFTS {
         let bits = shifted(bit);
         let longer = appended(salt, bit);
-        let ore = encrypt_ore_bits(bits.iter().copied(), &key, Some(salt));
-        let ore_longer = encrypt_ore_bits(bits[1..].iter().copied(), &key, Some(&longer));
+        let ore = encrypt_ore_bits(bits.iter().copied(), &key, Some(salt)).unwrap();
+        let ore_longer = encrypt_ore_bits(bits[1..].iter().copied(), &key, Some(&longer)).unwrap();
         assert_ne!(ore[1..], ore_longer[..], "ORE, salt {salt:?} then {bit}");
         let zeros = then_zeros(bit);
-        let ope = encrypt_ope_bits(zeros.iter().copied(), &key, Some(salt));
-        let ope_longer = encrypt_ope_bits(zeros[1..].iter().copied(), &key, Some(&longer));
+        let ope = encrypt_ope_bits(zeros.iter().copied(), &key, Some(salt)).unwrap();
+        let ope_longer = encrypt_ope_bits(zeros[1..].iter().copied(), &key, Some(&longer)).unwrap();
         assert_ne!(ope[2..], ope_longer[1..], "OPE, salt {salt:?} then {bit}");
     }
 }
@@ -265,11 +339,11 @@ fn no_salt_and_an_empty_salt_are_one_domain() {
     let key = key();
     let bits = bits_of(42);
     assert_eq!(
-        encrypt_ore_bits(bits.iter().copied(), &key, None),
-        encrypt_ore_bits(bits.iter().copied(), &key, Some(&[]))
+        encrypt_ore_bits(bits.iter().copied(), &key, None).unwrap(),
+        encrypt_ore_bits(bits.iter().copied(), &key, Some(&[])).unwrap()
     );
     assert_eq!(
-        encrypt_ope_bits(bits.iter().copied(), &key, None),
-        encrypt_ope_bits(bits.iter().copied(), &key, Some(&[]))
+        encrypt_ope_bits(bits.iter().copied(), &key, None).unwrap(),
+        encrypt_ope_bits(bits.iter().copied(), &key, Some(&[])).unwrap()
     );
 }

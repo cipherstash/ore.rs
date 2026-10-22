@@ -20,16 +20,29 @@ use zeroize::Zeroizing;
 /// the number of plaintext bits — one byte per bit — and bytes compare under
 /// clww-ore's ORE comparison (first-differing-byte `y + 1 == x`), **not** plain
 /// lex order. See [`OreClww8VariableV1`].
-pub fn encrypt_ore_bits<I>(bits: I, key: &Key, salt: Option<&[u8]>) -> Vec<u8>
+///
+/// # Errors
+///
+/// [`Error`](struct@crate::Error) if any byte of `bits` is not `0` or `1`: the comparison reads a
+/// difference of exactly one as the order, so any other byte gives terms that
+/// sort wrong. The whole stream is read first, so the error does not tell
+/// where the bad byte was.
+pub fn encrypt_ore_bits<I>(bits: I, key: &Key, salt: Option<&[u8]>) -> Result<Vec<u8>, Error>
 where
     I: IntoIterator<Item = u8>,
 {
     let mut hasher = crate::impls::keyed_hasher(key, crate::impls::Scheme::Ore, salt);
-    bits.into_iter().fold(Vec::new(), |mut out, bit| {
+    let mut invalid = 0u8;
+    let out = bits.into_iter().fold(Vec::new(), |mut out, bit| {
+        invalid |= bit >> 1;
         out.push(crate::impls::prf_byte(&hasher).wrapping_add(bit));
         let _ = hasher.update(&[bit]);
         out
-    })
+    });
+    if invalid != 0 {
+        return Err(Error);
+    }
+    Ok(out)
 }
 
 impl ClwwOreEncrypt for &[u8] {
@@ -39,7 +52,7 @@ impl ClwwOreEncrypt for &[u8] {
         let bits = self.iter().flat_map(|&byte| Biterator::new(byte));
         Ok(OreClww8VariableV1::from_bytes_unchecked(encrypt_ore_bits(
             bits, key, salt,
-        )))
+        )?))
     }
 }
 
@@ -52,7 +65,7 @@ impl ClwwOreEncrypt for &str {
             string_biter(&string),
             key,
             salt,
-        )))
+        )?))
     }
 }
 
@@ -61,7 +74,7 @@ impl ClwwOpeEncrypt for &str {
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         let normalized = orderize_secret(self);
-        let bytes = encrypt_ope_bits(string_biter(&normalized), key, salt);
+        let bytes = encrypt_ope_bits(string_biter(&normalized), key, salt)?;
         Ok(OpeClww8VariableV1::from_bytes_unchecked(bytes))
     }
 }
@@ -71,7 +84,7 @@ impl ClwwOpeEncrypt for &[u8] {
 
     fn encrypt_ope_with_salt(self, key: &Key, salt: Option<&[u8]>) -> Result<Self::Output, Error> {
         let bits = self.iter().flat_map(|&byte| Biterator::new(byte));
-        let bytes = encrypt_ope_bits(bits, key, salt);
+        let bytes = encrypt_ope_bits(bits, key, salt)?;
         Ok(OpeClww8VariableV1::from_bytes_unchecked(bytes))
     }
 }

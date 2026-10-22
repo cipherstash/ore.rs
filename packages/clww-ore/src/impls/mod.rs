@@ -1,4 +1,4 @@
-use crate::Key;
+use crate::{Error, Key};
 use std::cmp::Ordering;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 use zeroize::Zeroizing;
@@ -90,22 +90,35 @@ pub(crate) fn prf_byte(hasher: &blake3::Hasher) -> u8 {
 /// `bits` is an iterator of one byte per plaintext bit, each `0` or `1`. The
 /// MSB-first byte form of an integer or string is just one convenient producer
 /// — callers may freely pack their own tagged bit streams.
-pub fn encrypt_ope_bits<I>(bits: I, key: &Key, salt: Option<&[u8]>) -> Vec<u8>
+///
+/// # Errors
+///
+/// [`Error`](struct@crate::Error) if any byte of `bits` is not `0` or `1`. Such a byte would carry
+/// more than one into the byte above it, and the terms would no longer sort as
+/// their plaintexts. The whole stream is read first, so the error does not
+/// tell where the bad byte was.
+pub fn encrypt_ope_bits<I>(bits: I, key: &Key, salt: Option<&[u8]>) -> Result<Vec<u8>, Error>
 where
     I: IntoIterator<Item = u8>,
 {
-    let bits = bits.into_iter();
-    let n = bits.size_hint().0;
     let mut hasher = keyed_hasher(key, Scheme::Ope, salt);
 
-    let mut out: Vec<u8> = Vec::with_capacity(n + 1);
-    out.push(0);
-    // One byte per plaintext bit, kept for the carry pass: wiped on drop.
-    let mut plain_bits: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::with_capacity(n));
+    // Both buffers hold secrets until the carry pass: `out` the bare
+    // keystream, `plain_bits` one byte per plaintext bit. Each is wiped on
+    // drop, and grows through `push_secret`, so no buffer it outgrows is
+    // freed with its contents.
+    let mut out: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::new());
+    let mut plain_bits: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::new());
+    let mut invalid = 0u8;
+    push_secret(&mut out, 0);
     for bit in bits {
-        out.push(prf_byte(&hasher));
-        plain_bits.push(bit);
+        invalid |= bit >> 1;
+        push_secret(&mut out, prf_byte(&hasher));
+        push_secret(&mut plain_bits, bit);
         let _ = hasher.update(&[bit]);
+    }
+    if invalid != 0 {
+        return Err(Error);
     }
 
     // Each sum is at most 255 + 128 + 1, so the carry out of it is 0 or 1.
@@ -119,7 +132,21 @@ where
     }
     out[0] = carry as u8;
 
-    out
+    // The carry pass is done, so `out` is the ciphertext: hand over its
+    // buffer, not a copy.
+    Ok(std::mem::take(&mut *out))
+}
+
+/// Push `byte` onto a buffer of secrets. When the buffer is full it moves to
+/// one twice the size, and the old one is wiped as it drops; `Vec::push`
+/// would free it as it is.
+pub(crate) fn push_secret(buf: &mut Zeroizing<Vec<u8>>, byte: u8) {
+    if buf.len() == buf.capacity() {
+        let mut grown = Zeroizing::new(Vec::with_capacity((buf.capacity() * 2).max(64)));
+        grown.extend_from_slice(buf);
+        *buf = grown;
+    }
+    buf.push(byte);
 }
 
 /// Compare two CLWW ORE ciphertexts in constant time, given as their

@@ -399,4 +399,28 @@ mod tests {
             write!(f, "{:?}", self.0)
         }
     }
+
+    /// A stream with a byte that is not a bit is refused, wherever the byte
+    /// sits; the bits alone encrypt as they always have.
+    #[test]
+    fn bit_streams_refuse_bytes_that_are_not_bits() {
+        let key = Key::from([3; 32]);
+        let bits = [1u8, 0, 1, 1, 0, 0, 1, 0];
+        for (at, bad) in [(0, 2u8), (3, 0x80), (7, 0xff)] {
+            let mut stream = bits;
+            stream[at] = bad;
+            assert!(
+                encrypt_ope_bits(stream, &key, None).is_err(),
+                "OPE {bad} at {at}"
+            );
+            assert!(
+                encrypt_ore_bits(stream, &key, None).is_err(),
+                "ORE {bad} at {at}"
+            );
+        }
+        let ope = encrypt_ope_bits(bits, &key, None).unwrap();
+        let ore = encrypt_ore_bits(bits, &key, None).unwrap();
+        assert_eq!(ope, 0xb2u8.encrypt_ope(&key).unwrap().as_ref());
+        assert_eq!(ore, 0xb2u8.encrypt(&key).unwrap().as_ref());
+    }
 }

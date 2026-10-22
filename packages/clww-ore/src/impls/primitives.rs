@@ -291,7 +291,7 @@ macro_rules! impl_clww_ope_uint {
                 key: &Key,
                 salt: Option<&[u8]>,
             ) -> Result<Self::Output, Error> {
-                let vec = super::encrypt_ope_bits(Biterator::new(self), key, salt);
+                let vec = super::encrypt_ope_bits(Biterator::new(self), key, salt)?;
                 let mut bytes = [0u8; { <$uint_type>::BITS as usize + 1 }];
                 bytes.copy_from_slice(&vec);
                 Ok(OpeClww8V1 { bytes })

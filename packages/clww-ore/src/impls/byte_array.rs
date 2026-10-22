@@ -34,7 +34,7 @@ macro_rules! impl_clww_ope_byte_array {
                 salt: Option<&[u8]>,
             ) -> Result<Self::Output, Error> {
                 let bits = self.into_iter().flat_map(Biterator::new);
-                let vec = encrypt_ope_bits(bits, key, salt);
+                let vec = encrypt_ope_bits(bits, key, salt)?;
                 let mut bytes = [0u8; { $n * 8 + 1 }];
                 bytes.copy_from_slice(&vec);
                 Ok(OpeClww8V1::from_bytes(bytes))
