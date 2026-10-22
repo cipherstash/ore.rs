@@ -42,8 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - **Decryption.** `Key::decrypt`, the `ClwwOreDecrypt` trait (for `OreClww8V1` and
-  `OreClww8VariableV1`) and `OreClww8VariableV1::decrypt_to_bytes` are gone, so neither
-  scheme can be reversed. An order term is an index term, not a store of the value: a
+  `OreClww8VariableV1`) and `OreClww8VariableV1::decrypt_to_bytes` are gone, so the
+  crate has no decryption API. The key is still a decryption key: whoever holds it can
+  recompute the keystream and read any term's plaintext, so protect it as one. An order term is an index term, not a store of the value: a
   decrypt path made the order key a decryption key for every term, and with no
   authenticity check a corrupted or forged term decrypted to a wrong plaintext without
   error. A caller that needs the plaintext back stores it under an authenticated cipher

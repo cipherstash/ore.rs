@@ -19,30 +19,12 @@
 //! A CLWW term is its own query, so [`OrderQuery`] is implemented with
 //! `Query = Term`.
 //!
-//! # Examples
-//!
-//! ```
-//! use std::cmp::Ordering;
-//! use clww_ore::{ClwwOpe, ClwwOre};
-//! use vitaminc_ore::target::{Text, I32};
-//! use vitaminc_ore::{OrderEncrypt, OrderKeyInit};
-//! use vitaminc_protected::Protected;
-//! # let key_bytes = [7u8; 32];
-//!
-//! // ORE: terms compare with the scheme's comparator.
-//! let ore = ClwwOre::new(Protected::new(key_bytes));
-//! let names = ore.target(Text).context(("users", "name"));
-//! let (a, b) = (names.encrypt_checked("apple")?, names.encrypt_checked("Banana")?);
-//! assert_eq!(names.compare(&a, &b), Some(Ordering::Less));
-//!
-//! // OPE: terms compare in plain byte order, so the database needs no
-//! // comparator of its own.
-//! let ope = ClwwOpe::new(Protected::new(key_bytes));
-//! let quantity = ope.target(I32).context(("orders", "quantity"));
-//! let (a, b) = (quantity.encrypt(41i8)?, quantity.encrypt(42i16)?);
-//! assert!(a.as_ref() < b.as_ref());
-//! # Ok::<(), Box<dyn std::error::Error>>(())
-//! ```
+//! A `Text` or `Bytes` term shows the exact length of its value: there is no
+//! padding and no length limit. An ORE term is 8 bytes per plaintext byte
+//! and an OPE term the same plus 1 carry byte, so a very large value gives a
+//! term 8 times its size. `ore_rs::BlockOre`, behind the same vitaminc API,
+//! pads text and refuses text over its maximum; a caller who needs a limit
+//! here checks the value before it encrypts it.
 
 use std::cmp::Ordering;
 
@@ -96,6 +78,34 @@ fn is_ope_term(bytes: &[u8]) -> bool {
 /// CLWW order-revealing encryption as a vitaminc order scheme: one
 /// ciphertext byte per plaintext bit, compared by the scheme's own
 /// comparator, never byte by byte.
+///
+/// A `Text` or `Bytes` term shows the exact length of its value, with no
+/// padding and no length limit (see the [crate docs](crate)).
+///
+/// # Examples
+///
+/// ```
+/// use std::cmp::Ordering;
+/// use clww_ore::{ClwwOpe, ClwwOre};
+/// use vitaminc_ore::target::{Text, I32};
+/// use vitaminc_ore::{OrderEncrypt, OrderKeyInit};
+/// use vitaminc_protected::Protected;
+/// # let key_bytes = [7u8; 32];
+///
+/// // ORE: terms compare with the scheme's comparator.
+/// let ore = ClwwOre::new(Protected::new(key_bytes));
+/// let names = ore.target(Text).context(("users", "name"));
+/// let (a, b) = (names.encrypt_checked("apple")?, names.encrypt_checked("Banana")?);
+/// assert_eq!(names.compare(&a, &b), Some(Ordering::Less));
+///
+/// // OPE: terms compare in plain byte order, so the database needs no
+/// // comparator of its own.
+/// let ope = ClwwOpe::new(Protected::new(key_bytes));
+/// let quantity = ope.target(I32).context(("orders", "quantity"));
+/// let (a, b) = (quantity.encrypt(41i8)?, quantity.encrypt(42i16)?);
+/// assert!(a.as_ref() < b.as_ref());
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 pub struct ClwwOre {
     key: Key,
 }
@@ -183,6 +193,9 @@ impl OrderKeyInit for ClwwOre {
 /// CLWW order-preserving encryption as a vitaminc order scheme: the terms
 /// compare in plain byte order, so a database needs no comparator of its
 /// own. Encrypt-only.
+///
+/// A `Text` or `Bytes` term shows the exact length of its value, with no
+/// padding and no length limit (see [`ClwwOre`] for an example).
 pub struct ClwwOpe {
     key: Key,
 }
@@ -455,7 +468,66 @@ mod tests {
             .err()
             .unwrap();
         assert_eq!(short.0, 16);
-        assert!(ClwwOpe::try_from_bytes(Protected::new(vec![7; 33])).is_err());
+    }
+
+    #[test]
+    fn an_ope_scheme_is_keyed_from_exactly_thirty_two_bytes() {
+        let from_bytes = ClwwOpe::try_from_bytes(Protected::new(vec![7; 32])).unwrap();
+        let term = |s: &ClwwOpe| s.target(I32).encrypt(1i32).unwrap();
+        assert_eq!(term(&from_bytes), term(&ClwwOpe::new(key())));
+        for len in [0, 31, 33] {
+            let refused = ClwwOpe::try_from_bytes(Protected::new(vec![7; len]))
+                .err()
+                .unwrap();
+            assert_eq!(refused.0, len);
+        }
+    }
+
+    /// Terms made through a vitaminc space under a fixed key and context.
+    /// Every stored term depends on the scheme's `NAME`, vitaminc's salt
+    /// label and its encodings (the marker byte, text folding, the null
+    /// policy), so a change to any of them fails here.
+    const ORE_I32: &str = "a0ba9bc03546e23843a84858a147fccafae65d9bc5daa24c09bbedbd78189948";
+    const ORE_TEXT: &str = "edf1f47c1896380675fb75b5d2a059bfac833f3cedaab5dd7e8a5a4eee05bc8ff9303f75c02514b2a3705c0116702e11";
+    const OPE_I32: &str = "0102a4549fd1e81a592023d178662df56730d15c970fdc4110870db086de19db1a";
+    const OPE_TEXT: &str = "001a24a73753b3ce1355f3a5236070172b416b8f42046920c1f4dffb2cd51d17e43b894fd12e8a90a174da169e8b7aee69";
+    const OPE_I32_NULLS: &str =
+        "008eca5455932e0ac4f238110aa3052544b44a62cf304457709cc8f5f28e03dc4a";
+
+    #[test]
+    fn terms_under_a_fixed_key_are_pinned() {
+        let (ore, ope) = (ClwwOre::new(key()), ClwwOpe::new(key()));
+        let ore_int = ore.target(I32).context(("t", "c")).encrypt(42i32).unwrap();
+        let ore_text = ore
+            .target(Text)
+            .context(("t", "c"))
+            .encrypt_checked("École")
+            .unwrap();
+        let ope_int = ope.target(I32).context(("t", "c")).encrypt(42i32).unwrap();
+        let ope_text = ope
+            .target(Text)
+            .context(("t", "c"))
+            .encrypt_checked("École")
+            .unwrap();
+        let ope_nulls = ope
+            .target(I32)
+            .context(("t", "c"))
+            .nulls(vitaminc_ore::target::Last)
+            .encrypt_checked(42i32)
+            .unwrap();
+        for (name, term, expected) in [
+            ("ore i32", hex::encode(ore_int.as_ref()), ORE_I32),
+            ("ore text", hex::encode(ore_text.as_ref()), ORE_TEXT),
+            ("ope i32", hex::encode(ope_int.as_ref()), OPE_I32),
+            ("ope text", hex::encode(ope_text.as_ref()), OPE_TEXT),
+            (
+                "ope i32 nulls",
+                hex::encode(ope_nulls.as_ref()),
+                OPE_I32_NULLS,
+            ),
+        ] {
+            assert_eq!(term, expected, "{name}");
+        }
     }
 
     /// Bytes no term of these schemes has, and two terms whose first

@@ -62,7 +62,10 @@
 //! assert_eq!(ct1.cmp(&ct2), Ordering::Less);
 //! ```
 //!
-//! Encryption is one-way: there is no decryption. A caller that needs the
+//! There is no decryption API, but the key is still a decryption key:
+//! whoever holds it can recompute the keystream and read any term's
+//! plaintext, and for OPE can find any value by binary search over
+//! [`Key::encrypt_ope`]. Protect it as one. A caller that needs the
 //! plaintext back stores it alongside the term under an authenticated cipher
 //! such as AES-GCM.
 //!
@@ -155,8 +158,9 @@ pub struct Error;
 /// A 256-bit encryption key for CLWW Order-Revealing Encryption.
 ///
 /// The key is used to encrypt values while preserving their ordering.
-/// All encryption operations are deterministic for a given key, and none can
-/// be reversed.
+/// All encryption operations are deterministic for a given key. There is no
+/// decryption API, but whoever holds the key can recompute the keystream and
+/// read any term's plaintext, so protect it as a decryption key.
 ///
 /// The key material is wiped on drop (`ZeroizeOnDrop`), and
 /// [`Key::from`] wipes the by-value copy it is handed. Each layer is
@@ -307,6 +311,13 @@ pub trait ClwwOreEncrypt: Sized {
 /// let key = Key::from([0u8; 32]);
 ///
 /// let ct = 42u32.encrypt_ope(&key).unwrap();
+/// ```
+///
+/// Raw byte arrays have no OPE: bytes encoded by hand (little-endian, sign
+/// bit not flipped) would encrypt without error and then sort wrong.
+///
+/// ```compile_fail,E0277
+/// clww_ore::Key::from([0u8; 32]).encrypt_ope([0u8; 4]);
 /// ```
 pub trait ClwwOpeEncrypt: Sized {
     /// The output type of the encryption operation.

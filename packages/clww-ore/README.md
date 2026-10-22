@@ -30,7 +30,13 @@ builds here. A caller opens a space with a target and a context
 (`scheme.target(I32).context(("orders", "quantity"))`), and every value is encoded as that
 target. Both schemes take every target at any length through the byte-slice entry points, with
 the salt the space derives (scheme, domain and the caller's context) as the CLWW salt. A CLWW
-term is its own query. vitaminc-ore 0.8 or later.
+term is its own query. Requires vitaminc-ore 0.8.
+
+A `Text` or `Bytes` term shows the exact length of its value: there is no padding and no length
+limit. An ORE term is 8 bytes per plaintext byte, an OPE term the same plus 1 carry byte, so a
+very large value gives a term 8 times its size. This differs from `ore_rs::BlockOre`, which pads
+text to a power of two and refuses text over its maximum. A caller who needs a limit checks the
+value before it encrypts it.
 
 ## CipherStash
 
