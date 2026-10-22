@@ -65,8 +65,9 @@ re-encrypting either way.
   stream, so a caller could encrypt bytes that skipped the encoding.
 - **Unchecked term constructors.** `from_bytes_unchecked` is crate-private, and `from_hex`
   checks the length as `from_bytes` and `TryFrom` do (an ORE term is a multiple of 8
-  bytes, an OPE term `8n + 1`). Both were open for tagged bit streams, which no public
-  path makes now.
+  bytes, an OPE term `8n + 1`, and neither is empty). Both were open for tagged bit
+  streams, which no public path makes now. `FromHex::Error` is now `clww_ore::Error`,
+  not `hex::FromHexError`: bad hex and a bad length give the same error.
 - **Decryption.** `Key::decrypt`, the `ClwwOreDecrypt` trait (for `OreClww8V1` and
   `OreClww8VariableV1`) and `OreClww8VariableV1::decrypt_to_bytes` are gone, so the
   crate has no decryption API. The key is still a decryption key: whoever holds it can

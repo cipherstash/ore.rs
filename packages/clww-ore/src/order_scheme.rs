@@ -434,6 +434,31 @@ mod tests {
         assert_eq!(space.encrypt_term(&plaintext).unwrap().raw(), &direct);
     }
 
+    /// A stored term reads back as itself through every checked entry
+    /// point, so the length rule agrees with the layout encryption emits.
+    #[test]
+    fn stored_terms_read_back_through_the_checked_entry_points() {
+        use hex::FromHex;
+        let (ore, ope) = (ClwwOre::new(key()), ClwwOpe::new(key()));
+        let (ore, ope) = (
+            ore.target(Text).context("col"),
+            ope.target(Text).context("col"),
+        );
+        for value in ["a", "École", "a longer value than one block"] {
+            let term = ore.encrypt_checked(value).unwrap();
+            let term = term.raw();
+            let stored = hex::encode(term.as_ref());
+            assert_eq!(&OreClww8VariableV1::from_hex(&stored).unwrap(), term);
+            assert_eq!(&OreClww8VariableV1::try_from(term.as_ref()).unwrap(), term);
+
+            let term = ope.encrypt_checked(value).unwrap();
+            let term = term.raw();
+            let stored = hex::encode(term.as_ref());
+            assert_eq!(&OpeClww8VariableV1::from_hex(&stored).unwrap(), term);
+            assert_eq!(&OpeClww8VariableV1::try_from(term.as_ref()).unwrap(), term);
+        }
+    }
+
     /// ORE and OPE terms of one value in one context are bound under
     /// different salts, since each scheme's name is in its salt, as well as
     /// drawing from different keystreams.

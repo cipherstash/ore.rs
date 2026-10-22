@@ -56,9 +56,10 @@ impl TryFrom<&[u8]> for OreClww8VariableV1 {
 impl OreClww8VariableV1 {
     /// The one length rule, shared by [`from_bytes`](Self::from_bytes) and
     /// the `TryFrom` impl: encryption emits one byte per plaintext *bit*, so
-    /// a ciphertext over whole-byte plaintext is a multiple of 8 bytes long.
-    fn is_byte_aligned_len(len: usize) -> bool {
-        len.is_multiple_of(BITS_PER_BYTE)
+    /// a ciphertext over whole-byte plaintext is a multiple of 8 bytes long,
+    /// and never empty, since no plaintext vitaminc seals is.
+    fn is_term_len(len: usize) -> bool {
+        len > 0 && len.is_multiple_of(BITS_PER_BYTE)
     }
 
     /// Wrap bytes without the length check, for terms this crate just made
@@ -71,7 +72,7 @@ impl OreClww8VariableV1 {
     /// have. Structural only: bytes that pass are not thereby proven to be a
     /// genuine term.
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
-        if !Self::is_byte_aligned_len(bytes.len()) {
+        if !Self::is_term_len(bytes.len()) {
             return Err(Error);
         }
         Ok(Self { bytes })
@@ -159,9 +160,10 @@ impl OpeClww8VariableV1 {
     /// The one length rule, shared by [`from_bytes`](Self::from_bytes) and
     /// the `TryFrom` impl: a ciphertext over whole-byte plaintext is
     /// `8 * plaintext_bytes + 1` long (one byte per plaintext bit plus the
-    /// reserved leading carry byte).
-    fn is_byte_aligned_len(len: usize) -> bool {
-        len % BITS_PER_BYTE == 1
+    /// reserved leading carry byte), and no plaintext vitaminc seals is
+    /// empty, so the carry byte alone is not a term.
+    fn is_term_len(len: usize) -> bool {
+        len > 1 && len % BITS_PER_BYTE == 1
     }
 
     /// Wrap bytes without the length check, for terms this crate just made
@@ -174,7 +176,7 @@ impl OpeClww8VariableV1 {
     /// have. Structural only: bytes that pass are not thereby proven to be a
     /// genuine term.
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
-        if !Self::is_byte_aligned_len(bytes.len()) {
+        if !Self::is_term_len(bytes.len()) {
             return Err(Error);
         }
         Ok(Self { bytes })
@@ -212,15 +214,16 @@ mod tests {
     use super::*;
 
     // One length rule per type, shared by `from_bytes`, `TryFrom` and
-    // `from_hex`: an ORE term is a multiple of 8 bytes and an OPE term is
-    // `8 * n + 1` (the reserved leading carry byte).
+    // `from_hex`: an ORE term is a non-empty multiple of 8 bytes and an OPE
+    // term is `8 * n + 1` with `n > 0` (the reserved leading carry byte).
 
     #[test]
     fn ore_rejects_impossible_length_on_the_checked_entry_points() {
-        let short = vec![0u8; 7];
-        assert!(OreClww8VariableV1::from_bytes(short.clone()).is_err());
-        assert!(OreClww8VariableV1::try_from(short.as_slice()).is_err());
-        assert!(OreClww8VariableV1::from_hex(hex::encode(&short)).is_err());
+        for bad in [vec![], vec![0u8; 7]] {
+            assert!(OreClww8VariableV1::from_bytes(bad.clone()).is_err());
+            assert!(OreClww8VariableV1::try_from(bad.as_slice()).is_err());
+            assert!(OreClww8VariableV1::from_hex(hex::encode(&bad)).is_err());
+        }
     }
 
     #[test]
@@ -251,11 +254,22 @@ mod tests {
     #[test]
     fn ope_rejects_impossible_length_on_the_checked_entry_points() {
         // A multiple of 8 is exactly what an OPE ciphertext cannot be: the
-        // carry byte makes every valid length `8 * n + 1`.
-        let short = vec![0u8; 8];
-        assert!(OpeClww8VariableV1::from_bytes(short.clone()).is_err());
-        assert!(OpeClww8VariableV1::try_from(short.as_slice()).is_err());
-        assert!(OpeClww8VariableV1::from_hex(hex::encode(&short)).is_err());
+        // carry byte makes every valid length `8 * n + 1`. The carry byte
+        // alone is a term of the empty plaintext, which no space seals.
+        for bad in [vec![0u8; 8], vec![0u8]] {
+            assert!(OpeClww8VariableV1::from_bytes(bad.clone()).is_err());
+            assert!(OpeClww8VariableV1::try_from(bad.as_slice()).is_err());
+            assert!(OpeClww8VariableV1::from_hex(hex::encode(&bad)).is_err());
+        }
+    }
+
+    #[test]
+    fn malformed_hex_is_refused() {
+        // A non-hex digit, and an odd number of digits.
+        for bad in ["zz", "0", "0g00000000000000"] {
+            assert!(OreClww8VariableV1::from_hex(bad).is_err(), "{bad}");
+            assert!(OpeClww8VariableV1::from_hex(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

@@ -15,7 +15,7 @@ fn bits_of(bytes: &[u8]) -> impl Iterator<Item = u8> + '_ {
 }
 
 /// The ORE term of `bytes`: one ciphertext byte per plaintext bit. The
-/// entry point both vitaminc schemes encrypt their sealed bytes through.
+/// entry point [`ClwwOre`](crate::ClwwOre) encrypts its sealed bytes through.
 pub(crate) fn encrypt_ore_bytes(
     bytes: &[u8],
     key: &Key,
@@ -25,6 +25,8 @@ pub(crate) fn encrypt_ore_bytes(
 }
 
 /// The OPE term of `bytes`: a carry byte, then one byte per plaintext bit.
+/// The entry point [`ClwwOpe`](crate::ClwwOpe) encrypts its sealed bytes
+/// through.
 pub(crate) fn encrypt_ope_bytes(
     bytes: &[u8],
     key: &Key,
