@@ -181,10 +181,13 @@ impl std::fmt::Debug for BlockOre {
 }
 
 /// What [`BlockOre`] keeps for one space: the engine the space's target
-/// wants, keyed under the space's salt. `Send + Sync`, so a space is
-/// shared across threads as it is. Wiped on drop: each engine wipes its
-/// keys.
-pub struct BlockOreSpace(Engine);
+/// wants, keyed under the space's salt, and the target, so a plaintext of
+/// another is refused. `Send + Sync`, so a space is shared across threads
+/// as it is. Wiped on drop: each engine wipes its keys.
+pub struct BlockOreSpace {
+    engine: Engine,
+    target: OrderTarget,
+}
 
 enum Engine {
     // Boxed: an engine holds AES key schedules and a nonce generator, and
@@ -209,11 +212,27 @@ fn engines_wipe_on_drop(engine: &Engine) {
 
 impl std::fmt::Debug for BlockOreSpace {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let engine = match &self.0 {
+        let engine = match &self.engine {
             Engine::Bit6(_) => "Bit6",
             Engine::Chained(_) => "Chained",
         };
-        f.debug_tuple("BlockOreSpace").field(&engine).finish()
+        f.debug_struct("BlockOreSpace")
+            .field("engine", &engine)
+            .field("target", &self.target)
+            .finish()
+    }
+}
+
+impl BlockOreSpace {
+    /// [`OreError::TargetMismatch`] unless `plaintext` was encoded as the
+    /// space's target. Without it, text handed to a `U128` space would be
+    /// padded under that space's defaults, not the scheme's policy.
+    fn check_target(&self, plaintext: &OrderPlaintext) -> Result<(), OreError> {
+        if plaintext.target() == self.target {
+            Ok(())
+        } else {
+            Err(OreError::TargetMismatch)
+        }
     }
 }
 
@@ -287,15 +306,20 @@ impl OrderScheme for BlockOre {
                 Engine::Chained(Box::new(OreAes128Bit6Chained::init_with(key, options)?))
             }
         };
-        Ok(BlockOreSpace(engine))
+        Ok(BlockOreSpace { engine, target })
     }
 
+    /// A plaintext of another target than the space's is refused
+    /// ([`OreError::TargetMismatch`]): the space's engine is keyed and
+    /// configured for its own target alone. [`vitaminc_ore::OrderSpace`]
+    /// never hands one over; a direct call can.
     fn encrypt_plaintext(
         &self,
         space: &BlockOreSpace,
         plaintext: &OrderPlaintext,
     ) -> Result<Term, OreError> {
-        match &space.0 {
+        space.check_target(plaintext)?;
+        match &space.engine {
             Engine::Bit6(engine) => engine.encrypt_plaintext(plaintext),
             Engine::Chained(engine) => engine.encrypt_plaintext(plaintext),
         }
@@ -323,12 +347,15 @@ impl OrderScheme for BlockOre {
 impl OrderQuery for BlockOre {
     type Query = Query;
 
+    /// Refuses a plaintext of another target, as
+    /// [`OrderScheme::encrypt_plaintext`] does.
     fn encrypt_query(
         &self,
         space: &BlockOreSpace,
         plaintext: &OrderPlaintext,
     ) -> Result<Query, OreError> {
-        match &space.0 {
+        space.check_target(plaintext)?;
+        match &space.engine {
             Engine::Bit6(engine) => engine.encrypt_query_plaintext(plaintext),
             Engine::Chained(engine) => engine.encrypt_query_plaintext(plaintext),
         }
@@ -378,7 +405,7 @@ mod tests {
     use super::*;
     use crate::scheme::chained::MAX_STR_BYTES;
     use crate::scheme::decompose::num_blocks_6bit;
-    use crate::testing::ceiling;
+    use crate::testing::{ceiling, fixed_padding, salt, text_pt, u128_pt, u64_pt};
     use vitaminc_ore::target::{Bytes, Date, Decimal, Text, I32, I64, U128};
     use vitaminc_ore::{test_support, OrderEncrypt, OrderError, OrderTerm, QueryTerm};
 
@@ -653,6 +680,75 @@ mod tests {
             s.target(Text).context("c").open(),
             Err(OreError::InitFailed)
         ));
+    }
+
+    /// The text padding goes to `Text` spaces alone: a policy the chained
+    /// engine refuses closes the text space and nothing else, and a fixed
+    /// length bounds text under a ceiling no other policy could pad.
+    #[test]
+    fn the_text_padding_closes_only_text_spaces() {
+        let s = BlockOre::new(key()).with_text_padding(Padding::PowerOfTwo {
+            min_bytes: u16::MAX,
+        });
+        assert!(matches!(
+            s.target(Text).context("c").open(),
+            Err(OreError::InitFailed)
+        ));
+        for t in [
+            T::Bytes,
+            T::U128,
+            T::I128,
+            T::Uuid,
+            T::Timestamp,
+            T::Decimal,
+        ] {
+            if let Err(e) = s.target(t).context("c").open() {
+                panic!("{:?} under an unpaddable text policy: {:?}", t, e);
+            }
+        }
+
+        let s = BlockOre::new(key())
+            .with_text_padding(fixed_padding(8))
+            .with_max_bytes(ceiling(60000));
+        let text = s.target(Text).context("c");
+        assert!(text.encrypt_checked("1234567").is_ok());
+        assert!(matches!(
+            text.encrypt_checked("12345678"),
+            Err(OrderError::Backend(OreError::ExceedsPadding))
+        ));
+    }
+
+    /// A space refuses a plaintext of another target, so a direct trait
+    /// call cannot put text through a `U128` space's defaults. vitaminc's
+    /// own spaces never hand one over.
+    #[test]
+    fn a_space_refuses_a_plaintext_of_another_target() {
+        let s = BlockOre::new(key()).with_text_padding(fixed_padding(64));
+        let ctx = salt(b"c");
+        let wide = OrderScheme::open(&s, T::U128, &ctx).unwrap();
+        let narrow = OrderScheme::open(&s, T::I64, &ctx).unwrap();
+        let text = OrderScheme::open(&s, T::Text, &ctx).unwrap();
+        for space in [&wide, &narrow] {
+            assert!(matches!(
+                s.encrypt_plaintext(space, &text_pt("alice")),
+                Err(OreError::TargetMismatch)
+            ));
+            assert!(matches!(
+                s.encrypt_query(space, &text_pt("alice")),
+                Err(OreError::TargetMismatch)
+            ));
+        }
+        assert!(matches!(
+            s.encrypt_plaintext(&text, &u128_pt(5)),
+            Err(OreError::TargetMismatch)
+        ));
+        assert!(matches!(
+            s.encrypt_plaintext(&narrow, &u64_pt(5)),
+            Err(OreError::TargetMismatch)
+        ));
+        assert!(s.encrypt_plaintext(&wide, &u128_pt(5)).is_ok());
+        assert!(s.encrypt_query(&wide, &u128_pt(5)).is_ok());
+        assert!(s.encrypt_plaintext(&text, &text_pt("alice")).is_ok());
     }
 
     /// The default ceiling is 1024 bytes with the marker, so 1023 of value.

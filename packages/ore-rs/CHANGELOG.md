@@ -27,6 +27,8 @@ had.
   (the rest, text and bytes included) when the space is opened. Text is padded under
   `BlockOre::with_text_padding`, bytes are not, and both are refused past
   `BlockOre::with_max_bytes`. `compare` and `compare_query` dispatch on the wire header.
+  A space refuses a plaintext of another target (`OreError::TargetMismatch`, new), which
+  only a direct `encrypt_plaintext` or `encrypt_query` call can hand it.
 - **The schemes take sealed plaintexts only.** `OreScheme`, sealed, replaces the
   `OreCipher` and `OreEncrypt` traits: `encrypt_plaintext` and `encrypt_query_plaintext`
   over `vitaminc_ore::OrderPlaintext`, giving `Term` and `Query` (serialised bytes), and

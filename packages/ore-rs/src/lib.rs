@@ -222,6 +222,11 @@ pub enum OreError {
     /// NULs, it would encrypt the same as the string without them.
     #[error("String ends in NUL")]
     TrailingNul,
+    /// A plaintext encoded as another target than the space it was handed
+    /// to (`BlockOre`'s `encrypt_plaintext` or `encrypt_query` called
+    /// directly, with a space of another target).
+    #[error("Plaintext of another target than the space's")]
+    TargetMismatch,
 }
 
 mod sealed {
