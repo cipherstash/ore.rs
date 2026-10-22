@@ -924,4 +924,59 @@ mod tests {
         let c = Ore::init(fixed_key(1), fixed_key(2)).unwrap();
         assert_ne!(term_bytes(&a, &u64_pt(5)), term_bytes(&c, &u64_pt(5)));
     }
+
+    /// `init` seeds the nonce generator from the OS: one cipher never
+    /// repeats a nonce, and two ciphers under one key draw different
+    /// streams. A constant seed would pass every other test.
+    #[test]
+    fn every_term_draws_a_fresh_nonce() {
+        let a = Ore::init(fixed_key(1), fixed_key(2)).unwrap();
+        let b = Ore::init(fixed_key(1), fixed_key(2)).unwrap();
+        let (a1, a2, b1) = (
+            term_bytes(&a, &u64_pt(5)),
+            term_bytes(&a, &u64_pt(5)),
+            term_bytes(&b, &u64_pt(5)),
+        );
+        assert_ne!(a1, a2, "one cipher reused a nonce");
+        assert_ne!(a1, b1, "two ciphers drew the same nonce stream");
+        assert_eq!(Ore::compare_raw_slices(&a1, &b1), Some(Ordering::Equal));
+    }
+
+    /// A thread that panics while holding the nonce lock does not stop
+    /// encryption on the shared cipher: the generator is taken from the
+    /// poisoned lock and still draws fresh nonces.
+    #[test]
+    fn a_poisoned_nonce_lock_still_encrypts() {
+        let ore = Ore::init(fixed_key(1), fixed_key(2)).unwrap();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = ore.rng.lock().unwrap();
+            panic!("poison the nonce lock");
+        }));
+        assert!(ore.rng.is_poisoned());
+        let (a, b) = (term_bytes(&ore, &u64_pt(5)), term_bytes(&ore, &u64_pt(5)));
+        assert_ne!(a, b, "a poisoned lock reused a nonce");
+        assert_eq!(Ore::compare_raw_slices(&a, &b), Some(Ordering::Equal));
+    }
+
+    /// The scheme is shared across threads as it is: one instance, one
+    /// nonce generator behind a lock.
+    #[test]
+    fn the_scheme_is_send_and_sync() {
+        fn is_send_sync<X: Send + Sync>(_: &X) {}
+        let ore = init_ore();
+        is_send_sync(&ore);
+        let shared = &ore;
+        let terms: Vec<Vec<u8>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..4u64)
+                .map(|i| scope.spawn(move || term_bytes(shared, &u64_pt(i))))
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        for pair in terms.windows(2) {
+            assert_eq!(
+                Ore::compare_raw_slices(&pair[0], &pair[1]),
+                Some(Ordering::Less)
+            );
+        }
+    }
 }
