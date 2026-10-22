@@ -1,13 +1,30 @@
 mod common;
-use clww_ore::{Key, OreClww8V1};
+use clww_ore::{ClwwOre, OreClww8VariableV1};
 use common::*;
 use quickcheck::quickcheck;
 use std::cmp::Ordering;
+use vitaminc_ore::target::U64;
+use vitaminc_ore::{OrderEncrypt, OrderKeyInit};
+use vitaminc_protected::Protected;
 
-/// Compare two values using a SQL function.
-fn sql_compare<const N: usize>(a: &OreClww8V1<N>, b: &OreClww8V1<N>) -> i32 {
+/// The ORE term of `x` in a `U64` space. Every term is variable-length now,
+/// and a `u64`'s is 64 bytes, as the fixed `ore_cllw_8_v1` type held them.
+fn term(x: u64) -> OreClww8VariableV1 {
+    ClwwOre::new(Protected::new([0; 32]))
+        .target(U64)
+        .context("sql-compare")
+        .encrypt(x)
+        .unwrap()
+        .into_raw()
+}
+
+/// Compare two terms as `ore_cllw_8_v1` values, with the SQL function.
+fn sql_compare(a: &OreClww8VariableV1, b: &OreClww8VariableV1) -> i32 {
     let response = setup_db()
-        .query("SELECT compare_ore_cllw_8_v1($1, $2)", &[&a, &b])
+        .query(
+            "SELECT compare_ore_cllw_8_v1(ROW($1::bytea)::ore_cllw_8_v1, ROW($2::bytea)::ore_cllw_8_v1)",
+            &[&a.as_ref(), &b.as_ref()],
+        )
         .expect("Failed to execute query");
 
     let row = response.first().expect("Expected a result");
@@ -15,12 +32,12 @@ fn sql_compare<const N: usize>(a: &OreClww8V1<N>, b: &OreClww8V1<N>) -> i32 {
     row.get(0)
 }
 
-/// Compare two values using a SQL operator.
-fn sql_compare_op<const N: usize>(a: &OreClww8V1<N>, b: &OreClww8V1<N>, op: SqlOp) -> bool {
-    let query = format!("SELECT $1::ore_cllw_8_v1 {op} $2::ore_cllw_8_v1");
+/// Compare two terms as `ore_cllw_8_v1` values, with a SQL operator.
+fn sql_compare_op(a: &OreClww8VariableV1, b: &OreClww8VariableV1, op: SqlOp) -> bool {
+    let query = format!("SELECT ROW($1::bytea)::ore_cllw_8_v1 {op} ROW($2::bytea)::ore_cllw_8_v1");
 
     let response = setup_db()
-        .query(&query, &[&a, &b])
+        .query(&query, &[&a.as_ref(), &b.as_ref()])
         .expect("Failed to execute query");
 
     let row = response.first().expect("Expected a result");
@@ -39,36 +56,28 @@ fn expect(a: u64, b: u64) -> i32 {
 quickcheck! {
     #[ignore = "e2e"]
     fn test_compare_u64_eq(x: u64) -> bool {
-        let key = Key::from([0; 32]);
-        let a = key.encrypt::<u64>(x).unwrap();
-        let b = key.encrypt::<u64>(x).unwrap();
+        let (a, b) = (term(x), term(x));
 
         sql_compare(&a, &b) == 0
     }
 
     #[ignore = "e2e"]
     fn test_compare_u64_eq_op(x: u64) -> bool {
-        let key = Key::from([0; 32]);
-        let a = key.encrypt::<u64>(x).unwrap();
-        let b = key.encrypt::<u64>(x).unwrap();
+        let (a, b) = (term(x), term(x));
 
         sql_compare_op(&a, &b, SqlOp::Eq)
     }
 
     #[ignore = "e2e"]
     fn test_compare_u64_cmp(a: u64, b: u64) -> bool {
-        let key = Key::from([0; 32]);
-        let x = key.encrypt::<u64>(a).unwrap();
-        let y = key.encrypt::<u64>(b).unwrap();
+        let (x, y) = (term(a), term(b));
 
         expect(a, b) == sql_compare(&x, &y)
     }
 
     #[ignore = "e2e"]
     fn test_compare_u64_cmp_op(a: u64, b: u64) -> bool {
-        let key = Key::from([0; 32]);
-        let x = key.encrypt::<u64>(a).unwrap();
-        let y = key.encrypt::<u64>(b).unwrap();
+        let (x, y) = (term(a), term(b));
 
         match a.cmp(&b) {
             Ordering::Less => {

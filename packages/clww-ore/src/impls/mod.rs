@@ -3,15 +3,35 @@ use std::cmp::Ordering;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 use zeroize::Zeroizing;
 
-#[cfg(any(feature = "chrono", feature = "decimal"))]
-pub(crate) mod byte_array;
-#[cfg(feature = "chrono")]
-pub(crate) mod chrono;
-#[cfg(feature = "decimal")]
-pub(crate) mod decimal;
-pub(crate) mod primitives;
-pub(crate) mod string;
 pub(crate) mod variable;
+
+use variable::{OpeClww8VariableV1, OreClww8VariableV1};
+
+/// The bits of `bytes`, one byte each, most significant first.
+fn bits_of(bytes: &[u8]) -> impl Iterator<Item = u8> + '_ {
+    bytes
+        .iter()
+        .flat_map(|&byte| (0..8).rev().map(move |i| (byte >> i) & 1))
+}
+
+/// The ORE term of `bytes`: one ciphertext byte per plaintext bit. The
+/// entry point both vitaminc schemes encrypt their sealed bytes through.
+pub(crate) fn encrypt_ore_bytes(
+    bytes: &[u8],
+    key: &Key,
+    salt: Option<&[u8]>,
+) -> Result<OreClww8VariableV1, Error> {
+    encrypt_ore_bits(bits_of(bytes), key, salt).map(OreClww8VariableV1::from_bytes_unchecked)
+}
+
+/// The OPE term of `bytes`: a carry byte, then one byte per plaintext bit.
+pub(crate) fn encrypt_ope_bytes(
+    bytes: &[u8],
+    key: &Key,
+    salt: Option<&[u8]>,
+) -> Result<OpeClww8VariableV1, Error> {
+    encrypt_ope_bits(bits_of(bytes), key, salt).map(OpeClww8VariableV1::from_bytes_unchecked)
+}
 
 /// The scheme a keystream is drawn for. ORE and OPE each read their own
 /// domain of the keyed PRF, so their terms of one value under one key and
@@ -87,9 +107,7 @@ pub(crate) fn prf_byte(hasher: &blake3::Hasher) -> u8 {
 /// leftward where the signal re-emerges at the next shared-PRF byte and
 /// lex compare resolves cleanly.
 ///
-/// `bits` is an iterator of one byte per plaintext bit, each `0` or `1`. The
-/// MSB-first byte form of an integer or string is just one convenient producer
-/// — callers may freely pack their own tagged bit streams.
+/// `bits` is an iterator of one byte per plaintext bit, each `0` or `1`.
 ///
 /// # Errors
 ///
@@ -97,7 +115,7 @@ pub(crate) fn prf_byte(hasher: &blake3::Hasher) -> u8 {
 /// more than one into the byte above it, and the terms would no longer sort as
 /// their plaintexts. The whole stream is read first, so the error does not
 /// tell where the bad byte was.
-pub fn encrypt_ope_bits<I>(bits: I, key: &Key, salt: Option<&[u8]>) -> Result<Vec<u8>, Error>
+pub(crate) fn encrypt_ope_bits<I>(bits: I, key: &Key, salt: Option<&[u8]>) -> Result<Vec<u8>, Error>
 where
     I: IntoIterator<Item = u8>,
 {
@@ -147,6 +165,37 @@ pub(crate) fn push_secret(buf: &mut Zeroizing<Vec<u8>>, byte: u8) {
         *buf = grown;
     }
     buf.push(byte);
+}
+
+/// Encrypts a bit stream into a CLWW ORE ciphertext.
+///
+/// `bits` is an iterator of one byte per plaintext bit, each `0` or `1`. Each
+/// ciphertext byte is `(PRF_i + bit_i) mod 256`, one byte per bit, and the
+/// bytes compare under the ORE comparison (first differing byte, `y + 1 ==
+/// x`), **not** plain lex order. See [`OreClww8VariableV1`].
+///
+/// # Errors
+///
+/// [`Error`](struct@crate::Error) if any byte of `bits` is not `0` or `1`: the comparison reads a
+/// difference of exactly one as the order, so any other byte gives terms that
+/// sort wrong. The whole stream is read first, so the error does not tell
+/// where the bad byte was.
+pub(crate) fn encrypt_ore_bits<I>(bits: I, key: &Key, salt: Option<&[u8]>) -> Result<Vec<u8>, Error>
+where
+    I: IntoIterator<Item = u8>,
+{
+    let mut hasher = keyed_hasher(key, Scheme::Ore, salt);
+    let mut invalid = 0u8;
+    let out = bits.into_iter().fold(Vec::new(), |mut out, bit| {
+        invalid |= bit >> 1;
+        out.push(prf_byte(&hasher).wrapping_add(bit));
+        let _ = hasher.update(&[bit]);
+        out
+    });
+    if invalid != 0 {
+        return Err(Error);
+    }
+    Ok(out)
 }
 
 /// Compare two CLWW ORE ciphertexts in constant time, given as their

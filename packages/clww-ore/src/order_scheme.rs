@@ -5,10 +5,8 @@
 //! [`OrderPlaintext`] that only it can build, so a scheme here is never
 //! handed bytes that skipped the encoding. A caller opens a space with a
 //! target and a context, encrypts values there, and compares terms through
-//! the space. Both schemes take every target, at any length, through the
-//! byte-slice entry points, which encrypt the bytes as they are: a term here
-//! never matches one the typed entry points wrote, which apply encodings of
-//! their own.
+//! the space. Both schemes take every target, at any length, and encrypt
+//! the sealed bytes as they are, one plaintext bit to one term byte.
 //!
 //! The salt the space hands the scheme, `PAE("vitaminc/ore/v1", NAME,
 //! domain, context)`, goes in as the CLWW salt, so a term compares only
@@ -31,7 +29,8 @@ use std::cmp::Ordering;
 use vitaminc_ore::{Context, OrderKeyInit, OrderPlaintext, OrderQuery, OrderScheme, OrderTarget};
 use vitaminc_protected::{Controlled, Protected};
 
-use crate::{ClwwOpeEncrypt, ClwwOreEncrypt, Error, Key, OpeClww8VariableV1, OreClww8VariableV1};
+use crate::impls::{encrypt_ope_bytes, encrypt_ore_bytes};
+use crate::{Error, Key, OpeClww8VariableV1, OreClww8VariableV1};
 
 /// Why key material of a length only known at runtime was refused: a CLWW
 /// key is exactly thirty-two bytes.
@@ -122,8 +121,8 @@ impl OrderScheme for ClwwOre {
     type Error = Error;
     type Space = Protected<Vec<u8>>;
 
-    /// Every target goes through the one byte-slice entry point, so the
-    /// target is not needed here.
+    /// Every target's sealed bytes are encrypted as they are, so the target
+    /// is not needed here.
     fn open(&self, _: OrderTarget, salt: &Context<'_>) -> Result<Self::Space, Error> {
         Ok(open_space(salt))
     }
@@ -133,11 +132,11 @@ impl OrderScheme for ClwwOre {
         space: &Self::Space,
         plaintext: &OrderPlaintext,
     ) -> Result<OreClww8VariableV1, Error> {
-        plaintext
-            .bytes()
-            .risky_ref()
-            .as_slice()
-            .encrypt_with_salt(&self.key, Some(space.risky_ref()))
+        encrypt_ore_bytes(
+            plaintext.bytes().risky_ref(),
+            &self.key,
+            Some(space.risky_ref()),
+        )
     }
 
     /// The scheme's comparison. `None` for bytes no term of these schemes
@@ -212,8 +211,8 @@ impl OrderScheme for ClwwOpe {
     type Error = Error;
     type Space = Protected<Vec<u8>>;
 
-    /// Every target goes through the one byte-slice entry point, so the
-    /// target is not needed here.
+    /// Every target's sealed bytes are encrypted as they are, so the target
+    /// is not needed here.
     fn open(&self, _: OrderTarget, salt: &Context<'_>) -> Result<Self::Space, Error> {
         Ok(open_space(salt))
     }
@@ -223,11 +222,11 @@ impl OrderScheme for ClwwOpe {
         space: &Self::Space,
         plaintext: &OrderPlaintext,
     ) -> Result<OpeClww8VariableV1, Error> {
-        plaintext
-            .bytes()
-            .risky_ref()
-            .as_slice()
-            .encrypt_ope_with_salt(&self.key, Some(space.risky_ref()))
+        encrypt_ope_bytes(
+            plaintext.bytes().risky_ref(),
+            &self.key,
+            Some(space.risky_ref()),
+        )
     }
 
     /// Byte order, which is the terms' order. `None` for bytes no term of
@@ -280,7 +279,7 @@ impl OrderKeyInit for ClwwOpe {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vitaminc_ore::target::{Bytes, Text, I32, U128};
+    use vitaminc_ore::target::{Bytes, Text, I32, U128, U16};
     use vitaminc_ore::{
         order, test_support, Float, Int, Logical, NormalizeError, OrderEncrypt, OrderError,
         Physical, Raw, TimeUnit,
@@ -423,28 +422,28 @@ mod tests {
     }
 
     /// The stored format: a plaintext's sealed bytes, as vitaminc encodes
-    /// them, through the byte-slice entry points under the space's salt.
+    /// them, encrypted as they are under the space's salt.
     #[test]
     fn a_term_is_the_byte_slice_encryption_of_the_sealed_bytes() {
         let ore = ClwwOre::new(key());
         let space = ore.target(T::Bytes).context("col");
         let plaintext = order(T::Bytes, None, Physical::Bytes(&[0xAB])).unwrap();
-        let direct = plaintext
-            .bytes()
-            .risky_ref()
-            .as_slice()
-            .encrypt_with_salt(&key_from(key()), Some(space.salt().as_bytes()))
-            .unwrap();
+        let direct = encrypt_ore_bytes(
+            plaintext.bytes().risky_ref(),
+            &key_from(key()),
+            Some(space.salt().as_bytes()),
+        )
+        .unwrap();
         assert_eq!(space.encrypt_term(&plaintext).unwrap().raw(), &direct);
         let ope = ClwwOpe::new(key());
         let space = ope.target(T::Text).context("col");
         let plaintext = order(T::Text, None, Physical::Text("a")).unwrap();
-        let direct = plaintext
-            .bytes()
-            .risky_ref()
-            .as_slice()
-            .encrypt_ope_with_salt(&key_from(key()), Some(space.salt().as_bytes()))
-            .unwrap();
+        let direct = encrypt_ope_bytes(
+            plaintext.bytes().risky_ref(),
+            &key_from(key()),
+            Some(space.salt().as_bytes()),
+        )
+        .unwrap();
         assert_eq!(space.encrypt_term(&plaintext).unwrap().raw(), &direct);
     }
 
@@ -596,5 +595,32 @@ mod tests {
             ore.compare(&under_ore(&a), &under_ore(&b)) == Some(a.cmp(&b))
                 && ope.compare(&under_ope(&a), &under_ope(&b)) == Some(a.cmp(&b))
         }
+    }
+
+    /// The backward-carry encoding with the bit at the top of its byte gives
+    /// exact OPE: byte order on the terms always agrees with the plaintext
+    /// order (see `docs/backward-carry-ope.md`). Checked exhaustively on every
+    /// adjacent `u16` pair under twenty keys, the worst case for the older
+    /// `+1` variant, which had a residual error rate of about 7.7e-6 per
+    /// pair. Slow, so run with `cargo test --release -- --ignored`.
+    #[test]
+    #[ignore = "exhaustive exactness check — slow; run with `cargo test --release -- --ignored`"]
+    fn ope_exactness_adjacent_u16() {
+        let mut errors = 0u64;
+        for key_seed in 0..20u64 {
+            let mut key_bytes = [0u8; 32];
+            key_bytes[..8].copy_from_slice(&key_seed.to_le_bytes());
+            let scheme = ClwwOpe::new(Protected::new(key_bytes));
+            let space = scheme.target(U16).context("exactness");
+            let mut prev = space.encrypt(0u16).unwrap();
+            for x in 1..=u16::MAX {
+                let next = space.encrypt(x).unwrap();
+                if prev.as_ref() >= next.as_ref() {
+                    errors += 1;
+                }
+                prev = next;
+            }
+        }
+        assert_eq!(errors, 0, "exact OPE violated on {errors} adjacent pairs");
     }
 }

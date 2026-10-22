@@ -1,8 +1,8 @@
-//! `encrypt_ope_bits` frees no buffer that still holds a secret.
+//! OPE encryption frees no buffer that still holds a secret.
 //!
-//! The function grows two buffers as it reads the bits: one holds the
-//! keystream until the carry pass, the other one byte per plaintext bit. A
-//! `Vec` that outgrows its buffer frees the old one as it is. This binary's
+//! The encryption grows two buffers as it reads the plaintext bits: one holds
+//! the keystream until the carry pass, the other one byte per plaintext bit.
+//! A `Vec` that outgrows its buffer frees the old one as it is. This binary's
 //! allocator scans every buffer freed while it is armed for the two secrets,
 //! so a buffer freed unwiped fails the test. It is its own test binary, so the
 //! allocator sees no other test's buffers.
@@ -11,7 +11,10 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
-use clww_ore::{encrypt_ope_bits, Key};
+use clww_ore::ClwwOpe;
+use vitaminc_ore::target::Bytes;
+use vitaminc_ore::{OrderEncrypt, OrderKeyInit};
+use vitaminc_protected::Protected;
 
 const NEEDLE_LEN: usize = 32;
 
@@ -52,38 +55,42 @@ unsafe impl GlobalAlloc for Scanning {
 #[global_allocator]
 static ALLOCATOR: Scanning = Scanning;
 
-/// `bits`, through an iterator that gives no size hint, as the crate's own
-/// bit iterators do, so the buffers start empty and grow.
-fn unhinted(bits: &[u8]) -> impl Iterator<Item = u8> + '_ {
-    bits.iter().copied().filter(|_| true)
+/// The bits of `bytes`, one byte each, most significant first: what the
+/// plaintext-bits buffer holds.
+fn bits_of(bytes: &[u8]) -> Vec<u8> {
+    bytes
+        .iter()
+        .flat_map(|&b| (0..8).rev().map(move |i| (b >> i) & 1))
+        .collect()
 }
 
 #[test]
 fn no_buffer_is_freed_with_the_keystream_or_the_plaintext_bits() {
-    let key = Key::from([0x5a; 32]);
-    let salt = Some(&b"freed-buffers"[..]);
+    let scheme = ClwwOpe::new(Protected::new([0x5a; 32]));
+    let space = scheme.target(Bytes).context("freed-buffers");
 
-    // All zero bits add nothing and carry nothing, so this term past its
-    // leading byte is the bare keystream: what `out` holds before the carry
-    // pass.
-    let zeros = [0u8; 300];
-    let keystream = encrypt_ope_bits(unhinted(&zeros), &key, salt).unwrap();
-    // Bits of a pattern no keystream or zero buffer will hold.
-    let pattern: Vec<u8> = (0..300u32).map(|i| u8::from(i % 3 == 0)).collect();
+    // vitaminc puts one marker byte before the bytes. Past its eight bits,
+    // zero bits add nothing and carry nothing, so this term past its carry
+    // byte and the marker's bits is the bare keystream: what the buffer holds
+    // before the carry pass.
+    let zeros = [0u8; 40];
+    let keystream = space.encrypt(&zeros[..]).unwrap();
+    // A pattern no keystream or zero buffer will hold, as bits.
+    let pattern = [0xa5u8; 40];
 
     {
         let mut needles = NEEDLES.lock().unwrap();
-        needles[0].copy_from_slice(&keystream[1..=NEEDLE_LEN]);
-        needles[1].copy_from_slice(&pattern[..NEEDLE_LEN]);
+        needles[0].copy_from_slice(&keystream.as_ref()[9..9 + NEEDLE_LEN]);
+        needles[1].copy_from_slice(&bits_of(&pattern)[..NEEDLE_LEN]);
     }
 
     ARMED.store(true, Ordering::SeqCst);
-    let a = encrypt_ope_bits(unhinted(&zeros), &key, salt);
-    let b = encrypt_ope_bits(unhinted(&pattern), &key, salt);
+    let a = space.encrypt(&zeros[..]);
+    let b = space.encrypt(&pattern[..]);
     ARMED.store(false, Ordering::SeqCst);
 
-    // Checked once disarmed: `a` is the keystream needle itself.
-    assert_eq!(a.unwrap(), keystream);
+    // Checked once disarmed: `a` holds the keystream needle itself.
+    assert_eq!(a.unwrap().as_ref(), keystream.as_ref());
     assert!(b.is_ok());
     assert!(
         !FOUND.load(Ordering::SeqCst),

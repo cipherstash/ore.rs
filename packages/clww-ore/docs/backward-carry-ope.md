@@ -623,9 +623,9 @@ bit per ciphertext).
 - **Determinism.** Encryption is deterministic under a given
   `(key, salt, plaintext)`. This is the right behaviour for an index
   column.
-- **When to reach for this vs. ORE.** Use `ClwwOpeEncrypt` when you want
+- **When to reach for this vs. ORE.** Use `ClwwOpe` when you want
   to put ciphertexts into an off-the-shelf ordered index. Use
-  `ClwwOreEncrypt` when you're happy with a custom comparator (no
+  `ClwwOre` when you're happy with a custom comparator (no
   reserved-byte overhead, slightly smaller ciphertexts).
 
 ---
@@ -646,4 +646,4 @@ bit per ciphertext).
 - **Implementation.** The encryption and its tests live in
   `packages/clww-ore/src/impls/mod.rs::encrypt_ope_bits`. The exhaustive
   exactness check is
-  `packages/clww-ore/src/impls/primitives.rs::ope_exactness_adjacent_u16`.
+  `packages/clww-ore/src/order_scheme.rs::ope_exactness_adjacent_u16`.

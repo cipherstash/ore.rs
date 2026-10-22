@@ -57,8 +57,8 @@ jobs:
       - name: clippy (no features)
         run: cargo clippy --no-deps -p ore-rs --all-targets -- -D warnings
 
-      # clww-ore's default features include `postgres-types`, so its
-      # no-features build is a separate one.
+      # `--all-features` turns on clww-ore's `postgres-types`; this builds it
+      # with none, as a dependant gets it by default.
       - name: clippy (clww-ore, no features)
         run: cargo clippy --no-deps -p clww-ore --all-targets --no-default-features -- -D warnings
 

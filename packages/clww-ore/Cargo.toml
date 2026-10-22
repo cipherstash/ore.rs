@@ -12,32 +12,25 @@ documentation = "https://docs.rs/clww-ore"
 license-file = "LICENSE"
 publish = false
 edition = "2021"
+# vitaminc's floor.
+rust-version = "1.88"
 repository = "https://github.com/cipherstash/ore.rs"
 homepage = "https://cipherstash.com"
 keywords = ["cryptography", "security", "databases", "encryption", "sql"]
 categories = ["cryptography", "database"]
 
 [features]
-# WARNING: The postgres-types feature is currently enabled by default for backwards compatibility,
-# but this will change in a future major version. Please explicitly enable this feature if you need it.
-default = ["postgres-types"]
+# `ToSql` for the term types: `ore_cllw_8_variable_v1` (created by
+# `install.sql`) and `ore_cllw_8_ope_variable_v1`.
 postgres-types = ["dep:postgres-types"]
-# Adds OPE support for `rust_decimal::Decimal`.
-decimal = ["dep:rust_decimal", "dep:orderable-bytes", "orderable-bytes/decimal"]
-# Adds OPE support for `chrono::NaiveDate` and `chrono::DateTime<Utc>`.
-chrono = ["dep:chrono", "dep:orderable-bytes", "orderable-bytes/chrono"]
 
 [dependencies]
 # `zeroize` wipes the keyed hasher and its output readers on drop.
 blake3 = { version = "1.5.4", features = ["zeroize"] }
-chrono = { version = "0.4.42", default-features = false, optional = true }
 hex = "0.4.3"
-orderable-bytes = { version = "0.1.1", default-features = false, optional = true }
 postgres-types = { version = "0.2.8", features = ["derive", "array-impls"], optional = true }
-rust_decimal = { version = "1.28", default-features = false, optional = true }
 subtle = "2.6.1"
 thiserror = "1.0.56"
-unicode-normalization = "0.1.24"
 # vitaminc-ore's `OrderScheme` and `OrderQuery`, implemented by `ClwwOre`
 # and `ClwwOpe`: vitaminc seals every plaintext and owns the encodings, as
 # it does for ore-rs.
@@ -48,11 +41,8 @@ zeroize = { version = "1.8.1", features = ["derive"] }
 [dev-dependencies]
 criterion = "0.5.1"
 hex = "0.4.3"
-paste = "1.0.15"
 postgres = "0.19.9"
 quickcheck = "1.0.3"
-# Test-only: macros for constructing `Decimal` literals in unit tests.
-rust_decimal_macros = "1.28"
 # The conformance checks vitaminc-ore runs against a real scheme.
 vitaminc-ore = { version = "0.8.0", features = ["test-support"] }
 
