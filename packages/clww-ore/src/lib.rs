@@ -38,36 +38,6 @@
 #![warn(clippy::unimplemented)]
 // Ensure we use constant-time comparisons where appropriate
 #![warn(clippy::if_then_some_else_none)]
-//! ## Usage
-//!
-//! Every value goes in through a [`vitaminc_ore`] order space: vitaminc
-//! encodes it as the space's target and seals the bytes, and [`ClwwOre`] or
-//! [`ClwwOpe`] encrypts them under the salt the space derives.
-//!
-//! ```
-//! use std::cmp::Ordering;
-//! use clww_ore::ClwwOre;
-//! use vitaminc_ore::target::U64;
-//! use vitaminc_ore::{OrderEncrypt, OrderKeyInit};
-//! use vitaminc_protected::Protected;
-//!
-//! let scheme = ClwwOre::new(Protected::new([7u8; 32]));
-//! let totals = scheme.target(U64).context(("orders", "total"));
-//! let (a, b) = (totals.encrypt(10u64)?, totals.encrypt(20u64)?);
-//! assert_eq!(totals.compare(&a, &b), Some(Ordering::Less));
-//! # Ok::<(), Box<dyn std::error::Error>>(())
-//! ```
-//!
-//! Terms are deterministic: one value in one space always encrypts to the
-//! same term. The ORE comparator runs in constant time over the terms'
-//! bytes.
-//!
-//! There is no decryption API, but the key is still a decryption key:
-//! whoever holds it can recompute the keystream and read any term's
-//! plaintext, and for OPE can find any value by binary search over
-//! encryptions. Protect it as one. A caller that needs the plaintext back
-//! stores it alongside the term under an authenticated cipher such as
-//! AES-GCM.
 use thiserror::Error;
 use zeroize::Zeroize;
 mod impls;

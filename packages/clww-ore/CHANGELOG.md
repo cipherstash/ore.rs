@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**vitaminc is the front door**, as it is for ore-rs 0.10: `ClwwOre` and `ClwwOpe` are vitaminc
+order schemes, and the typed API is gone. vitaminc encodes every value and seals the bytes; the
+schemes encrypt them. The design and its reasons are in
+`docs/plans/2026-10-19-ore-0-10-vitaminc-front-door.md`. The bytes of a plaintext encrypt as
+they did, so raw bytes and unsigned integers keep their terms; other types now take vitaminc's
+encodings. 0.6.0 also changes every term (see Security), so terms from `cllw-ore` 0.5 need
+re-encrypting either way.
+
 ### Added
 
 - **`ClwwOre` and `ClwwOpe`, vitaminc order schemes.** Both implement vitaminc-ore 0.8's
@@ -41,19 +49,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- **The typed API.** vitaminc is the only way in, as it is for ore-rs 0.10: it encodes every
-  value as its space's target and seals the bytes, and `ClwwOre` and `ClwwOpe` encrypt
-  them. Gone: the `ClwwOreEncrypt` and `ClwwOpeEncrypt` traits and every impl of them
-  (integers, `bool`, floats, `&str`, `String`, `&[u8]`, byte arrays), `Key::encrypt` and
-  `Key::encrypt_ope`, the fixed-width terms `OreClww8V1<N>` and `OpeClww8V1<N>`,
-  `orderize_string`, and the `chrono` and `decimal` features with the `orderable-bytes`,
-  `chrono`, `rust_decimal` and `unicode-normalization` dependencies. `Key` is
-  crate-private: a scheme is keyed from a `Protected<[u8; 32]>`. Every term is an
-  `OreClww8VariableV1` or an `OpeClww8VariableV1`, and the bytes of a plaintext encrypt
-  as they did: an unsigned integer's term is its big-endian bytes' term, and the
-  known-answer digests of those and of byte slices still hold. Other types now take
-  vitaminc's encodings, so their terms differ from the typed ones (strings were folded by
-  `orderize_string`, now by vitaminc's `Text`).
+- **The typed traits.** `ClwwOreEncrypt` and `ClwwOpeEncrypt` and every impl of them
+  (integers, `bool`, floats, `&str`, `String`, `&[u8]`, byte arrays), with `Key::encrypt`
+  and `Key::encrypt_ope`. `Key` is crate-private: a scheme is keyed from a
+  `Protected<[u8; 32]>`.
+- **The fixed-width terms** `OreClww8V1<N>` and `OpeClww8V1<N>`. Every term is an
+  `OreClww8VariableV1` or an `OpeClww8VariableV1`. An unsigned integer's term is its
+  big-endian bytes' term, as it was, and the known-answer digests of those and of byte
+  slices still hold.
+- **The encodings.** `orderize_string`, and the `chrono` and `decimal` features with the
+  `orderable-bytes`, `chrono`, `rust_decimal` and `unicode-normalization` dependencies.
+  Strings, floats, signed integers, dates and decimals now take vitaminc's encodings, so
+  their terms differ from the typed ones.
 - **`encrypt_ore_bits` and `encrypt_ope_bits` are crate-private.** They took any bit
   stream, so a caller could encrypt bytes that skipped the encoding.
 - **Unchecked term constructors.** `from_bytes_unchecked` is crate-private, and `from_hex`
@@ -78,11 +85,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `OreCllw8VariableV1` and `OpeCllw8VariableV1` are `OreClww8VariableV1` and
   `OpeClww8VariableV1`.
 - **No SQL or Postgres type changes.** The rename changes no key derivation or encoding.
-  The SQL objects in `install.sql` and `uninstall.sql` and the Postgres type names
-  the `postgres-types` feature maps to (`ore_cllw_8_v1`, `ore_cllw_8_variable_v1`,
-  `ore_cllw_8_ope_v1`, `ore_cllw_8_ope_variable_v1`) keep their spelling: they are
-  installed in databases and named by EQL, so renaming them would break every
-  installation.
+  The SQL objects in `install.sql` and `uninstall.sql` (`ore_cllw_8_v1`,
+  `ore_cllw_8_variable_v1` and their comparisons and operator classes) and the Postgres
+  type names the `postgres-types` feature maps to (`ore_cllw_8_variable_v1`,
+  `ore_cllw_8_ope_variable_v1`) keep their spelling: they are installed in databases and
+  named by EQL, so renaming them would break every installation. No Rust type maps to
+  `ore_cllw_8_v1` now that the fixed-width terms are gone; the e2e tests still check its
+  comparison, binding a term's bytes.
 - **`postgres-types` is off by default.** A caller that binds terms as Postgres
   parameters turns it on. The e2e SQL tests declare
   `required-features = ["postgres-types"]`, and CI runs them against Postgres.

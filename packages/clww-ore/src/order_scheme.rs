@@ -1,12 +1,6 @@
-//! [`ClwwOre`] and [`ClwwOpe`]: CLWW ORE and OPE as vitaminc order schemes,
-//! so a vitaminc order space can encrypt its sealed plaintexts here.
-//!
-//! vitaminc decides the encoding of every kind of value and seals it as an
-//! [`OrderPlaintext`] that only it can build, so a scheme here is never
-//! handed bytes that skipped the encoding. A caller opens a space with a
-//! target and a context, encrypts values there, and compares terms through
-//! the space. Both schemes take every target, at any length, and encrypt
-//! the sealed bytes as they are, one plaintext bit to one term byte.
+//! [`ClwwOre`] and [`ClwwOpe`]: CLWW ORE and OPE as vitaminc order schemes
+//! (see the crate docs for their use). A sealed [`OrderPlaintext`] is
+//! encrypted as it is, one plaintext bit to one term byte.
 //!
 //! The salt the space hands the scheme, `PAE("vitaminc/ore/v1", NAME,
 //! domain, context)`, goes in as the CLWW salt, so a term compares only
@@ -16,13 +10,6 @@
 //!
 //! A CLWW term is its own query, so [`OrderQuery`] is implemented with
 //! `Query = Term`.
-//!
-//! A `Text` or `Bytes` term shows the exact length of its value: there is no
-//! padding and no length limit. An ORE term is 8 bytes per plaintext byte
-//! and an OPE term the same plus 1 carry byte, so a very large value gives a
-//! term 8 times its size. `ore_rs::BlockOre`, behind the same vitaminc API,
-//! pads text and refuses text over its maximum; a caller who needs a limit
-//! here checks the value before it encrypts it.
 
 use std::cmp::Ordering;
 

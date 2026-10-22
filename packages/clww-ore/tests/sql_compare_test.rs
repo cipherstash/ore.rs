@@ -1,21 +1,16 @@
 mod common;
-use clww_ore::{ClwwOre, OreClww8VariableV1};
+use clww_ore::OreClww8VariableV1;
 use common::*;
 use quickcheck::quickcheck;
 use std::cmp::Ordering;
 use vitaminc_ore::target::U64;
-use vitaminc_ore::{OrderEncrypt, OrderKeyInit};
-use vitaminc_protected::Protected;
+use vitaminc_ore::OrderEncrypt;
 
 /// The ORE term of `x` in a `U64` space. Every term is variable-length now,
 /// and a `u64`'s is 64 bytes, as the fixed `ore_cllw_8_v1` type held them.
 fn term(x: u64) -> OreClww8VariableV1 {
-    ClwwOre::new(Protected::new([0; 32]))
-        .target(U64)
-        .context("sql-compare")
-        .encrypt(x)
-        .unwrap()
-        .into_raw()
+    let space = scheme().target(U64).context("sql-compare");
+    space.encrypt(x).unwrap().into_raw()
 }
 
 /// Compare two terms as `ore_cllw_8_v1` values, with the SQL function.

@@ -18,6 +18,10 @@ use vitaminc_protected::Protected;
 
 const NEEDLE_LEN: usize = 32;
 
+/// Where the bits of a `Bytes` value start in its OPE term: one carry byte,
+/// then the eight bits of vitaminc's marker byte.
+const VALUE_BITS_AT: usize = 1 + 8;
+
 /// Scans each buffer freed while `ARMED` for the needles.
 struct Scanning;
 
@@ -56,7 +60,8 @@ unsafe impl GlobalAlloc for Scanning {
 static ALLOCATOR: Scanning = Scanning;
 
 /// The bits of `bytes`, one byte each, most significant first: what the
-/// plaintext-bits buffer holds.
+/// plaintext-bits buffer holds. A copy of the crate-private `bits_of`, which
+/// an integration test cannot reach.
 fn bits_of(bytes: &[u8]) -> Vec<u8> {
     bytes
         .iter()
@@ -80,7 +85,7 @@ fn no_buffer_is_freed_with_the_keystream_or_the_plaintext_bits() {
 
     {
         let mut needles = NEEDLES.lock().unwrap();
-        needles[0].copy_from_slice(&keystream.as_ref()[9..9 + NEEDLE_LEN]);
+        needles[0].copy_from_slice(&keystream.as_ref()[VALUE_BITS_AT..VALUE_BITS_AT + NEEDLE_LEN]);
         needles[1].copy_from_slice(&bits_of(&pattern)[..NEEDLE_LEN]);
     }
 

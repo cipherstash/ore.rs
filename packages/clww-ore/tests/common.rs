@@ -1,5 +1,15 @@
+use clww_ore::ClwwOre;
 use postgres::{Client, NoTls};
 use std::fmt::{self, Display, Formatter};
+use std::sync::OnceLock;
+use vitaminc_ore::OrderKeyInit;
+use vitaminc_protected::Protected;
+
+/// The one ORE scheme the e2e tests encrypt under, made once.
+pub fn scheme() -> &'static ClwwOre {
+    static SCHEME: OnceLock<ClwwOre> = OnceLock::new();
+    SCHEME.get_or_init(|| ClwwOre::new(Protected::new([0; 32])))
+}
 
 pub fn setup_db() -> Client {
     Client::connect("dbname=cllwtest host=localhost user=postgres", NoTls)

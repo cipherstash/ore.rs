@@ -1,20 +1,15 @@
 mod common;
-use clww_ore::{ClwwOre, OreClww8VariableV1};
+use clww_ore::OreClww8VariableV1;
 use common::*;
 use quickcheck::{quickcheck, TestResult};
 use vitaminc_ore::target::Text;
-use vitaminc_ore::{OrderEncrypt, OrderKeyInit};
-use vitaminc_protected::Protected;
+use vitaminc_ore::OrderEncrypt;
 
 /// The ORE term of `s` in a `Text` space, or `None` for text vitaminc
 /// refuses (an unassigned code point, say).
 fn try_term(s: &str) -> Option<OreClww8VariableV1> {
-    ClwwOre::new(Protected::new([0; 32]))
-        .target(Text)
-        .context("sql-compare-lex")
-        .encrypt_checked(s)
-        .ok()
-        .map(|t| t.into_raw())
+    let space = scheme().target(Text).context("sql-compare-lex");
+    space.encrypt_checked(s).ok().map(|t| t.into_raw())
 }
 
 fn term(s: &str) -> OreClww8VariableV1 {

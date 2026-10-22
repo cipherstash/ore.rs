@@ -8,11 +8,11 @@
 //! The digests were recorded from the code as it came over from
 //! cipherstash-suite (`cllw-ore` 0.5.1), and recorded again when 0.6.0 gave
 //! ORE and OPE their own keystreams and framed the salt (see
-//! `keystream_separation`), which changed every term. 0.10 removed the typed
-//! entry points: every term now goes through the byte path. An unsigned
-//! integer's typed term was the term of its big-endian bytes, so its digests
-//! are kept and now pin the byte path. Encodings of other types are
-//! vitaminc's, pinned through the schemes in `order_scheme`.
+//! `keystream_separation`), which changed every term. The typed entry points
+//! were removed before 0.6.0 was released: every term now goes through the
+//! byte path. An unsigned integer's typed term was the term of its big-endian
+//! bytes, so its digests are kept and now pin the byte path. Encodings of
+//! other types are vitaminc's, pinned through the schemes in `order_scheme`.
 
 use crate::impls::{encrypt_ope_bits, encrypt_ope_bytes, encrypt_ore_bits, encrypt_ore_bytes};
 use crate::Key;
@@ -81,7 +81,8 @@ macro_rules! ints {
 }
 
 /// The big-endian bytes of unsigned integers, whose digests were recorded
-/// from the typed entry points 0.6 had.
+/// from the typed entry points of the `cllw-ore` 0.5.1 lineage, after the
+/// keystream separation.
 #[test]
 fn unsigned_integers() {
     let got = ints!(u8, u16, u32, u64, u128);
