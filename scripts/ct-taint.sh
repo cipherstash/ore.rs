@@ -25,8 +25,7 @@ cargo build --release --quiet
 bin="${CARGO_TARGET_DIR:-target}/release/ct-taint"
 modes=(
     bit6-encrypt bit6-encrypt-left bit6-encrypt-i64 bit6-encrypt-f64 bit6-encrypt-u32
-    bit6-encrypt-raw bit6-encrypt-left-raw
-    chained-encrypt chained-encrypt-left
+    chained-encrypt chained-encrypt-left chained-encrypt-u128 chained-encrypt-bytes
 )
 status=0
 export CT_TAINT_GATE=1

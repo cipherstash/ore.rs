@@ -10,13 +10,16 @@
 //!
 //! The packed prefix caps `N` at 14 (`prefix ≤ 13 ‖ value ‖ index` plus
 //! the block count in byte 15 must fit one AES block; seeds also use byte
-//! 14 for the block index), which covers all
-//! primitives up to 64 bits. `Decimal` (14 bytes) and `DateTime<Utc>`
-//! (12 bytes) exceed this limit; use
-//! [`crate::scheme::chained::OreAes128Bit6Chained::encrypt_fixed`] for them.
-//! `u128`/`i128` (22 blocks) fit neither this scheme nor the legacy one
-//! (15 bytes at most); their [`crate::OreEncrypt`] implementations use
-//! [`crate::scheme::chained`].
+//! 14 for the block index), which is ten bytes of plaintext: every
+//! vitaminc target up to 64 bits, `f64` and dates. A timestamp (12
+//! bytes), a decimal (14), a 128-bit integer or uuid (16), text and bytes
+//! are refused ([`crate::OreError::TooManyBlocks`], [`crate::OreError::VariableLength`])
+//! and belong to [`crate::scheme::chained`]; [`crate::BlockOre`]
+//! routes between the two by width.
+//!
+//! The scheme takes a sealed `OrderPlaintext` through [`crate::OreScheme`]. The
+//! plaintext bytes are the target's encoding, whose byte order is the
+//! value's order, and this scheme decomposes them into 6-bit blocks.
 //!
 //! **Status: wire format frozen as of 0.9.0.** `tests/compat_w6_vectors.rs`
 //! pins the bytes; a change that alters them breaks every stored Bit6
@@ -29,10 +32,7 @@
 //! the legacy scheme does not let legacy ciphertexts reveal Bit6 masking
 //! keys, and ciphertexts under different salts share no key material.
 
-#[cfg(feature = "vitaminc")]
 use crate::scheme::decompose::num_blocks_6bit;
-#[cfg(feature = "vitaminc")]
-use crate::OreOutput;
 use crate::{
     ciphertext::*,
     primitives::{
@@ -41,20 +41,23 @@ use crate::{
     scheme::decompose::Blocks6,
     scheme::keys,
     scheme::width::{AesBlockBuf, Bit6, BlockWidth, FirstDiff},
-    OreCipher, OreError, PlainText,
+    OreCipher, OreError, OreScheme, PlainText, Query, Term,
 };
 
 use aes::cipher::generic_array::GenericArray;
-use rand::{Rng, SeedableRng};
-use rand_chacha::ChaCha20Rng;
-use std::cell::RefCell;
+use rand::TryRng;
 use std::cmp::Ordering;
+use std::sync::Mutex;
 use subtle_ng::{Choice, ConditionallySelectable, ConstantTimeEq};
+use vitaminc_context::Context;
+use vitaminc_ore::OrderPlaintext;
+use vitaminc_protected::{Controlled, Protected};
+use vitaminc_random::SafeRand;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Per-block ciphertext component types for this scheme.
-pub mod block_types;
-pub use self::block_types::*;
+pub(crate) mod block_types;
+pub(crate) use self::block_types::*;
 
 /// The Z2 random-oracle instantiation for this scheme (plan §6, option 3 —
 /// pending review; option 2 fallback is `Aes128Z2Hash` with an extra
@@ -65,32 +68,32 @@ type Z2Hash = FixedPiZ2Hash;
 /// plus the block count at byte 15 must fit one 16-byte AES input.
 pub const MAX_BLOCKS: usize = 14;
 
-/// AES-128 BlockORE cipher over 6-bit blocks, generic over the RNG used
-/// for per-encryption nonces. Keys are zeroised on drop.
+/// AES-128 BlockORE cipher over 6-bit blocks. Keys are zeroised on drop.
+///
+/// Per-encryption nonces come from a [`SafeRand`] seeded from the OS when
+/// the cipher is made, behind a mutex, so the cipher is `Send + Sync` and
+/// one instance serves every thread.
 #[derive(ZeroizeOnDrop)]
-pub struct OreAes128Bit6<R: Rng + SeedableRng> {
+pub struct OreAes128Bit6 {
     prf1: Aes128Prf,
     prf2: Aes128Prf,
     #[zeroize(skip)]
-    rng: RefCell<R>,
+    rng: Mutex<SafeRand>,
 }
 
 // Opaque Debug: never render key material (OpaqueDebug discipline).
-impl<R: Rng + SeedableRng> std::fmt::Debug for OreAes128Bit6<R> {
+impl std::fmt::Debug for OreAes128Bit6 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OreAes128Bit6").finish_non_exhaustive()
     }
 }
 
-/// Convenience alias for [`OreAes128Bit6`] backed by `ChaCha20Rng`.
-pub type OreAes128Bit6ChaCha20 = OreAes128Bit6<ChaCha20Rng>;
-
-type EncryptLeftResult<R, const N: usize> = Result<Left<OreAes128Bit6<R>, N>, OreError>;
-type EncryptResult<R, const N: usize> = Result<CipherText<OreAes128Bit6<R>, N>, OreError>;
+type EncryptLeftResult<const N: usize> = Result<Left<OreAes128Bit6, N>, OreError>;
+type EncryptResult<const N: usize> = Result<CipherText<OreAes128Bit6, N>, OreError>;
 
 /// v2 wire header for this scheme: version 2, scheme id 0x02
 /// (= AES-128 suite, 6-bit blocks, packed prefix).
-const WIRE: WireHeader = WireHeader {
+pub(crate) const WIRE: WireHeader = WireHeader {
     version: 0x02,
     scheme_id: 0x02,
 };
@@ -130,7 +133,7 @@ const _: () = assert!(
 const PRF1_LABEL: [u8; 16] = *b"ORE.v2.bit6.prf1";
 const PRF2_LABEL: [u8; 16] = *b"ORE.v2.bit6.prf2";
 
-impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
+impl OreAes128Bit6 {
     /// Per-block PRP seeds: `PRF₂(x[0..n] ‖ 0… ‖ n@14 ‖ N@15)`. The block
     /// count in byte 15 separates plaintext shapes (plan §4); the block
     /// index in byte 14 separates positions, so a prefix padded with zero
@@ -156,7 +159,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
     pub(crate) fn encrypt_left_blocks<const N: usize>(
         &self,
         x: &Blocks6<PlainText<N>>,
-    ) -> EncryptLeftResult<R, N> {
+    ) -> EncryptLeftResult<N> {
         if N > MAX_BLOCKS {
             return Err(OreError::TooManyBlocks);
         }
@@ -183,7 +186,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
     pub(crate) fn encrypt_blocks<const N: usize>(
         &self,
         x: &Blocks6<PlainText<N>>,
-    ) -> EncryptResult<R, N> {
+    ) -> EncryptResult<N> {
         if N > MAX_BLOCKS {
             return Err(OreError::TooManyBlocks);
         }
@@ -191,7 +194,7 @@ impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
         let mut left = Left::<Self, N>::init();
         let mut right = Right::<Self, N>::init();
 
-        self.rng.borrow_mut().try_fill(&mut right.nonce)?;
+        self.fill_nonce(&mut right.nonce);
 
         let seeds = self.derive_prp_seeds(x.inner());
         let hasher: Z2Hash = Hash::new(HashKey::from_slice(&right.nonce));
@@ -250,18 +253,19 @@ impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
 // Right-block encoding is the width-/hash-generic helper shared with the
 // legacy scheme: `crate::scheme::bit2::encode_right_block::<Bit6, Z2Hash>`.
 
-impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
-    /// Initialise the cipher from one 16-byte key, with an empty salt:
-    /// `init_with_salt(key, &[])`.
-    pub fn init(key: &[u8; 16]) -> Result<Self, OreError> {
-        Self::init_with_salt(key, &[])
+impl OreAes128Bit6 {
+    /// Initialise the cipher from one 16-byte key, with the empty salt:
+    /// `init_with_salt(key, &Context::empty())`.
+    pub fn init(key: Protected<[u8; 16]>) -> Result<Self, OreError> {
+        Self::init_with_salt(key, &Context::empty())
     }
 
     /// Initialise the cipher from one 16-byte key and a salt naming what
-    /// the key is for (a data set, a tenant, a plaintext type). PRF₁ and
-    /// PRF₂ are keyed by `AES_{k_salt}(label)` with
-    /// `k_salt = CMAC_{AES_key(ROOT_LABEL)}(salt)`; see the crate-private
-    /// `scheme::keys` for the stages and their argument.
+    /// the key is for: the context a vitaminc space derives, or any bytes
+    /// as `Context::from_encoded(bytes)`. PRF₁ and PRF₂ are keyed by
+    /// `AES_{k_salt}(label)` with `k_salt = CMAC_{AES_key(ROOT_LABEL)}(salt)`
+    /// over the context's bytes; see the crate-private `scheme::keys` for
+    /// the stages and their argument.
     ///
     /// Ciphertexts under different salts share no key material, but
     /// nothing on the wire records the salt, so the comparators cannot
@@ -270,8 +274,33 @@ impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
     /// `Equal` under any salts), so no result confirms that two salts
     /// match. Keep the salt with the identity of the stored data, as you
     /// keep the key.
-    pub fn init_with_salt(key: &[u8; 16], salt: &[u8]) -> Result<Self, OreError> {
-        let k_salt = keys::salted(&keys::root(key, &ROOT_LABEL), salt);
+    ///
+    /// Fails ([`OreError::Random`]) only if the OS random number generator
+    /// could not seed the nonce generator.
+    pub fn init_with_salt(key: Protected<[u8; 16]>, salt: &Context<'_>) -> Result<Self, OreError> {
+        Self::init_with_rng(key, salt, SafeRand::from_entropy()?)
+    }
+
+    /// [`Self::init_with_salt`] with every nonce drawn from `seed`, so a
+    /// test can pin a full ciphertext's bytes. Two values encrypted under
+    /// one seed share their nonces, which the scheme's security assumes
+    /// they never do: never ship a seeded cipher.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn init_seeded(
+        key: Protected<[u8; 16]>,
+        salt: &Context<'_>,
+        seed: [u8; 32],
+    ) -> Result<Self, OreError> {
+        use vitaminc_random::SeedableRng;
+        Self::init_with_rng(key, salt, SafeRand::from_seed(seed))
+    }
+
+    fn init_with_rng(
+        key: Protected<[u8; 16]>,
+        salt: &Context<'_>,
+        rng: SafeRand,
+    ) -> Result<Self, OreError> {
+        let k_salt = keys::salted(&keys::root(key.risky_ref(), &ROOT_LABEL), salt.as_bytes());
         let prf1 = Prf::new(GenericArray::from_slice(&*keys::subkey(
             &k_salt,
             &PRF1_LABEL,
@@ -283,12 +312,44 @@ impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
         Ok(OreAes128Bit6 {
             prf1,
             prf2,
-            rng: RefCell::new(SeedableRng::from_entropy()),
+            rng: Mutex::new(rng),
         })
+    }
+
+    /// Draw one nonce. The generator is infallible once seeded, and a
+    /// thread that panicked while holding the lock left a generator that
+    /// is still a generator, so a poisoned lock is taken as it is.
+    fn fill_nonce(&self, nonce: &mut [u8; NONCE_SIZE]) {
+        let mut rng = self
+            .rng
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match rng.try_fill_bytes(nonce) {
+            Ok(()) => {}
+            Err(never) => match never {},
+        }
     }
 }
 
-impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
+/// The bytes of a fixed-width plaintext this scheme takes: up to ten,
+/// so at most [`MAX_BLOCKS`] blocks. Text and bytes, whose width varies,
+/// are [`OreError::VariableLength`]; a wider fixed-width plaintext is
+/// [`OreError::TooManyBlocks`]. Decided by the width, never by a byte.
+fn fixed_width_bytes(plaintext: &OrderPlaintext) -> Result<&[u8], OreError> {
+    match plaintext.width() {
+        None => Err(OreError::VariableLength),
+        Some(width) if width > MAX_BYTES => Err(OreError::TooManyBlocks),
+        Some(_) => Ok(plaintext.bytes().risky_ref().as_slice()),
+    }
+}
+
+/// Most plaintext bytes this scheme takes: [`MAX_BLOCKS`] six-bit blocks
+/// hold ten bytes (`⌈8·10/6⌉ = 14`).
+pub const MAX_BYTES: usize = 10;
+const _: () = assert!(num_blocks_6bit(MAX_BYTES) == MAX_BLOCKS);
+const _: () = assert!(num_blocks_6bit(MAX_BYTES + 1) > MAX_BLOCKS);
+
+impl OreAes128Bit6 {
     /// Encrypt bytes already encoded so that byte order is value order
     /// (MSB-first 6-bit blocks, `⌈8n/6⌉` of them). Up to ten bytes fit the
     /// [`MAX_BLOCKS`] cap; more returns [`OreError::TooManyBlocks`].
@@ -296,13 +357,11 @@ impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
     /// The block count depends on the length, which is only known at
     /// runtime, so the result is the serialised full ciphertext rather
     /// than a `CipherText<_, N>`; compare it with
-    /// [`compare_raw_slices`](crate::OreCipher::compare_raw_slices).
+    /// [`OreScheme::compare_raw_slices`].
     ///
-    /// Crate-private on purpose: the only encoded bytes this crate accepts
-    /// from outside arrive sealed, as a vitaminc `OrderPlaintext` through
-    /// the `vitaminc` module, so a caller cannot hand the scheme bytes that
-    /// skipped the encoding. The typed impls above remain the public way in.
-    #[cfg(feature = "vitaminc")]
+    /// Crate-private on purpose: the only encoded bytes this scheme takes
+    /// arrive sealed, as an `OrderPlaintext` through [`OreScheme`], so a
+    /// caller cannot hand it bytes that skipped the encoding.
     pub(crate) fn encrypt_bytes(&self, bytes: &[u8]) -> Result<Vec<u8>, OreError> {
         match bytes.len() {
             0 => self.encrypt_bytes_as::<0, 0>(bytes),
@@ -320,10 +379,28 @@ impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
         }
     }
 
+    /// [`Self::encrypt_bytes`], for the left (query) half alone.
+    pub(crate) fn encrypt_left_bytes(&self, bytes: &[u8]) -> Result<Vec<u8>, OreError> {
+        match bytes.len() {
+            0 => self.encrypt_left_bytes_as::<0, 0>(bytes),
+            1 => self.encrypt_left_bytes_as::<1, 2>(bytes),
+            2 => self.encrypt_left_bytes_as::<2, 3>(bytes),
+            3 => self.encrypt_left_bytes_as::<3, 4>(bytes),
+            4 => self.encrypt_left_bytes_as::<4, 6>(bytes),
+            5 => self.encrypt_left_bytes_as::<5, 7>(bytes),
+            6 => self.encrypt_left_bytes_as::<6, 8>(bytes),
+            7 => self.encrypt_left_bytes_as::<7, 10>(bytes),
+            8 => self.encrypt_left_bytes_as::<8, 11>(bytes),
+            9 => self.encrypt_left_bytes_as::<9, 12>(bytes),
+            10 => self.encrypt_left_bytes_as::<10, 14>(bytes),
+            _ => Err(OreError::TooManyBlocks),
+        }
+    }
+
     /// [`Self::encrypt_bytes`] for `N` bytes, which the caller has matched
     /// to the length, as `B` blocks. `B` must be `num_blocks_6bit(N)`,
-    /// checked at compile time.
-    #[cfg(feature = "vitaminc")]
+    /// checked at compile time. The plaintext's blocks are a copy in this
+    /// frame, so they are made inside the scrub.
     #[allow(clippy::let_unit_value)]
     fn encrypt_bytes_as<const N: usize, const B: usize>(
         &self,
@@ -335,14 +412,70 @@ impl<R: Rng + SeedableRng> OreAes128Bit6<R> {
             self.encrypt_blocks(&blocks).map(|ct| ct.to_bytes())
         })
     }
+
+    /// [`Self::encrypt_bytes_as`], for the left half.
+    #[allow(clippy::let_unit_value)]
+    fn encrypt_left_bytes_as<const N: usize, const B: usize>(
+        &self,
+        bytes: &[u8],
+    ) -> Result<Vec<u8>, OreError> {
+        let () = BlocksFor::<N, B>::OK;
+        stack::scrubbed(|| {
+            let blocks = Blocks6::decompose(bytes, [0u8; B]);
+            self.encrypt_left_blocks(&blocks)
+                .map(|left| left.to_bytes())
+        })
+    }
+}
+
+impl crate::sealed::Sealed for OreAes128Bit6 {}
+
+impl OreScheme for OreAes128Bit6 {
+    fn encrypt_plaintext(&self, plaintext: &OrderPlaintext) -> Result<Term, OreError> {
+        self.encrypt_bytes(fixed_width_bytes(plaintext)?)
+            .map(Term::new)
+    }
+
+    fn encrypt_query_plaintext(&self, plaintext: &OrderPlaintext) -> Result<Query, OreError> {
+        self.encrypt_left_bytes(fixed_width_bytes(plaintext)?)
+            .map(Query::new)
+    }
+
+    fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering> {
+        if a.len() != b.len() {
+            return None;
+        }
+        let (num_blocks, a, b) = parse_pair(a, b)?;
+        if a.len() != full_body_len(num_blocks) {
+            return None;
+        }
+        compare_bodies(a, b, num_blocks)
+    }
+
+    /// Compare a serialised left (query) ciphertext with a serialised full
+    /// one: the order of `left`'s plaintext against `full`'s, as
+    /// `compare_raw_slices` gives it for two full ciphertexts. A query
+    /// needs only the left half; the comparison reads `full`'s left and
+    /// right halves. This does not make stored data safe at rest: a stored
+    /// full ciphertext carries its left half, so two stored rows compare
+    /// offline.
+    ///
+    /// `None` if either input is malformed (including a full ciphertext
+    /// passed as `left`, or a left one as `full`), if their headers or
+    /// block counts differ, or if a symbol is outside the 6-bit domain.
+    fn compare_left_to_full(left: &[u8], full: &[u8]) -> Option<Ordering> {
+        let (num_blocks, left, full) = parse_pair(left, full)?;
+        if left.len() != left_body_len(num_blocks) {
+            return None;
+        }
+        compare_bodies(left, full, num_blocks)
+    }
 }
 
 /// `N` bytes are `B` six-bit blocks: [`Self::OK`] fails to compile
 /// otherwise.
-#[cfg(feature = "vitaminc")]
 struct BlocksFor<const N: usize, const B: usize>;
 
-#[cfg(feature = "vitaminc")]
 impl<const N: usize, const B: usize> BlocksFor<N, B> {
     const OK: () = assert!(
         B == num_blocks_6bit(N),
@@ -350,7 +483,7 @@ impl<const N: usize, const B: usize> BlocksFor<N, B> {
     );
 }
 
-impl<R: Rng + SeedableRng> OreCipher for OreAes128Bit6<R> {
+impl OreCipher for OreAes128Bit6 {
     type LeftBlockType = LeftBlock16;
     type RightBlockType = RightBlock8;
 
@@ -359,95 +492,113 @@ impl<R: Rng + SeedableRng> OreCipher for OreAes128Bit6<R> {
 
     /// Encrypt `x`, whose entries are **6-bit block values** (`< 64`, as
     /// the crate-private `scheme::decompose` produces); `N` is the block count
-    /// (≤ [`MAX_BLOCKS`]; more returns [`OreError::TooManyBlocks`]). The [`crate::OreEncrypt`] impls handle the
-    /// byte→block decomposition for primitive types and skip the check
-    /// below. A value `>= 64` returns [`OreError::PrpError`].
-    fn encrypt_left<const N: usize>(&self, x: &PlainText<N>) -> EncryptLeftResult<R, N> {
+    /// (≤ [`MAX_BLOCKS`]; more returns [`OreError::TooManyBlocks`]). The
+    /// byte paths above decompose and skip the check below. A value
+    /// `>= 64` returns [`OreError::PrpError`].
+    fn encrypt_left<const N: usize>(&self, x: &PlainText<N>) -> EncryptLeftResult<N> {
         stack::scrubbed(|| self.encrypt_left_blocks(&Blocks6::check(*x)?))
     }
 
     /// As [`Self::encrypt_left`], for the full ciphertext.
-    fn encrypt<const N: usize>(&self, x: &PlainText<N>) -> EncryptResult<R, N> {
+    fn encrypt<const N: usize>(&self, x: &PlainText<N>) -> EncryptResult<N> {
         stack::scrubbed(|| self.encrypt_blocks(&Blocks6::check(*x)?))
     }
+}
 
-    fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering> {
-        if a.len() != b.len() {
-            return None;
-        }
-        let (header_a, a) = parse_header(a).ok()?;
-        let (header_b, b) = parse_header(b).ok()?;
-        if header_a != header_b || (header_a.0, header_a.1) != (WIRE.version, WIRE.scheme_id) {
-            return None;
-        }
-        let num_blocks = header_a.2;
-        // Reject a degenerate count=0 header: no OreEncrypt path produces zero
-        // blocks, and an empty scan would otherwise return Equal for any pair
-        // of crafted 0-block ciphertexts.
-        if num_blocks == 0 || num_blocks > MAX_BLOCKS {
-            return None;
-        }
-
-        let left_size = Self::LeftBlockType::BLOCK_SIZE;
-        let right_size = Self::RightBlockType::BLOCK_SIZE;
-        if a.len() != num_blocks * (left_size + 1 + right_size) + NONCE_SIZE {
-            return None;
-        }
-        // Reject symbols outside the 64-element domain: the scan below reads
-        // the right block at `a[l]`, which must index one of its 64 bits.
-        // `xt` is public, so this may branch.
-        if a[..num_blocks]
-            .iter()
-            .chain(&b[..num_blocks])
-            .any(|&s| usize::from(s) >= <Bit6 as BlockWidth>::DOMAIN)
-        {
-            return None;
-        }
-
-        let mut is_equal = Choice::from(1);
-        // What the resolution step needs from the first differing block `l`:
-        // `a`'s permuted symbol and PRF tag, and `b`'s right bitvector. All
-        // three are latched *inside* the scan, under the choice "this is the
-        // first difference", so no load after the loop is indexed by `l`.
-        // The right blocks are the one region the scan would otherwise never
-        // touch, so a direct `right[l]` afterwards hits or misses the cache
-        // according to `l`; measured as a timing signal, see `docs/reviews/`.
-        let mut diff = FirstDiff::<{ RightBlock8::BLOCK_SIZE }>::new();
-
-        // Slices for the PRF ("f") blocks and the right half.
-        let a_f = &a[num_blocks..];
-        let b_f = &b[num_blocks..];
-        let b_right = &b[num_blocks * (left_size + 1)..];
-        let b_right_blocks = &b_right[NONCE_SIZE..];
-
-        for n in 0..num_blocks {
-            let prp_eq: Choice = !a[n].ct_eq(&b[n]);
-            let left_block_comparison: Choice = !left_block(a_f, n).ct_eq(left_block(b_f, n));
-            let condition: Choice = prp_eq | left_block_comparison;
-            // Set for exactly one `n`: the first differing block.
-            let first = is_equal & condition;
-
-            diff.latch(
-                a[n],
-                left_block(a_f, n),
-                right_block(b_right_blocks, n),
-                first,
-            );
-            is_equal.conditional_assign(&Choice::from(0), first);
-        }
-
-        if bool::from(is_equal) {
-            return Some(Ordering::Equal);
-        }
-
-        let hash: Z2Hash = Hash::new(HashKey::from_slice(&b_right[0..NONCE_SIZE]));
-
-        if diff.resolve(&hash) == 1 {
-            return Some(Ordering::Greater);
-        }
-
-        Some(Ordering::Less)
+/// Check two headered Bit6 slices against each other and the scheme:
+/// the same version, scheme id and block count, and a count from 1 to
+/// [`MAX_BLOCKS`]. Returns the count and the two bodies. Lengths are the
+/// caller's to check.
+fn parse_pair<'a>(a: &'a [u8], b: &'a [u8]) -> Option<(usize, &'a [u8], &'a [u8])> {
+    let (header_a, a) = parse_header(a).ok()?;
+    let (header_b, b) = parse_header(b).ok()?;
+    if header_a != header_b || (header_a.0, header_a.1) != (WIRE.version, WIRE.scheme_id) {
+        return None;
     }
+    let num_blocks = header_a.2;
+    // Reject a degenerate count=0 header: no plaintext is empty, so no
+    // ciphertext has zero blocks, and an empty scan would otherwise return
+    // Equal for any pair of crafted 0-block ciphertexts.
+    if num_blocks == 0 || num_blocks > MAX_BLOCKS {
+        return None;
+    }
+    Some((num_blocks, a, b))
+}
+
+/// Body length (after the header) of a left ciphertext: `xt ‖ f`.
+fn left_body_len(num_blocks: usize) -> usize {
+    num_blocks * (LeftBlock16::BLOCK_SIZE + 1)
+}
+
+/// Body length (after the header) of a full ciphertext:
+/// `xt ‖ f ‖ nonce ‖ right`.
+fn full_body_len(num_blocks: usize) -> usize {
+    left_body_len(num_blocks) + NONCE_SIZE + num_blocks * RightBlock8::BLOCK_SIZE
+}
+
+/// Compare the bodies of `a` and `b`, which share `num_blocks`. `a` may be
+/// a left or a full body: only its left view (`xt ‖ f`, the same prefix in
+/// both) is read. `b` must be a full body of `full_body_len(num_blocks)`
+/// bytes; `a` at least `left_body_len(num_blocks)`. Refuses (`None`) a
+/// symbol outside the 6-bit domain in either.
+fn compare_bodies(a: &[u8], b: &[u8], num_blocks: usize) -> Option<Ordering> {
+    if b.len() != full_body_len(num_blocks) || a.len() < left_body_len(num_blocks) {
+        return None;
+    }
+    // Reject symbols outside the 64-element domain: the scan below reads
+    // the right block at `a[l]`, which must index one of its 64 bits.
+    // `xt` is public, so this may branch.
+    if a[..num_blocks]
+        .iter()
+        .chain(&b[..num_blocks])
+        .any(|&s| usize::from(s) >= <Bit6 as BlockWidth>::DOMAIN)
+    {
+        return None;
+    }
+
+    let mut is_equal = Choice::from(1);
+    // What the resolution step needs from the first differing block `l`:
+    // `a`'s permuted symbol and PRF tag, and `b`'s right bitvector. All
+    // three are latched *inside* the scan, under the choice "this is the
+    // first difference", so no load after the loop is indexed by `l`.
+    // The right blocks are the one region the scan would otherwise never
+    // touch, so a direct `right[l]` afterwards hits or misses the cache
+    // according to `l`; measured as a timing signal, see `docs/reviews/`.
+    let mut diff = FirstDiff::<{ RightBlock8::BLOCK_SIZE }>::new();
+
+    // Slices for the PRF ("f") blocks and `b`'s right half.
+    let a_f = &a[num_blocks..];
+    let b_f = &b[num_blocks..];
+    let b_right = &b[left_body_len(num_blocks)..];
+    let b_right_blocks = &b_right[NONCE_SIZE..];
+
+    for n in 0..num_blocks {
+        let prp_eq: Choice = !a[n].ct_eq(&b[n]);
+        let left_block_comparison: Choice = !left_block(a_f, n).ct_eq(left_block(b_f, n));
+        let condition: Choice = prp_eq | left_block_comparison;
+        // Set for exactly one `n`: the first differing block.
+        let first = is_equal & condition;
+
+        diff.latch(
+            a[n],
+            left_block(a_f, n),
+            right_block(b_right_blocks, n),
+            first,
+        );
+        is_equal.conditional_assign(&Choice::from(0), first);
+    }
+
+    if bool::from(is_equal) {
+        return Some(Ordering::Equal);
+    }
+
+    let hash: Z2Hash = Hash::new(HashKey::from_slice(&b_right[0..NONCE_SIZE]));
+
+    if diff.resolve(&hash) == 1 {
+        return Some(Ordering::Greater);
+    }
+
+    Some(Ordering::Less)
 }
 
 #[inline]
@@ -462,181 +613,112 @@ fn right_block(input: &[u8], n: usize) -> &[u8] {
     &input[f_pos..(f_pos + RightBlock8::BLOCK_SIZE)]
 }
 
-impl<const N: usize> PartialEq for CipherText<OreAes128Bit6ChaCha20, N> {
+impl<const N: usize> PartialEq for CipherText<OreAes128Bit6, N> {
     fn eq(&self, b: &Self) -> bool {
         matches!(self.cmp(b), Ordering::Equal)
     }
 }
 
-impl<const N: usize> Ord for CipherText<OreAes128Bit6ChaCha20, N> {
+impl<const N: usize> Ord for CipherText<OreAes128Bit6, N> {
     fn cmp(&self, b: &Self) -> Ordering {
-        let mut is_equal = Choice::from(1);
-        // Latch the first differing block during the scan, as in
-        // `compare_raw_slices`: no load after the loop is indexed by its
-        // position.
-        let mut diff = FirstDiff::<{ RightBlock8::BLOCK_SIZE }>::new();
-
-        for n in 0..N {
-            let condition: Choice =
-                !(self.left.xt[n].ct_eq(&b.left.xt[n])) | !(self.left.f[n].ct_eq(&b.left.f[n]));
-            // Set for exactly one `n`: the first differing block.
-            let first = is_equal & condition;
-
-            diff.latch(
-                self.left.xt[n],
-                &self.left.f[n],
-                b.right.data[n].bytes(),
-                first,
-            );
-            is_equal.conditional_assign(&Choice::from(0), first);
-        }
-
-        if bool::from(is_equal) {
-            return Ordering::Equal;
-        }
-
-        let hash: Z2Hash = Hash::new(HashKey::from_slice(&b.right.nonce));
-        if diff.resolve(&hash) == 1 {
-            return Ordering::Greater;
-        }
-
-        Ordering::Less
+        compare_typed(&self.left, b)
     }
 }
 
-impl<const N: usize> PartialOrd for CipherText<OreAes128Bit6ChaCha20, N> {
+#[cfg(test)]
+impl<const N: usize> Left<OreAes128Bit6, N> {
+    /// The order of this left (query) ciphertext's plaintext against
+    /// `full`'s: the typed form of
+    /// [`OreScheme::compare_left_to_full`], and what `Ord` on
+    /// [`CipherText`] computes from the first ciphertext's left half.
+    pub(crate) fn compare_to_full(&self, full: &CipherText<OreAes128Bit6, N>) -> Ordering {
+        compare_typed(self, full)
+    }
+}
+
+/// The typed comparator: `left`'s plaintext against `b`'s. Reads only
+/// `left` and `b`, as the raw comparator reads only `a`'s left view.
+fn compare_typed<const N: usize>(
+    left: &Left<OreAes128Bit6, N>,
+    b: &CipherText<OreAes128Bit6, N>,
+) -> Ordering {
+    let mut is_equal = Choice::from(1);
+    // Latch the first differing block during the scan, as in
+    // `compare_raw_slices`: no load after the loop is indexed by its
+    // position.
+    let mut diff = FirstDiff::<{ RightBlock8::BLOCK_SIZE }>::new();
+
+    for n in 0..N {
+        let condition: Choice =
+            !(left.xt[n].ct_eq(&b.left.xt[n])) | !(left.f[n].ct_eq(&b.left.f[n]));
+        // Set for exactly one `n`: the first differing block.
+        let first = is_equal & condition;
+
+        diff.latch(left.xt[n], &left.f[n], b.right.data[n].bytes(), first);
+        is_equal.conditional_assign(&Choice::from(0), first);
+    }
+
+    if bool::from(is_equal) {
+        return Ordering::Equal;
+    }
+
+    let hash: Z2Hash = Hash::new(HashKey::from_slice(&b.right.nonce));
+    if diff.resolve(&hash) == 1 {
+        return Ordering::Greater;
+    }
+
+    Ordering::Less
+}
+
+impl<const N: usize> PartialOrd for CipherText<OreAes128Bit6, N> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<const N: usize> Eq for CipherText<OreAes128Bit6ChaCha20, N> {}
-
-// ---------------------------------------------------------------------------
-// OreEncrypt impls: byte → 6-bit-block decomposition per primitive type.
-// ---------------------------------------------------------------------------
-
-mod encrypt_impls {
-    use super::{OreAes128Bit6, MAX_BLOCKS};
-    use crate::primitives::stack;
-    use crate::scheme::decompose::{num_blocks_6bit, Blocks6};
-    use crate::{CipherText, Left, OreEncrypt, OreError};
-    use orderable_bytes::{FixedOrderableBytes, OrderableBytes};
-    use rand::{Rng, SeedableRng};
-
-    // Each invocation also emits a test that the type round-trips, orders
-    // `$lo` below `$hi`, and compares equal across nonces, so a type cannot
-    // be listed as supported without being exercised (issue #105).
-    macro_rules! impl_ore_encrypt_bit6 {
-        ($type:ty, $blocks_const:ident, $tests:ident, $lo:expr, $hi:expr) => {
-            /// Block count for this type at 6-bit width.
-            const $blocks_const: usize =
-                num_blocks_6bit(<$type as FixedOrderableBytes>::ENCODED_LEN);
-            // The packed prefix caps the block count; types beyond it
-            // (u128, i128, Decimal) must not get these impls.
-            const _: () = assert!($blocks_const <= MAX_BLOCKS);
-
-            impl<R: Rng + SeedableRng> OreEncrypt<OreAes128Bit6<R>> for $type {
-                type LeftOutput = Left<OreAes128Bit6<R>, $blocks_const>;
-                type FullOutput = CipherText<OreAes128Bit6<R>, $blocks_const>;
-
-                fn encrypt_left(
-                    &self,
-                    cipher: &OreAes128Bit6<R>,
-                ) -> Result<Self::LeftOutput, OreError> {
-                    // The plaintext's bytes and blocks are copies in this
-                    // frame, so they go inside the scrub too.
-                    stack::scrubbed(|| {
-                        let bytes = self.to_orderable_bytes();
-                        let blocks = Blocks6::decompose(&bytes, [0u8; $blocks_const]);
-                        cipher.encrypt_left_blocks(&blocks)
-                    })
-                }
-
-                fn encrypt(&self, cipher: &OreAes128Bit6<R>) -> Result<Self::FullOutput, OreError> {
-                    stack::scrubbed(|| {
-                        let bytes = self.to_orderable_bytes();
-                        let blocks = Blocks6::decompose(&bytes, [0u8; $blocks_const]);
-                        cipher.encrypt_blocks(&blocks)
-                    })
-                }
-            }
-
-            #[cfg(test)]
-            mod $tests {
-                use super::*;
-                use crate::scheme::bit2_w6::OreAes128Bit6ChaCha20;
-                use crate::{OreCipher, OreOutput};
-                use std::cmp::Ordering;
-
-                #[test]
-                fn round_trip_order_and_equality() {
-                    let ore = OreAes128Bit6ChaCha20::init(&[0x11; 16]).unwrap();
-                    let (lo, hi): ($type, $type) = ($lo, $hi);
-                    assert!(lo < hi);
-
-                    let lo_ct = lo.encrypt(&ore).unwrap();
-                    let hi_ct = hi.encrypt(&ore).unwrap();
-                    let lo_left = lo.encrypt_left(&ore).unwrap();
-                    let lo_ct2 = lo.encrypt(&ore).unwrap();
-
-                    let lo_bytes = lo_ct.to_bytes();
-                    let hi_bytes = hi_ct.to_bytes();
-                    assert_eq!(
-                        CipherText::<OreAes128Bit6ChaCha20, $blocks_const>::from_slice(&lo_bytes)
-                            .unwrap()
-                            .to_bytes(),
-                        lo_bytes
-                    );
-                    assert_eq!(
-                        Left::<OreAes128Bit6ChaCha20, $blocks_const>::from_slice(
-                            &lo_left.to_bytes()
-                        )
-                        .unwrap()
-                        .to_bytes(),
-                        lo_left.to_bytes()
-                    );
-
-                    let cmp = OreAes128Bit6ChaCha20::compare_raw_slices;
-                    assert_eq!(cmp(&lo_bytes, &hi_bytes), Some(Ordering::Less));
-                    assert_eq!(cmp(&hi_bytes, &lo_bytes), Some(Ordering::Greater));
-                    assert_ne!(lo_bytes, lo_ct2.to_bytes());
-                    assert_eq!(cmp(&lo_bytes, &lo_ct2.to_bytes()), Some(Ordering::Equal));
-                    assert_eq!(lo_ct.cmp(&hi_ct), Ordering::Less);
-                }
-            }
-        };
-    }
-
-    impl_ore_encrypt_bit6!(bool, BOOL_BLOCKS, bool_tests, false, true);
-    impl_ore_encrypt_bit6!(u8, U8_BLOCKS, u8_tests, 0u8, u8::MAX);
-    impl_ore_encrypt_bit6!(i8, I8_BLOCKS, i8_tests, i8::MIN, i8::MAX);
-    impl_ore_encrypt_bit6!(u16, U16_BLOCKS, u16_tests, 0u16, u16::MAX);
-    impl_ore_encrypt_bit6!(i16, I16_BLOCKS, i16_tests, i16::MIN, i16::MAX);
-    impl_ore_encrypt_bit6!(u32, U32_BLOCKS, u32_tests, 0u32, u32::MAX);
-    impl_ore_encrypt_bit6!(i32, I32_BLOCKS, i32_tests, i32::MIN, i32::MAX);
-    impl_ore_encrypt_bit6!(u64, U64_BLOCKS, u64_tests, 0u64, u64::MAX);
-    impl_ore_encrypt_bit6!(i64, I64_BLOCKS, i64_tests, i64::MIN, i64::MAX);
-    // `u128`/`i128` (22 blocks) exceed `MAX_BLOCKS` and are provided by
-    // `scheme::chained` instead (issue #105).
-    impl_ore_encrypt_bit6!(char, CHAR_BLOCKS, char_tests, '\0', char::MAX);
-    impl_ore_encrypt_bit6!(f32, F32_BLOCKS, f32_tests, f32::MIN, f32::MAX);
-    impl_ore_encrypt_bit6!(f64, F64_BLOCKS, f64_tests, f64::MIN, f64::MAX);
-}
+impl<const N: usize> Eq for CipherText<OreAes128Bit6, N> {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::encrypt::OreEncrypt;
-    use crate::OreOutput;
+    use crate::scheme::bit2::OreAes128;
+    use crate::testing::{
+        date_pt, f64_pt, fixed_key, key, salt, text_pt, timestamp_pt, u32_pt, u64_pt,
+    };
     use quickcheck::TestResult;
 
-    type Ore = OreAes128Bit6ChaCha20;
+    type Ore = OreAes128Bit6;
 
     fn init_ore() -> Ore {
-        let mut key: [u8; 16] = Default::default();
-        ChaCha20Rng::from_entropy().fill(&mut key);
-        Ore::init(&key).unwrap()
+        Ore::init(key()).unwrap()
+    }
+
+    /// A full ciphertext of `plaintext`, typed by its block count.
+    fn full<const N: usize>(ore: &Ore, plaintext: &OrderPlaintext) -> CipherText<Ore, N> {
+        let term = ore.encrypt_plaintext(plaintext).unwrap();
+        CipherText::from_slice(term.as_bytes()).unwrap()
+    }
+
+    /// A left (query) ciphertext of `plaintext`, typed by its block count.
+    fn left<const N: usize>(ore: &Ore, plaintext: &OrderPlaintext) -> Left<Ore, N> {
+        let query = ore.encrypt_query_plaintext(plaintext).unwrap();
+        Left::from_slice(query.as_bytes()).unwrap()
+    }
+
+    fn full_u64(ore: &Ore, x: u64) -> CipherText<Ore, 11> {
+        full(ore, &u64_pt(x))
+    }
+
+    fn left_u64(ore: &Ore, x: u64) -> Left<Ore, 11> {
+        left(ore, &u64_pt(x))
+    }
+
+    fn term_bytes(ore: &Ore, plaintext: &OrderPlaintext) -> Vec<u8> {
+        ore.encrypt_plaintext(plaintext).unwrap().into_bytes()
+    }
+
+    fn query_bytes(ore: &Ore, plaintext: &OrderPlaintext) -> Vec<u8> {
+        ore.encrypt_query_plaintext(plaintext).unwrap().into_bytes()
     }
 
     /// `init` is the empty salt; another salt gives unrelated ciphertexts,
@@ -644,54 +726,77 @@ mod tests {
     /// lengths, so the length prefix alone cannot separate them.
     #[test]
     fn salt_separates_keys() {
-        let key = [0x42u8; 16];
-        let plain = Ore::init(&key).unwrap();
-        let empty = Ore::init_with_salt(&key, &[]).unwrap();
-        let col_a = Ore::init_with_salt(&key, b"users.age").unwrap();
-        let col_a2 = Ore::init_with_salt(&key, b"users.age").unwrap();
-        let col_b = Ore::init_with_salt(&key, b"users.dob").unwrap();
+        let plain = Ore::init(fixed_key(0x42)).unwrap();
+        let empty = Ore::init_with_salt(fixed_key(0x42), &Context::empty()).unwrap();
+        let col_a = Ore::init_with_salt(fixed_key(0x42), &salt(b"users.age")).unwrap();
+        let col_a2 = Ore::init_with_salt(fixed_key(0x42), &salt(b"users.age")).unwrap();
+        let col_b = Ore::init_with_salt(fixed_key(0x42), &salt(b"users.dob")).unwrap();
 
-        let left = |c: &Ore| 456u64.encrypt_left(c).unwrap().to_bytes();
-        assert_eq!(left(&plain), left(&empty));
-        assert_eq!(left(&col_a), left(&col_a2));
-        assert_ne!(left(&plain), left(&col_a));
-        assert_ne!(left(&col_a), left(&col_b));
+        let query = |c: &Ore| query_bytes(c, &u64_pt(456));
+        assert_eq!(query(&plain), query(&empty));
+        assert_eq!(query(&col_a), query(&col_a2));
+        assert_ne!(query(&plain), query(&col_a));
+        assert_ne!(query(&col_a), query(&col_b));
 
-        let a = 456u64.encrypt(&col_a).unwrap().to_bytes();
-        let b = 456u64.encrypt(&col_b).unwrap().to_bytes();
+        let a = term_bytes(&col_a, &u64_pt(456));
+        let b = term_bytes(&col_b, &u64_pt(456));
         assert_ne!(Ore::compare_raw_slices(&a, &b), Some(Ordering::Equal));
         assert_eq!(
-            Ore::compare_raw_slices(&a, &456u64.encrypt(&col_a2).unwrap().to_bytes()),
+            Ore::compare_raw_slices(&a, &term_bytes(&col_a2, &u64_pt(456))),
             Some(Ordering::Equal)
         );
     }
 
-    /// A block count past `MAX_BLOCKS` through the public `OreCipher` path
-    /// is an error, as on the legacy scheme, not a panic (review of #113).
+    /// The scheme takes a fixed-width plaintext of up to ten bytes and
+    /// refuses the rest by width: a timestamp (12 bytes) is too many
+    /// blocks, and text has no fixed width. Refused before any block is
+    /// made, so a refusal costs nothing.
+    #[test]
+    fn plaintexts_are_taken_by_width() {
+        let ore = init_ore();
+        assert_eq!(
+            term_bytes(&ore, &date_pt(19_000)).len(),
+            4 + 6 + 96 + 16 + 48
+        );
+        assert_eq!(term_bytes(&ore, &u64_pt(1)).len(), 295);
+        assert!(matches!(
+            ore.encrypt_plaintext(&timestamp_pt(1)),
+            Err(OreError::TooManyBlocks)
+        ));
+        assert!(matches!(
+            ore.encrypt_query_plaintext(&timestamp_pt(1)),
+            Err(OreError::TooManyBlocks)
+        ));
+        assert!(matches!(
+            ore.encrypt_plaintext(&text_pt("alice")),
+            Err(OreError::VariableLength)
+        ));
+        assert!(matches!(
+            ore.encrypt_query_plaintext(&text_pt("alice")),
+            Err(OreError::VariableLength)
+        ));
+    }
+
+    /// A block count past `MAX_BLOCKS` through the block-level path is an
+    /// error, as on the legacy scheme, not a panic (review of #113).
     #[test]
     fn too_many_blocks_is_an_error_not_a_panic() {
         let ore = init_ore();
         assert!(matches!(
-            ore.encrypt(&[0u8; MAX_BLOCKS + 1]),
+            OreCipher::encrypt(&ore, &[0u8; MAX_BLOCKS + 1]),
             Err(OreError::TooManyBlocks)
         ));
         assert!(matches!(
-            ore.encrypt_left(&[0u8; MAX_BLOCKS + 1]),
+            OreCipher::encrypt_left(&ore, &[0u8; MAX_BLOCKS + 1]),
             Err(OreError::TooManyBlocks)
         ));
-        assert!(ore.encrypt(&[0u8; MAX_BLOCKS]).is_ok());
-        assert!(ore.encrypt_left(&[0u8; MAX_BLOCKS]).is_ok());
+        assert!(OreCipher::encrypt(&ore, &[0u8; MAX_BLOCKS]).is_ok());
+        assert!(OreCipher::encrypt_left(&ore, &[0u8; MAX_BLOCKS]).is_ok());
     }
 
-    /// Cross-scheme regression (review of #82): under keys shared with the
-    /// legacy scheme, a legacy `N = 15` left ciphertext must never publish
-    /// one of Bit6's PRF₁ tags. Bit6's `f[0]` for an 11-block value has PRF₁
-    /// input `xt[0] ‖ 0×10 ‖ 0@11 ‖ 0×3 ‖ 11@15`; legacy block 11 of
-    /// `(xt[0], 0×10, c, 0×3)` has input `xt[0] ‖ 0×10 ‖ xt'[11] ‖ 0×3 ‖
-    /// 11@15`, which matches whenever `c` permutes to 0. Search every `c`.
-    /// Blocks passed straight to `OreCipher` are checked: a value outside
-    /// the 6-bit domain is refused, and an in-domain array encrypts exactly
-    /// as the decomposing `OreEncrypt` path does.
+    /// Blocks passed straight to the block-level path are checked: a value
+    /// outside the 6-bit domain is refused, and an in-domain array
+    /// encrypts exactly as the decomposing byte path does.
     #[test]
     fn raw_blocks_are_checked() {
         let ore = init_ore();
@@ -707,31 +812,31 @@ mod tests {
         ));
 
         let x = 0x0123_4567_89ab_cdefu64;
-        let decomposed = crate::scheme::decompose::Blocks6::decompose(&x.to_be_bytes(), [0u8; 11]);
+        let decomposed = Blocks6::decompose(&x.to_be_bytes(), [0u8; 11]);
         let raw = OreCipher::encrypt_left(&ore, decomposed.inner()).unwrap();
-        assert_eq!(raw.to_bytes(), x.encrypt_left(&ore).unwrap().to_bytes());
+        assert_eq!(raw.to_bytes(), query_bytes(&ore, &u64_pt(x)));
     }
 
+    /// Cross-scheme regression (review of #82): under keys shared with the
+    /// legacy scheme, a legacy `N = 15` left ciphertext must never publish
+    /// one of Bit6's PRF₁ tags. Bit6's `f[0]` for an 11-block value has PRF₁
+    /// input `xt[0] ‖ 0×10 ‖ 0@11 ‖ 0×3 ‖ 11@15`; legacy block 11 of
+    /// `(xt[0], 0×10, c, 0×3)` has input `xt[0] ‖ 0×10 ‖ xt'[11] ‖ 0×3 ‖
+    /// 11@15`, which matches whenever `c` permutes to 0. Search every `c`.
     #[test]
     fn legacy_ciphertexts_never_publish_bit6_tags() {
-        use crate::scheme::bit2::OreAes128ChaCha20;
+        let k1 = key();
+        let bit6 = Ore::init(k1.clone()).unwrap();
+        let legacy = OreAes128::init(k1, key()).unwrap();
 
-        let mut k1 = [0u8; 16];
-        let mut k2 = [0u8; 16];
-        let mut rng = ChaCha20Rng::from_entropy();
-        rng.fill(&mut k1);
-        rng.fill(&mut k2);
-        let bit6 = Ore::init(&k1).unwrap();
-        let legacy = OreAes128ChaCha20::init(&k1, &k2).unwrap();
-
-        let target = bit6.encrypt_left(&[0u8; 11]).unwrap();
+        let target = OreCipher::encrypt_left(&bit6, &[0u8; 11]).unwrap();
         let tag = target.f[0];
 
         let mut probe = [0u8; 15];
         probe[0] = target.xt[0];
         for c in 0..=255u8 {
             probe[11] = c;
-            let left = legacy.encrypt_left(&probe).unwrap();
+            let left = OreCipher::encrypt_left(&legacy, &probe).unwrap();
             assert!(
                 !bool::from(left.f[11].ct_eq(&tag)),
                 "legacy block 11 reproduced a Bit6 tag (c = {})",
@@ -746,7 +851,7 @@ mod tests {
     #[test]
     fn zero_blocks_use_distinct_permutations_per_position() {
         let ore = init_ore();
-        let left = ore.encrypt_left(&[0u8; 11]).unwrap();
+        let left = OreCipher::encrypt_left(&ore, &[0u8; 11]).unwrap();
         let first = left.xt[0];
         assert!(
             left.xt.iter().any(|&s| s != first),
@@ -754,11 +859,124 @@ mod tests {
         );
     }
 
+    /// A query is the left half of a term: deterministic, and the same
+    /// bytes as the left half of every full ciphertext of its value.
+    #[test]
+    fn a_query_is_the_left_half_of_a_term() {
+        let ore = init_ore();
+        let query = query_bytes(&ore, &u64_pt(456));
+        assert_eq!(query, query_bytes(&ore, &u64_pt(456)));
+        let term = full_u64(&ore, 456);
+        assert_eq!(query, term.left.to_bytes());
+        assert_eq!(query.len(), 4 + 11 + 176);
+    }
+
+    /// A left ciphertext against a full one, raw: what each kind of
+    /// malformed or mismatched pair returns (#120).
+    #[test]
+    fn left_to_full_refuses_what_is_not_a_left_and_a_full() {
+        let ore = init_ore();
+        let left = query_bytes(&ore, &u64_pt(7));
+        let full = term_bytes(&ore, &u64_pt(7));
+        assert_eq!(
+            Ore::compare_left_to_full(&left, &full),
+            Some(Ordering::Equal)
+        );
+        // Swapped, or two of a kind.
+        assert_eq!(Ore::compare_left_to_full(&full, &left), None);
+        assert_eq!(Ore::compare_left_to_full(&full, &full), None);
+        assert_eq!(Ore::compare_left_to_full(&left, &left), None);
+        // Another block count: a `u32` is 6 blocks.
+        let left_u32 = query_bytes(&ore, &u32_pt(7));
+        assert_eq!(Ore::compare_left_to_full(&left_u32, &full), None);
+        // Truncated, or a symbol outside the 6-bit domain (the first `xt`
+        // byte, after the 4-byte header).
+        assert_eq!(
+            Ore::compare_left_to_full(&left[..left.len() - 1], &full),
+            None
+        );
+        let mut bad = left.clone();
+        bad[4] = 64;
+        assert_eq!(Ore::compare_left_to_full(&bad, &full), None);
+        // The same on `full`'s side: a bad symbol, truncated, extended.
+        let mut bad = full.clone();
+        bad[4] = 64;
+        assert_eq!(Ore::compare_left_to_full(&left, &bad), None);
+        assert_eq!(
+            Ore::compare_left_to_full(&left, &full[..full.len() - 1]),
+            None
+        );
+        let mut longer = full.clone();
+        longer.push(0);
+        assert_eq!(Ore::compare_left_to_full(&left, &longer), None);
+        let mut longer = left.clone();
+        longer.push(0);
+        assert_eq!(Ore::compare_left_to_full(&longer, &full), None);
+        // Every header byte (version, scheme id, block count) altered on
+        // either side, and on both alike.
+        for i in 0..4 {
+            let (mut l, mut f) = (left.clone(), full.clone());
+            l[i] ^= 0xff;
+            f[i] ^= 0xff;
+            assert_eq!(Ore::compare_left_to_full(&l, &full), None, "left byte {i}");
+            assert_eq!(Ore::compare_left_to_full(&left, &f), None, "full byte {i}");
+            assert_eq!(Ore::compare_left_to_full(&l, &f), None, "both byte {i}");
+        }
+        // A 0-block pair, and one past `MAX_BLOCKS`, each with consistent
+        // headers and lengths.
+        for count in [0, MAX_BLOCKS + 1] {
+            let mut l = vec![0u8; 4 + left_body_len(count)];
+            let mut f = vec![0u8; 4 + full_body_len(count)];
+            let mut header = Vec::new();
+            WIRE.write(count as u16, &mut header);
+            l[..4].copy_from_slice(&header);
+            f[..4].copy_from_slice(&header);
+            assert_eq!(Ore::compare_left_to_full(&l, &f), None, "{count} blocks");
+        }
+    }
+
+    /// The scheme is shared across threads as it is: one instance, one
+    /// nonce generator behind a lock.
+    #[test]
+    fn the_scheme_is_send_and_sync() {
+        fn is_send_sync<X: Send + Sync>(_: &X) {}
+        let ore = init_ore();
+        is_send_sync(&ore);
+        let shared = &ore;
+        let terms: Vec<Vec<u8>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..4u64)
+                .map(|i| scope.spawn(move || term_bytes(shared, &u64_pt(i))))
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        for pair in terms.windows(2) {
+            assert_eq!(
+                Ore::compare_raw_slices(&pair[0], &pair[1]),
+                Some(Ordering::Less)
+            );
+        }
+    }
+
     quickcheck! {
+        /// A left (query) ciphertext orders against a full one as the
+        /// plaintexts do, raw and typed, and agrees with the full-vs-full
+        /// comparators (#120).
+        fn left_to_full_orders_as_the_plaintexts(a: u64, b: u64) -> bool {
+            let ore = init_ore();
+            let left = left_u64(&ore, a);
+            let full_a = full_u64(&ore, a);
+            let full_b = full_u64(&ore, b);
+            let want = a.cmp(&b);
+            Ore::compare_left_to_full(&left.to_bytes(), &full_b.to_bytes()) == Some(want)
+                && left.compare_to_full(&full_b) == want
+                && full_a.cmp(&full_b) == want
+                && Ore::compare_raw_slices(&full_a.to_bytes(), &full_b.to_bytes()) == Some(want)
+        }
+
         fn compare_u64(x: u64, y: u64) -> bool {
             let ore = init_ore();
-            let a = x.encrypt(&ore).unwrap();
-            let b = y.encrypt(&ore).unwrap();
+            let a = full_u64(&ore, x);
+            let b = full_u64(&ore, y);
 
             match x.cmp(&y) {
                 Ordering::Greater => a > b,
@@ -769,8 +987,8 @@ mod tests {
 
         fn compare_u64_raw_slices(x: u64, y: u64) -> bool {
             let ore = init_ore();
-            let a = x.encrypt(&ore).unwrap().to_bytes();
-            let b = y.encrypt(&ore).unwrap().to_bytes();
+            let a = term_bytes(&ore, &u64_pt(x));
+            let b = term_bytes(&ore, &u64_pt(y));
 
             match Ore::compare_raw_slices(&a, &b) {
                 Some(Ordering::Greater) => x > y,
@@ -782,16 +1000,16 @@ mod tests {
 
         fn equality_u64(x: u64) -> bool {
             let ore = init_ore();
-            let a = x.encrypt(&ore).unwrap();
-            let b = x.encrypt(&ore).unwrap();
+            let a = full_u64(&ore, x);
+            let b = full_u64(&ore, x);
 
             a == b
         }
 
         fn compare_u32(x: u32, y: u32) -> bool {
             let ore = init_ore();
-            let a = x.encrypt(&ore).unwrap();
-            let b = y.encrypt(&ore).unwrap();
+            let a: CipherText<Ore, 6> = full(&ore, &u32_pt(x));
+            let b: CipherText<Ore, 6> = full(&ore, &u32_pt(y));
 
             match x.cmp(&y) {
                 Ordering::Greater => a > b,
@@ -806,8 +1024,8 @@ mod tests {
             }
 
             let ore = init_ore();
-            let a = x.encrypt(&ore).unwrap();
-            let b = y.encrypt(&ore).unwrap();
+            let a: CipherText<Ore, 11> = full(&ore, &f64_pt(x));
+            let b: CipherText<Ore, 11> = full(&ore, &f64_pt(y));
 
             match x.partial_cmp(&y) {
                 Some(Ordering::Greater) => TestResult::from_bool(a > b),
@@ -819,7 +1037,7 @@ mod tests {
 
         fn serialize_roundtrip_u64(x: u64) -> bool {
             let ore = init_ore();
-            let a = x.encrypt(&ore).unwrap();
+            let a = full_u64(&ore, x);
             let bytes = a.to_bytes();
             let b = CipherText::<Ore, 11>::from_slice(&bytes).unwrap();
             a == b
@@ -831,14 +1049,13 @@ mod tests {
         // u64: 11 blocks. header(4) + xt(11) + f(11*16) + nonce(16) + right(11*8)
         assert_eq!(CipherText::<Ore, 11>::size(), 4 + 11 + 176 + 16 + 88);
         let ore = init_ore();
-        let ct = 456u64.encrypt(&ore).unwrap();
-        assert_eq!(ct.to_bytes().len(), 295);
+        assert_eq!(term_bytes(&ore, &u64_pt(456)).len(), 295);
     }
 
     #[test]
     fn header_emitted_and_validated() {
         let ore = init_ore();
-        let mut bytes = 456u64.encrypt(&ore).unwrap().to_bytes();
+        let mut bytes = term_bytes(&ore, &u64_pt(456));
         assert_eq!(&bytes[0..4], &[0x02, 0x02, 0x00, 11]);
 
         // Corrupt each header field; parsing must fail.
@@ -855,46 +1072,39 @@ mod tests {
 
     #[test]
     fn cross_scheme_comparison_rejected() {
-        use crate::scheme::bit2::OreAes128ChaCha20;
+        let legacy = OreAes128::init(fixed_key(1), fixed_key(2)).unwrap();
+        let bit6 = Ore::init(fixed_key(1)).unwrap();
 
-        let k1 = [1u8; 16];
-        let k2 = [2u8; 16];
-        let legacy = OreAes128ChaCha20::init(&k1, &k2).unwrap();
-        let bit6 = Ore::init(&k1).unwrap();
-
-        let a = 456u64.encrypt(&legacy).unwrap().to_bytes();
-        let b = 456u64.encrypt(&bit6).unwrap().to_bytes();
+        let a = legacy.encrypt_plaintext(&u64_pt(456)).unwrap().into_bytes();
+        let b = term_bytes(&bit6, &u64_pt(456));
 
         assert_eq!(Ore::compare_raw_slices(&a, &b), None);
         assert_eq!(Ore::compare_raw_slices(&b, &a), None);
         // The legacy comparator infers block count from length; a Bit6
         // u64 ciphertext (295 bytes) never matches a legacy length for
         // equal-length inputs, and unequal lengths return None up front.
-        assert_eq!(OreAes128ChaCha20::compare_raw_slices(&a, &b), None);
+        assert_eq!(OreAes128::compare_raw_slices(&a, &b), None);
     }
 
     #[test]
     fn cross_block_count_comparison_rejected() {
         let ore = init_ore();
-        let a = 456u64.encrypt(&ore).unwrap().to_bytes();
-        let b = 456u32.encrypt(&ore).unwrap().to_bytes();
+        let a = term_bytes(&ore, &u64_pt(456));
+        let b = term_bytes(&ore, &u32_pt(456));
         assert_eq!(Ore::compare_raw_slices(&a, &b), None);
     }
 
     #[test]
     fn smallest_to_largest() {
         let ore = init_ore();
-        let a = 0u64.encrypt(&ore).unwrap();
-        let b = u64::MAX.encrypt(&ore).unwrap();
-
-        assert!(a < b);
+        assert!(full_u64(&ore, 0) < full_u64(&ore, u64::MAX));
     }
 
     #[test]
     fn comparisons_in_last_block() {
         let ore = init_ore();
-        let a = 10u64.encrypt(&ore).unwrap();
-        let b = 73u64.encrypt(&ore).unwrap();
+        let a = full_u64(&ore, 10);
+        let b = full_u64(&ore, 73);
 
         assert!(a < b);
         assert!(b > a);
@@ -902,14 +1112,11 @@ mod tests {
 
     #[test]
     fn different_keys_not_equal() {
-        let k1 = [1u8; 16];
-        let k3 = [3u8; 16];
+        let ore1 = Ore::init(fixed_key(1)).unwrap();
+        let ore2 = Ore::init(fixed_key(3)).unwrap();
 
-        let ore1 = Ore::init(&k1).unwrap();
-        let ore2 = Ore::init(&k3).unwrap();
-
-        let a = 1000u32.encrypt(&ore1).unwrap().to_bytes();
-        let b = 1000u32.encrypt(&ore2).unwrap().to_bytes();
+        let a = term_bytes(&ore1, &u32_pt(1000));
+        let b = term_bytes(&ore2, &u32_pt(1000));
 
         assert_ne!(Some(Ordering::Equal), Ore::compare_raw_slices(&a, &b));
     }
@@ -931,13 +1138,12 @@ mod tests {
 
     fn assert_no_block_secrets(encrypt: fn(&Ore, u64), unscrubbed: fn(&Ore, u64)) {
         use crate::primitives::stack::{residue, SCRUB_BYTES};
-        let k1 = [0x3cu8; 16];
         let x = 0x0123_4567_89ab_cdefu64;
-        let needles = block_secrets(&Ore::init(&k1).unwrap(), u64_blocks(x).inner());
+        let needles = block_secrets(&Ore::init(fixed_key(0x3c)).unwrap(), u64_blocks(x).inner());
 
         // Positive control and depth: without the scrub the secrets are
         // there, and the scrub must reach deeper than the encryption did.
-        let ore = Ore::init(&k1).unwrap();
+        let ore = Ore::init(fixed_key(0x3c)).unwrap();
         let dead = residue::after(move || unscrubbed(&ore, x));
         assert!(needles.iter().any(|n| residue::contains(&dead, n)));
         let depth = residue::depth(&dead);
@@ -948,7 +1154,7 @@ mod tests {
             SCRUB_BYTES
         );
 
-        let ore = Ore::init(&k1).unwrap();
+        let ore = Ore::init(fixed_key(0x3c)).unwrap();
         let dead = residue::after(move || encrypt(&ore, x));
         for (i, needle) in needles.iter().enumerate() {
             assert!(
@@ -968,7 +1174,7 @@ mod tests {
     fn encrypt_leaves_no_prp_secrets_on_the_stack() {
         assert_no_block_secrets(
             |ore, x| {
-                core::hint::black_box(x.encrypt(ore).unwrap());
+                core::hint::black_box(ore.encrypt_plaintext(&u64_pt(x)).unwrap());
             },
             |ore, x| {
                 core::hint::black_box(ore.encrypt_blocks(&u64_blocks(x)).unwrap());
@@ -980,11 +1186,44 @@ mod tests {
     fn encrypt_left_leaves_no_prp_secrets_on_the_stack() {
         assert_no_block_secrets(
             |ore, x| {
-                core::hint::black_box(x.encrypt_left(ore).unwrap());
+                core::hint::black_box(ore.encrypt_query_plaintext(&u64_pt(x)).unwrap());
             },
             |ore, x| {
                 core::hint::black_box(ore.encrypt_left_blocks(&u64_blocks(x)).unwrap());
             },
         );
+    }
+
+    /// `init` seeds the nonce generator from the OS: one cipher never
+    /// repeats a nonce, and two ciphers under one key draw different
+    /// streams. A constant seed would pass every other test.
+    #[test]
+    fn every_term_draws_a_fresh_nonce() {
+        let a = Ore::init(fixed_key(1)).unwrap();
+        let b = Ore::init(fixed_key(1)).unwrap();
+        let (a1, a2, b1) = (
+            term_bytes(&a, &u64_pt(5)),
+            term_bytes(&a, &u64_pt(5)),
+            term_bytes(&b, &u64_pt(5)),
+        );
+        assert_ne!(a1, a2, "one cipher reused a nonce");
+        assert_ne!(a1, b1, "two ciphers drew the same nonce stream");
+        assert_eq!(Ore::compare_raw_slices(&a1, &b1), Some(Ordering::Equal));
+    }
+
+    /// A thread that panics while holding the nonce lock does not stop
+    /// encryption on the shared cipher: the generator is taken from the
+    /// poisoned lock and still draws fresh nonces.
+    #[test]
+    fn a_poisoned_nonce_lock_still_encrypts() {
+        let ore = Ore::init(fixed_key(1)).unwrap();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = ore.rng.lock().unwrap();
+            panic!("poison the nonce lock");
+        }));
+        assert!(ore.rng.is_poisoned());
+        let (a, b) = (term_bytes(&ore, &u64_pt(5)), term_bytes(&ore, &u64_pt(5)));
+        assert_ne!(a, b, "a poisoned lock reused a nonce");
+        assert_eq!(Ore::compare_raw_slices(&a, &b), Some(Ordering::Equal));
     }
 }

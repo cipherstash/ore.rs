@@ -1,54 +1,36 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use ore_rs::scheme::bit2_w6::OreAes128Bit6ChaCha20;
-use ore_rs::{CipherText, Left, OreCipher, OreOutput, Right};
+use ore_rs::scheme::bit2_w6::OreAes128Bit6;
+use ore_rs::OreScheme;
+use std::cmp::Ordering;
 
-// The fixed-width v2 scheme at its two shipped widths (11 blocks for 64-bit
-// values, 6 for 32-bit). Parsing untrusted bytes as a full, left-only or
-// right-only ciphertext must never panic, anything accepted must re-encode
-// to itself, and the raw comparator must answer arbitrary pairs without
-// panicking and agree with the typed `Ord` on pairs that parse.
-fn check<const N: usize>(data: &[u8]) {
-    if let Ok(ct) = CipherText::<OreAes128Bit6ChaCha20, N>::from_slice(data) {
-        assert_eq!(
-            ct.to_bytes(),
-            data,
-            "accepted full ciphertext did not round-trip"
-        );
-    }
-    if let Ok(left) = Left::<OreAes128Bit6ChaCha20, N>::from_slice(data) {
-        assert_eq!(
-            left.to_bytes(),
-            data,
-            "accepted left ciphertext did not round-trip"
-        );
-    }
-    if let Ok(right) = Right::<OreAes128Bit6ChaCha20, N>::from_slice(data) {
-        assert_eq!(
-            right.to_bytes(),
-            data,
-            "accepted right ciphertext did not round-trip"
-        );
+// The fixed-width v2 scheme's comparators take raw stored bytes and index
+// into them by the block count the header declares. Arbitrary byte pairs
+// must never panic: a malformed side is answered with `None`. A full
+// ciphertext compared with itself is `Equal` whenever it is accepted, and a
+// left ciphertext is its full's prefix, so the left-to-full comparator must
+// agree with the full-to-full one on that prefix. Antisymmetry is not
+// asserted; it holds only for genuine ciphertexts.
+fn consistent(a: &[u8], b: &[u8]) {
+    let full = OreAes128Bit6::compare_raw_slices(a, b);
+    if let Some(count) = header_count(a) {
+        let left_len = 4 + count * 17;
+        if a.len() >= left_len {
+            let by_left = OreAes128Bit6::compare_left_to_full(&a[..left_len], b);
+            if full.is_some() {
+                assert_eq!(full, by_left, "left-to-full disagrees with full-to-full");
+            }
+        }
     }
 }
 
-/// When both inputs parse as full ciphertexts, the raw comparator and the
-/// typed `Ord` must give the same order: a database index (raw bytes) and an
-/// application (parsed values) must not order the same rows differently.
-/// Antisymmetry is not asserted; it holds only for genuine ciphertexts.
-fn agree<const N: usize>(a: &[u8], b: &[u8]) {
-    let (Ok(ct_a), Ok(ct_b)) = (
-        CipherText::<OreAes128Bit6ChaCha20, N>::from_slice(a),
-        CipherText::<OreAes128Bit6ChaCha20, N>::from_slice(b),
-    ) else {
-        return;
-    };
-    assert_eq!(
-        OreAes128Bit6ChaCha20::compare_raw_slices(a, b),
-        Some(ct_a.cmp(&ct_b)),
-        "raw and typed comparators disagree"
-    );
+/// The block count a v2 header declares, if the bytes have one.
+fn header_count(bytes: &[u8]) -> Option<usize> {
+    if bytes.len() < 4 || bytes[0] != 0x02 || bytes[1] != 0x02 {
+        return None;
+    }
+    Some(u16::from_be_bytes([bytes[2], bytes[3]]) as usize)
 }
 
 /// `a` with its first `header` bytes kept and `b` written over the rest.
@@ -64,13 +46,14 @@ fn overlay(a: &[u8], b: &[u8], header: usize) -> Vec<u8> {
 
 fuzz_target!(|pair: (&[u8], &[u8])| {
     let (a, b) = pair;
-    check::<11>(a);
-    check::<6>(a);
+    if let Some(order) = OreAes128Bit6::compare_raw_slices(a, a) {
+        assert_eq!(order, Ordering::Equal, "a ciphertext is not equal to itself");
+    }
     let b2 = overlay(a, b, 4);
     for (x, y) in [(a, b), (a, &b2[..]), (&b2[..], a)] {
-        agree::<11>(x, y);
-        agree::<6>(x, y);
+        consistent(x, y);
     }
-    let _ = OreAes128Bit6ChaCha20::compare_raw_slices(a, b);
-    let _ = OreAes128Bit6ChaCha20::compare_raw_slices(b, a);
+    let _ = OreAes128Bit6::compare_raw_slices(b, a);
+    let _ = OreAes128Bit6::compare_left_to_full(a, b);
+    let _ = OreAes128Bit6::compare_left_to_full(b, a);
 });

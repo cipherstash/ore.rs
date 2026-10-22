@@ -1,6 +1,6 @@
 # ore-rs
 
-Part of the [ore.rs](https://github.com/cipherstash/ore.rs) workspace _(pronounced "auras")_, alongside [`orderable-bytes`](https://crates.io/crates/orderable-bytes).
+Part of the [ore.rs](https://github.com/cipherstash/ore.rs) workspace _(pronounced "auras")_.
 
 [![Test](https://github.com/cipherstash/ore.rs/actions/workflows/test.yml/badge.svg)](https://github.com/cipherstash/ore.rs/actions/workflows/test.yml)
 
@@ -10,109 +10,138 @@ The library is based on the Block-ORE scheme by [Lewi and Wu (2016)](https://epr
 
 Reference documentation is on [docs.rs/ore-rs](https://docs.rs/ore-rs).
 
-## Choosing a scheme
+## How it fits together
 
-| Scheme | When to use it |
-|---|---|
-| `OreAes128Bit6` ([`scheme::bit2_w6`](https://docs.rs/ore-rs/latest/ore_rs/scheme/bit2_w6/index.html)) | The recommended choice for new fixed-width data: booleans, integers up to 64 bits, characters and floats. |
-| `OreAes128Bit6Chained` ([`scheme::chained`](https://docs.rs/ore-rs/latest/ore_rs/scheme/chained/index.html)) | Strings, other variable-length data and 128-bit integers. Also supports `Decimal` and `chrono` types through `encrypt_fixed`. |
+ore-rs is a scheme crate for [`vitaminc-ore`](https://docs.rs/vitaminc-ore), which owns the plaintext data model: for each kind of value, vitaminc decides how it becomes bytes that sort the way the value does, and seals the result as an `OrderPlaintext` that only it can build. ore-rs encrypts those plaintexts. You never hand it bytes of your own.
 
-The [legacy `OreAes128` scheme](#the-legacy-scheme-oreaes128) remains available for compatibility with existing ciphertexts. It is not recommended for new data.
+The typed API is vitaminc's. You open a **space** on the scheme with a **target** (the type every value in it is encoded as) and a **context** (what the terms compare within), and encrypt values there. A term compares only with terms of its own space.
 
-Bit6 and chained are the v2 schemes. Both use 6-bit blocks. Their ciphertext formats are frozen as of 0.9.0, with compatibility tests to check that stored ciphertexts remain readable across releases. The [legacy format](#the-legacy-scheme-oreaes128) is also frozen.
+One scheme, `BlockOre`, covers every target. It routes each space to one of two engines by the target's width when the space is opened, and you never name an engine:
+
+| Engine | Targets | What a term reveals |
+|---|---|---|
+| Bit6 (`scheme::bit2_w6`) | `I16`–`U64`, `F64`, `Date` (up to 10 bytes) | Order, and the position of the first differing 6-bit block |
+| Chained (`scheme::chained`) | `I128`, `U128`, `Uuid`, `Timestamp`, `Decimal`, `Text`, `Bytes` | Order, the common-prefix length in 6-bit blocks, and the padded length |
+
+Both engines are the v2 schemes from 0.9.0 and their ciphertext formats are frozen, with compatibility tests to check that stored ciphertexts remain readable across releases. The [legacy `OreAes128` scheme](#the-legacy-scheme-oreaes128) remains available for compatibility with existing ciphertexts.
 
 ## Quick start
 
 ```toml
 [dependencies]
-ore-rs = "0.9"
+ore-rs = "0.10"
+vitaminc-ore = "0.8"
+vitaminc-protected = "0.8"
 ```
 
-ore-rs requires Rust 1.78 or later. The `vitaminc` feature requires Rust 1.88 or later.
-
-Use `OreEncrypt` to encrypt a value. You can compare ciphertexts directly or pass their serialised bytes to `compare_raw_slices`:
+ore-rs requires Rust 1.88 or later.
 
 ```rust
-use ore_rs::scheme::bit2_w6::OreAes128Bit6ChaCha20;
-use ore_rs::{CipherText, OreCipher, OreEncrypt, OreOutput};
 use std::cmp::Ordering;
+use ore_rs::BlockOre;
+use vitaminc_ore::target::{I64, Text};
+use vitaminc_ore::{OrderEncrypt, OrderKeyInit};
+use vitaminc_protected::Protected;
 
-// In production, use a random 16-byte key from your key management system.
-let key = [0x2b; 16];
-let ore = OreAes128Bit6ChaCha20::init(&key).unwrap();
+// In production, a random 32-byte key from your key management system.
+let scheme = BlockOre::new(Protected::new([0x2b; 32]));
 
-let a = 456u64.encrypt(&ore).unwrap();
-let b = 1024u64.encrypt(&ore).unwrap();
-assert!(a < b);
+// A space of `i64`s under one context. The compiler checks that a value
+// always fits the target: an `i32` goes in as it is, an `i64` into an
+// `I32` space needs `encrypt_checked`.
+let quantities = scheme.target(I64).context(("orders", "quantity"));
+let a = quantities.encrypt(456i64)?;
+let b = quantities.encrypt(1024i64)?;
+assert_eq!(quantities.compare(&a, &b), Some(Ordering::Less));
+
+// A query is the half of a ciphertext a comparison needs from the
+// searching side: smaller than a stored term, and never stored.
+let query = quantities.encrypt_query(1000i64)?;
+assert_eq!(quantities.compare_query(&query, &a), Some(Ordering::Greater));
+assert_eq!(quantities.compare_query(&query, &b), Some(Ordering::Less));
+
+// A term is stored as bytes, and read back through its space.
+let stored: Vec<u8> = a.as_bytes().to_vec();
+let read_back = quantities.term(ore_rs::Term::from_bytes(stored));
+assert_eq!(quantities.compare(&read_back, &b), Some(Ordering::Less));
+
+// Text goes to the chained engine. The caller does not choose.
+let names = scheme.target(Text).context(("users", "name"));
+let alice = names.encrypt_checked("alice")?;
+let bob = names.encrypt_checked("bob")?;
+assert_eq!(names.compare(&alice, &bob), Some(Ordering::Less));
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`encrypt` takes a value that always fits the target, as vitaminc's `FitsIn` table says; `encrypt_checked` takes any value of the data model and checks it while the program runs. The `vitaminc-ore` README describes the chain, the targets and the encodings.
+
+## Keys and contexts
+
+`BlockOre::new` takes a 32-byte key and derives one 16-byte ORE key from it with HMAC-SHA256. Each space is then keyed from that key under the salt vitaminc derives, `PAE("vitaminc/ore/v1", "block-ore", domain, context)`, through the engines' own salt stage. Two targets or two contexts never share key material, so `0i64` and `i64::MIN` in two spaces are not the same term, and a term of one space never compares `Equal` to a term of another.
+
+Only compare terms of one space. Terms do not record their space, so the scheme cannot detect a mismatch and may return any ordering. Keep a space's terms together, as the vitaminc docs say.
+
+## Padding and length limits
+
+Text is padded with NUL bytes to a length bucket before encryption, so a text term reveals the bucket rather than the exact length. The default rounds up to a power of two with a 16-byte floor: 16, 32, 64 and so on. Stored terms and the queries that compare with them must share a policy, and text that ends in NUL is refused (`OreError::TrailingNul`), since padding would make `"alice"` and `"alice\0"` the same term. Bytes are never padded, because NUL padding would refuse every value that ends in a zero byte, so a bytes term reveals the exact length. Fixed-width targets have nothing to hide.
+
+Text and bytes are refused past a ceiling, 1024 bytes by default, counting the marker byte vitaminc puts before them. Encryption time and term size grow with the padded length, so the ceiling bounds what one value can cost. Set both on the scheme:
+
+```rust
+use std::num::NonZeroUsize;
+use ore_rs::scheme::chained::Padding;
+use ore_rs::BlockOre;
+use vitaminc_ore::target::Text;
+use vitaminc_ore::{OrderEncrypt, OrderKeyInit};
+use vitaminc_protected::Protected;
+
+let scheme = BlockOre::new(Protected::new([0x2b; 32]))
+    .with_text_padding(Padding::PowerOfTwo { min_bytes: 32 })
+    .with_max_bytes(NonZeroUsize::new(256).unwrap());
+let emails = scheme.target(Text).context("customers");
+let term = emails.encrypt_checked("alice@example.com")?;
+# let _ = term;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+## Using the engines directly
+
+The engines and the legacy scheme are public, through the `OreScheme` trait, for compatibility tests, the stored-bytes comparators and anyone who holds serialised ciphertexts. They take a sealed plaintext, made with `vitaminc_ore::order`, and nothing else, and they take the key and salt a space would derive for them. The salt is a `vitaminc_context::Context`, so this path also needs `vitaminc-context = "0.8"` alongside the quick start's dependencies.
+
+```rust
+use std::cmp::Ordering;
+use ore_rs::scheme::bit2_w6::OreAes128Bit6;
+use ore_rs::OreScheme;
+use vitaminc_context::Context;
+use vitaminc_ore::{order, Int, OrderTarget, Physical};
+use vitaminc_protected::Protected;
+
+let ore = OreAes128Bit6::init_with_salt(
+    Protected::new([0x2b; 16]),
+    &Context::from_encoded(&b"orders.quantity"[..]),
+)?;
+let plaintext = |x: u64| order(OrderTarget::U64, None, Physical::Int(Int::U64(x))).unwrap();
+
+let a = ore.encrypt_plaintext(&plaintext(456))?;
+let b = ore.encrypt_plaintext(&plaintext(1024))?;
+let query = ore.encrypt_query_plaintext(&plaintext(456))?;
 
 // A u64 ciphertext has 11 six-bit blocks.
-let bytes = a.to_bytes();
-assert_eq!(bytes.len(), 295);
-let parsed = CipherText::<OreAes128Bit6ChaCha20, 11>::from_slice(&bytes).unwrap();
-assert_eq!(parsed.cmp(&b), Ordering::Less);
-
-// Or compare serialised ciphertexts without parsing them.
+assert_eq!(a.as_bytes().len(), 295);
 assert_eq!(
-    OreAes128Bit6ChaCha20::compare_raw_slices(&bytes, &b.to_bytes()),
+    OreAes128Bit6::compare_raw_slices(a.as_bytes(), b.as_bytes()),
     Some(Ordering::Less)
 );
-```
-
-Strings use the chained scheme:
-
-```rust
-use ore_rs::scheme::chained::OreAes128Bit6ChainedChaCha20;
-use std::cmp::Ordering;
-
-let key = [0x2b; 16];
-let ore = OreAes128Bit6ChainedChaCha20::init(&key).unwrap();
-
-let alice = ore.encrypt_str("alice").unwrap().to_bytes();
-let bob = ore.encrypt_str("bob").unwrap().to_bytes();
 assert_eq!(
-    OreAes128Bit6ChainedChaCha20::compare_raw_slices(&alice, &bob),
-    Some(Ordering::Less)
-);
-
-// A query needs only the left half of a ciphertext.
-let query = ore.encrypt_left_str("alice").unwrap().to_bytes();
-assert_eq!(
-    OreAes128Bit6ChainedChaCha20::compare_left_to_full(&query, &alice),
+    OreAes128Bit6::compare_left_to_full(query.as_bytes(), a.as_bytes()),
     Some(Ordering::Equal)
 );
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-## Ciphertext types and serialisation
+`compare_raw_slices` and `compare_left_to_full` take serialised bytes and need no key, so a comparison can run wherever the bytes are, a database included. They return `None` for bytes that are not a ciphertext of the scheme, or for two chained ciphertexts made under different padding policies. Bit6 and the legacy scheme also return `None` for two ciphertexts of different block counts. The chained engine compares different block counts lexicographically, as it compares two strings: the first differing block decides, and when the shorter ciphertext's blocks all match the longer one's, the shorter sorts first. Serde is not supported.
 
-Bit6 returns a `CipherText<S, N>`, where `S` is the scheme and `N` is the block count. A `u64` uses 11 blocks. Comparing ciphertexts with different schemes or block counts is a compile error:
-
-```compile_fail
-use ore_rs::{OreEncrypt, scheme::bit2_w6::OreAes128Bit6ChaCha20};
-
-let ore = OreAes128Bit6ChaCha20::init(&[0x2b; 16]).unwrap();
-let a = 456u64.encrypt(&ore).unwrap();
-let b = 1024u32.encrypt(&ore).unwrap(); // a u32 is 6 blocks
-
-let result = a > b; // compilation error
-```
-
-Use `to_bytes` to serialise a ciphertext and `from_slice` to parse it, specifying the scheme and block count as in the quick start. You can also compare serialised ciphertexts directly with `compare_raw_slices`. Serde is not supported.
-
-## Plaintext types
-
-The following types implement `OreEncrypt`, which provides `value.encrypt(&cipher)` and `value.encrypt_left(&cipher)`:
-
-| Scheme | Types |
-|---|---|
-| `OreAes128Bit6` | `bool`, `u8`–`u64`, `i8`–`i64`, `char`, `f32`, `f64` |
-| `OreAes128Bit6Chained` | `u128`, `i128` |
-| `OreAes128` (legacy) | The Bit6 types, plus `rust_decimal::Decimal` with the `decimal` feature, and `chrono::NaiveDate` and `chrono::DateTime<Utc>` with the `chrono` feature |
-
-The chained scheme also provides `encrypt_str` for strings and `encrypt_fixed` for other fixed-length types. This includes `rust_decimal::Decimal` with the `decimal` feature, and `chrono::NaiveDate` and `chrono::DateTime<Utc>` with the `chrono` feature. Use `cipher.encrypt_fixed(&value)` for a full ciphertext or `cipher.encrypt_left_fixed(&value)` for a query.
-
-These three types do not yet implement `OreEncrypt` for either v2 scheme. Decimal and timestamp encodings are 14 and 12 bytes respectively, exceeding Bit6's 10-byte limit. `NaiveDate` uses 4 bytes and would fit, but its Bit6 implementation is still missing. Use the chained scheme's `encrypt_fixed` method for all three today.
-
-The plaintext encodings come from the sibling [`orderable-bytes`](https://crates.io/crates/orderable-bytes) crate.
+The chained engine takes `Options` for its salt, padding policy and ceiling: `OreAes128Bit6Chained::init_with(key, options)`. The legacy scheme takes two 16-byte keys: `OreAes128::init(k1, k2)`.
 
 ## Bit6 performance and limits
 
@@ -130,65 +159,7 @@ The smaller blocks account for much of the difference: each needs 64 random-orac
 
 Bit6 also avoids the legacy scheme's [zero-byte leakage](#known-leakage-of-oreaes128). The permutation builder avoids secret-dependent memory addresses, and table lookups and comparisons use constant-time scans. Temporary encryption state is zeroed after use. Parsers and comparators reject malformed input without panicking.
 
-Bit6 supports at most 14 blocks (10 bytes of plaintext) because it packs the prefix into a single AES block. Use the chained scheme for wider values.
-
-## Strings and the chained scheme
-
-Use `OreAes128Bit6Chained` for strings and other values too wide for Bit6. It uses an AES-CMAC accumulator to track the preceding blocks, removing Bit6's 14-block limit. Strings compare lexicographically: `"alice"` sorts before `"bob"`, and `"a"` sorts before `"alice"`.
-
-### Padding and length limits
-
-By default, string lengths are rounded up to a power of two, with a minimum of 16 bytes: 16, 32, 64 and so on. Padding uses NUL bytes, and the ciphertext's size reveals the padded length. You can disable padding with `Padding::None` or choose a fixed length with `Padding::Fixed { max_bytes }`.
-
-Stored values and queries must use the same padding policy. Comparators return `None` if the policies differ. With padding enabled, strings ending in NUL are rejected with `OreError::TrailingNul`: padding would make `"alice"` and `"alice\0"` indistinguishable, for example.
-
-Strings longer than 1024 bytes are rejected with `OreError::TooLong` by default. Encryption time and ciphertext size grow with the padded length, so the limit bounds the cost of encrypting one value.
-
-Set the padding policy, length limit and salt through `Options`:
-
-```rust
-use ore_rs::scheme::chained::{OreAes128Bit6ChainedChaCha20, Options, Padding};
-
-let key = [0x2b; 16];
-let options = Options::default()
-    .with_padding(Padding::PowerOfTwo { min_bytes: 32 })
-    .with_max_bytes(256)
-    .with_salt(b"customers");
-let ore = OreAes128Bit6ChainedChaCha20::init_with(&key, options).unwrap();
-let ct = ore.encrypt_str("alice@example.com").unwrap();
-```
-
-### 128-bit integers and other fixed-length types
-
-The chained scheme implements `OreEncrypt` for `u128` and `i128`, returning `ChainedCipherText<22>` or `ChainedLeft<22>`. Their parsers and comparators require exactly 22 blocks.
-
-The block count does not identify the plaintext type: both integer types and a 16-byte string use 22 blocks. Use a separate key or salt for each type, as described in [Keys and salts](#keys-and-salts).
-
-Use `encrypt_fixed` for other fixed-length types from `orderable-bytes`.
-
-## Keys and salts
-
-Bit6 and chained take one 16-byte key and an optional salt through `init(key)` or `init_with_salt(key, salt)`. The chained scheme also accepts a salt through `Options::with_salt`. A salt can be any byte string, such as a dataset or tenant identifier. Different salts produce separate derived keys.
-
-Only compare values encrypted with the same key and salt. Ciphertexts do not record the salt, so the library cannot detect a mismatch and may return any ordering, including `Equal`. For example, two unpadded empty values compare equal even when their salts differ. Keep track of which key and salt belong to each dataset.
-
-Use a separate key or salt for each plaintext type. Some types encode different values as the same bytes: `0u64` and `i64::MIN`, for example, produce ciphertexts that compare equal under the same key and salt.
-
-The v2 schemes use the supplied key only to derive a root key from a fixed label. They then derive separate internal keys using the salt and labels specific to each scheme. This prevents legacy ciphertexts from exposing v2 keys if the same key is used with both schemes. Legacy `OreAes128` still requires two keys: `init(k1, k2)`.
-
-## Using ore-rs with vitaminc
-
-Enable the optional `vitaminc` feature to use ore-rs through [`vitaminc-ore`](https://docs.rs/vitaminc-ore)'s `OrderScheme` trait. It uses vitaminc 0.6.1 and requires Rust 1.88 or later.
-
-Choose a target type and a context with `scheme.column(OrderTarget::I32, context)`. For fixed-width targets, vitaminc encodes every value at the target's width so the ciphertexts can be compared.
-
-- `vitaminc::Bit6BlockOre` supports fixed-width targets up to 10 bytes.
-- `vitaminc::ChainedBlockOre` supports all targets, including text and bytes.
-- `vitaminc::BlockOre` uses the legacy scheme and supports fixed-width targets up to 15 bytes.
-
-The chained adapter adds a byte (`vitaminc::VARIABLE_WIDTH_MARKER`) before text and byte values so even an empty value produces an encrypted block. The marker counts towards the default 1024-byte limit, leaving 1023 bytes for the value. Longer values return `OrderError::Backend(OreError::TooLong)`.
-
-vitaminc derives a salt for each combination of scheme, target and context. The v2 adapters derive an ORE key from the scheme key once, using HMAC-SHA256, and apply the salt through `init_with_salt`. The legacy adapter derives its two keys for each term using HMAC-SHA256 and the salt.
+Bit6 supports at most 14 blocks (10 bytes of plaintext) because it packs the prefix into a single AES block. The chained engine takes wider values: it uses an AES-CMAC accumulator to track the preceding blocks, removing the limit, at about the same cost per block.
 
 ## Hardware AES on ARM
 
@@ -206,7 +177,7 @@ Without this flag, the `aes` crate uses software AES, which is about 60 times sl
 
 The Lewi-Wu Block-ORE scheme has been well studied, but this implementation has not had a public third-party audit. Evaluate it against your threat model before using it in production. The v2 designs and review notes are in [`docs/`](https://github.com/cipherstash/ore.rs/tree/main/docs).
 
-Anyone with two full ciphertexts can compare them without a key or a query. The information revealed depends on the scheme:
+Anyone with two full ciphertexts can compare them without a key or a query. The information revealed depends on the engine:
 
 - Bit6 reveals the order and the position of the first differing 6-bit block.
 - Chained reveals the order and the common-prefix length in 6-bit blocks. A ciphertext also reveals the padded length, or the exact byte length if padding is disabled.
@@ -216,15 +187,24 @@ To report a security issue, see [SECURITY.md](https://github.com/cipherstash/ore
 
 ## The legacy scheme: `OreAes128`
 
-`OreAes128` (`scheme::bit2`) uses 8-bit blocks and was the only scheme available before 0.9. It remains available for compatibility with existing legacy ciphertexts, but is not recommended for new data. Its format remains frozen so existing ciphertexts stay readable. For new decimal and chrono values, use the chained scheme's `encrypt_fixed` method as described in [Plaintext types](#plaintext-types).
+`OreAes128` (`scheme::bit2`) uses 8-bit blocks and was the only scheme available before 0.9. It remains available for compatibility with existing legacy ciphertexts, but is not recommended for new data and has no vitaminc adapter. Its format remains frozen so existing ciphertexts stay readable. It takes fixed-width plaintexts of up to 15 bytes.
 
 ```rust
-use ore_rs::scheme::bit2::OreAes128ChaCha20;
-use ore_rs::OreEncrypt;
+use std::cmp::Ordering;
+use ore_rs::scheme::bit2::OreAes128;
+use ore_rs::OreScheme;
+use vitaminc_ore::{order, Int, OrderTarget, Physical};
+use vitaminc_protected::Protected;
 
-let (k1, k2) = ([0x2b; 16], [0x7e; 16]);
-let ore = OreAes128ChaCha20::init(&k1, &k2).unwrap();
-assert!(456u64.encrypt(&ore).unwrap() < 1024u64.encrypt(&ore).unwrap());
+let ore = OreAes128::init(Protected::new([0x2b; 16]), Protected::new([0x7e; 16]))?;
+let plaintext = |x: u64| order(OrderTarget::U64, None, Physical::Int(Int::U64(x))).unwrap();
+let a = ore.encrypt_plaintext(&plaintext(456))?;
+let b = ore.encrypt_plaintext(&plaintext(1024))?;
+assert_eq!(
+    OreAes128::compare_raw_slices(a.as_bytes(), b.as_bytes()),
+    Some(Ordering::Less)
+);
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 The legacy implementation uses a Knuth (Fisher-Yates) shuffle for its pseudorandom permutation (PRP), avoiding the weaknesses of small-domain Feistel networks described by [Bogatov et al.](https://eprint.iacr.org/2018/953.pdf). Other changes from the original Lewi-Wu scheme include using AES as the random oracle and including the block number in the left-tag (PRF₁) input to avoid repeated tags.

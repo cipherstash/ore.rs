@@ -16,17 +16,16 @@
     )
 )]
 
-#[cfg(feature = "chrono")]
-mod chrono;
+mod block_ore;
 mod ciphertext;
-#[cfg(feature = "decimal")]
-mod decimal;
-mod encrypt;
 mod primitives;
 pub mod scheme;
-#[cfg(feature = "vitaminc")]
-pub mod vitaminc;
-pub use crate::ciphertext::*;
+mod term;
+#[cfg(test)]
+pub(crate) mod testing;
+pub use crate::block_ore::{BlockOre, BlockOreSpace, ORE_KEY};
+pub(crate) use crate::ciphertext::*;
+pub use crate::term::{Query, Term};
 
 /// Timing-measurement entry points to private primitives, for the detached
 /// `ct-dudect` crate. Enabled only by the `ct-bench` feature; not public API.
@@ -176,18 +175,18 @@ pub mod ct_bench {
         }
     }
 }
-pub use crate::encrypt::OreEncrypt;
 use primitives::PrpError;
 use std::cmp::Ordering;
 use thiserror::Error;
+use vitaminc_ore::OrderPlaintext;
 
-/// Fixed-size byte array used as the input to the BlockORE encryption
-/// routines. `N` is the number of plaintext bytes (one byte per ORE block).
-/// The fixed-N encryption path caps `N` at 15 due to the AES-as-PRF input
-/// packing in [`scheme::bit2`].
-pub type PlainText<const N: usize> = [u8; N];
+/// Fixed-size block array, the input to the fixed-N encryption routines.
+/// `N` is the block count. For the legacy scheme a block is a plaintext
+/// byte; for Bit6 a 6-bit symbol. The fixed-N path caps `N` at 15 (legacy)
+/// or 14 (Bit6) by the AES-as-PRF input packing.
+pub(crate) type PlainText<const N: usize> = [u8; N];
 
-/// Errors returned by [`OreCipher`] initialisation and encryption.
+/// Errors returned by scheme initialisation and encryption.
 ///
 /// New schemes and policies add variants, so the enum is non-exhaustive.
 #[derive(Debug, Error)]
@@ -200,10 +199,14 @@ pub enum OreError {
     /// A pseudo-random permutation primitive returned an error.
     #[error(transparent)]
     PrpError(#[from] PrpError),
-    /// The OS or seeded RNG failed to produce random bytes (used for the
-    /// per-ciphertext nonce).
+    /// The OS random number generator could not seed the scheme's
+    /// generator, from which every per-ciphertext nonce is drawn.
     #[error("Randomness Error")]
-    RandError(#[from] rand::Error),
+    Random(#[from] vitaminc_random::RandomError),
+    /// A text or bytes plaintext, whose width varies, on a fixed-width
+    /// scheme. Only the chained scheme takes them.
+    #[error("Variable-length plaintext on a fixed-width scheme")]
+    VariableLength,
     /// The plaintext exceeds the maximum block count the wire format can
     /// represent (the chained scheme encodes the block count as a `u16`).
     #[error("Too many blocks")]
@@ -219,19 +222,65 @@ pub enum OreError {
     /// NULs, it would encrypt the same as the string without them.
     #[error("String ends in NUL")]
     TrailingNul,
+    /// A plaintext encoded as another target than the space it was handed
+    /// to (`BlockOre`'s `encrypt_plaintext` or `encrypt_query` called
+    /// directly, with a space of another target).
+    #[error("Plaintext of another target than the space's")]
+    TargetMismatch,
 }
 
-/// A BlockORE cipher: a key-bound object that can encrypt fixed-N plaintexts
-/// to ciphertexts whose byte-wise comparison matches the plaintext order.
+mod sealed {
+    pub trait Sealed {}
+}
+
+/// An ORE scheme: encrypts a sealed [`OrderPlaintext`] to a stored
+/// [`Term`] or a [`Query`], and compares the serialised bytes of either
+/// without a key.
 ///
-/// Implementations associate concrete block types for the Left and Right
-/// halves of a ciphertext (see [`Left`], [`Right`], [`CipherText`]) and
-/// expose [`encrypt_left`](Self::encrypt_left)
-/// for query-side ciphertexts, [`encrypt`](Self::encrypt) for indexable
-/// ciphertexts, and [`compare_raw_slices`](Self::compare_raw_slices) for
-/// comparing serialised ciphertext bytes without round-tripping through
-/// typed values.
-pub trait OreCipher: Sized {
+/// The plaintext comes from vitaminc-ore, which owns the encodings:
+/// `vitaminc_ore::order()` makes one from a value and a target, and
+/// [`BlockOre`] is the typed way in, which routes a plaintext to
+/// the right engine by its width. A scheme here takes nothing else, so no
+/// caller can hand it bytes that skipped the encoding.
+///
+/// Sealed: the schemes are this crate's. [`scheme::bit2_w6::OreAes128Bit6`]
+/// takes fixed-width plaintexts of up to 10 bytes,
+/// [`scheme::chained::OreAes128Bit6Chained`] takes any plaintext, and the
+/// legacy [`scheme::bit2::OreAes128`] takes fixed-width plaintexts of up to
+/// 15 bytes.
+pub trait OreScheme: sealed::Sealed {
+    /// Encrypt `plaintext` to a full ciphertext, for storage. Carries a
+    /// random nonce, so one value has many terms, which compare `Equal`.
+    fn encrypt_plaintext(&self, plaintext: &OrderPlaintext) -> Result<Term, OreError>;
+
+    /// Encrypt `plaintext` to a query: the left half alone, which is what
+    /// a comparison against a stored term needs from the other side.
+    /// Deterministic under one key and salt.
+    fn encrypt_query_plaintext(&self, plaintext: &OrderPlaintext) -> Result<Query, OreError>;
+
+    /// Compare two serialised full ciphertexts (the bytes of two
+    /// [`Term`]s) without a key. `None` if either is not a well-formed
+    /// ciphertext of this scheme, or the two were not made to compare: on
+    /// the fixed-width schemes (Bit6 and legacy), a different block
+    /// count; on the chained scheme, a different padding policy. The
+    /// chained scheme compares terms of different block counts, across
+    /// length buckets too, lexicographically: a plaintext that is a
+    /// prefix of the other sorts first.
+    fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering>;
+
+    /// Compare a serialised query (the bytes of a [`Query`]) with a
+    /// serialised full ciphertext: the order of the queried value against
+    /// the stored one, `Less` when the query sorts first. `None` as
+    /// [`compare_raw_slices`](Self::compare_raw_slices) is `None`, and
+    /// for a full ciphertext passed as the query or a query as the term.
+    fn compare_left_to_full(left: &[u8], full: &[u8]) -> Option<Ordering>;
+}
+
+/// A fixed-N BlockORE engine: encrypts `N` blocks to typed halves whose
+/// serialised bytes compare in plaintext order. Crate-private: the block
+/// count is only known when a plaintext arrives, so the public surface is
+/// [`OreScheme`], over sealed plaintexts and bytes.
+pub(crate) trait OreCipher: Sized {
     /// Block type for the Left half of a ciphertext (per-block PRF tag plus
     /// permuted plaintext byte).
     type LeftBlockType: CipherTextBlock;
@@ -250,9 +299,8 @@ pub trait OreCipher: Sized {
     /// since the comparator indexes the right block by it.
     const SYMBOL_DOMAIN: usize = 256;
 
-    /// Encrypt `input` and return only the Left half of the ciphertext.
-    /// Useful for query plaintexts compared against stored ciphertexts —
-    /// the Left alone is enough to drive the comparator.
+    /// Encrypt `input` and return only the Left half of the ciphertext:
+    /// the query side.
     fn encrypt_left<const N: usize>(&self, input: &PlainText<N>)
         -> Result<Left<Self, N>, OreError>;
 
@@ -262,12 +310,6 @@ pub trait OreCipher: Sized {
         &self,
         input: &PlainText<N>,
     ) -> Result<CipherText<Self, N>, OreError>;
-
-    /// Compare two serialised ciphertexts (as produced by
-    /// [`OreOutput::to_bytes`]) byte-for-byte without deserialising. Returns
-    /// `None` if the slice lengths disagree (i.e., they encode ciphertexts
-    /// over different `N`).
-    fn compare_raw_slices(a: &[u8], b: &[u8]) -> Option<Ordering>;
 }
 
 #[cfg(test)]

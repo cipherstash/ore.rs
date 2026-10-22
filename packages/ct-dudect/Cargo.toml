@@ -21,5 +21,12 @@ path = "../ore-rs"
 # `ct-bench` exposes the private PRP builder for the isolated bench.
 features = ["ct-bench"]
 
+# The sealed plaintexts the schemes take.
+[dependencies.vitaminc-ore]
+version = "0.8.0"
+
+[dependencies.vitaminc-protected]
+version = "0.8.0"
+
 [workspace]
 resolver = "2"

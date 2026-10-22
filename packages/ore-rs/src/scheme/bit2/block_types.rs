@@ -1,5 +1,3 @@
-use zeroize::Zeroize;
-
 use crate::ciphertext::{CipherTextBlock, ParseError};
 use crate::primitives::AesBlock;
 
@@ -19,15 +17,18 @@ pub struct RightBlock32 {
 impl RightBlock32 {
     /// Set bit `bit` to the low bit of `value`, overwriting whatever the
     /// bit held. A `u8` names every one of the 256 bits and no other.
+    /// For the tests: the encryptor writes whole masks through
+    /// [`Self::bytes_mut`].
+    #[cfg(test)]
     #[inline]
-    pub fn set_bit(&mut self, bit: u8, value: u8) {
+    pub(crate) fn set_bit(&mut self, bit: u8, value: u8) {
         let shift = bit % 8;
         let b = &mut self.data[usize::from(bit / 8)];
         *b = (*b & !(1 << shift)) | ((value & 1) << shift);
     }
 
     /// The raw bitvector bytes, LSB-first within each byte — the bit order
-    /// used by [`Self::set_bit`] / [`Self::get_bit`].
+    /// used by `set_bit` and [`Self::get_bit`].
     #[inline]
     pub(crate) fn bytes(&self) -> &[u8] {
         &self.data
@@ -64,10 +65,6 @@ impl CipherTextBlock for LeftBlock16 {
             Ok(Self::clone_from_slice(data))
         }
     }
-
-    fn default_in_place(&mut self) {
-        self.zeroize()
-    }
 }
 
 impl CipherTextBlock for RightBlock32 {
@@ -87,10 +84,6 @@ impl CipherTextBlock for RightBlock32 {
 
             Ok(Self { data: arr })
         }
-    }
-
-    fn default_in_place(&mut self) {
-        self.data.zeroize()
     }
 }
 
@@ -125,20 +118,5 @@ mod tests {
             (1, 1),
             "neighbours untouched"
         );
-    }
-
-    #[test]
-    fn right_default_in_place_without_new_data() {
-        let mut right = RightBlock32::default();
-        right.data.copy_from_slice(&[1; 32]);
-
-        let ptr: *const [u8] = &right.data;
-
-        assert_eq!(unsafe { &*ptr }, &[1; 32]);
-
-        right.default_in_place();
-
-        assert_eq!(unsafe { &*ptr }, &[0; 32]);
-        assert_eq!(right.data, [0; 32]);
     }
 }

@@ -20,7 +20,11 @@ import pathlib
 import re
 import sys
 
-DEFAULT_DIRS = ["packages/ore-rs/src", "packages/orderable-bytes/src"]
+DEFAULT_DIRS = [
+    "packages/clww-ore/src",
+    "packages/ore-rs/src",
+    "packages/orderable-bytes/src",
+]
 
 EXEMPT_ATTR = re.compile(r"#\[\s*(cfg\(\s*(test|kani)\s*\)|test|kani::proof)\s*\]")
 ASSERT = re.compile(r"(?<![\w:])(?:(?:core|std)::)?(debug_)?assert(_eq|_ne)?!")

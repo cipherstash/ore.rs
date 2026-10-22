@@ -254,8 +254,8 @@ mod avx2 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{Rng, SeedableRng};
-    use rand_chacha::ChaCha20Rng;
+    use rand::rngs::ChaCha20Rng;
+    use rand::{RngExt, SeedableRng};
 
     fn rand_table(rng: &mut ChaCha20Rng) -> [u8; 256] {
         let mut t = [0u8; 256];
@@ -268,7 +268,7 @@ mod tests {
         let mut rng = ChaCha20Rng::seed_from_u64(7);
         for _ in 0..5_000 {
             let table = rand_table(&mut rng);
-            let x: u8 = rng.gen();
+            let x: u8 = rng.random();
             // Random starting contents so the XOR semantics are exercised.
             let mut a = [0u8; 32];
             rng.fill(&mut a[..]);
@@ -288,7 +288,7 @@ mod tests {
             rng.fill(&mut table[..]);
             // Block values and table entries are < 64 in real use, but the
             // kernels must agree on all byte values.
-            let x: u8 = rng.gen();
+            let x: u8 = rng.random();
             let mut a = [0u8; 8];
             rng.fill(&mut a[..]);
             let mut b = a;

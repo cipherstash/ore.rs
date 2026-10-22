@@ -20,6 +20,13 @@ libfuzzer-sys = "0.4"
 [dependencies.ore-rs]
 path = ".."
 
+# The sealed plaintexts the schemes take.
+[dependencies.vitaminc-ore]
+version = "0.8.0"
+
+[dependencies.vitaminc-protected]
+version = "0.8.0"
+
 [[bin]]
 name = "chained_parse"
 path = "fuzz_targets/chained_parse.rs"

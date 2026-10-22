@@ -17,10 +17,12 @@
 use dudect_bencher::rand::RngExt;
 use dudect_bencher::{ctbench_main, BenchRng, Class, CtRunner};
 use ore_rs::ct_bench::{self, Line};
-use ore_rs::scheme::bit2_w6::OreAes128Bit6ChaCha20;
-use ore_rs::scheme::chained::{OreAes128Bit6Chained, OreAes128Bit6ChainedChaCha20, Padding, Options};
-use ore_rs::{OreCipher, OreEncrypt, OreOutput};
+use ore_rs::scheme::bit2_w6::OreAes128Bit6;
+use ore_rs::scheme::chained::{Options, OreAes128Bit6Chained, Padding};
+use ore_rs::OreScheme;
 use std::hint::black_box;
+use vitaminc_ore::{order, Int, OrderPlaintext, OrderTarget, Physical};
+use vitaminc_protected::Protected;
 
 const K1: [u8; 16] = [
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
@@ -76,17 +78,38 @@ fn data_independent_timing() {
     panic!("CT_DUDECT_DIT is set, but DIT is an aarch64 feature");
 }
 
-fn bit6() -> OreAes128Bit6ChaCha20 {
+fn bit6() -> OreAes128Bit6 {
     data_independent_timing();
-    OreAes128Bit6ChaCha20::init(&K1).unwrap()
+    OreAes128Bit6::init(Protected::new(K1)).unwrap()
+}
+
+/// The sealed `u64` plaintext of `x`: what the encryptor takes. Made
+/// outside the measured region, so the region is the encryption alone.
+fn u64_pt(x: u64) -> OrderPlaintext {
+    order(OrderTarget::U64, None, Physical::Int(Int::U64(x))).unwrap()
+}
+
+/// The sealed `u128` plaintext of `x`.
+fn u128_pt(x: u128) -> OrderPlaintext {
+    order(OrderTarget::U128, None, Physical::Int(Int::U128(x))).unwrap()
+}
+
+/// The sealed text plaintext of `s`: vitaminc's marker byte, then the
+/// folded text, which for lowercase ASCII is the text itself.
+fn text_pt(s: &str) -> OrderPlaintext {
+    order(OrderTarget::Text, None, Physical::Text(s)).unwrap()
 }
 
 /// The chained cipher under `padding`. A harness that places the differing
 /// byte at a chosen block must pass [`Padding::None`]: a padded 17-byte
 /// string becomes 32 bytes, and its last byte is no longer the last block.
-fn chained(padding: Padding) -> OreAes128Bit6ChainedChaCha20 {
+fn chained(padding: Padding) -> OreAes128Bit6Chained {
     data_independent_timing();
-    OreAes128Bit6Chained::init_with(&K1, Options::default().with_padding(padding)).unwrap()
+    OreAes128Bit6Chained::init_with(
+        Protected::new(K1),
+        Options::default().with_padding(padding),
+    )
+    .unwrap()
 }
 
 /// Random class assignment, so the two classes interleave.
@@ -110,14 +133,9 @@ fn bit6_compare_first_vs_last_block(runner: &mut CtRunner, rng: &mut BenchRng) {
         let y0 = x ^ (1 << 63);
         // Flip the bottom bit: only the last block differs.
         let y1 = x ^ 1;
-        left.push((
-            x.encrypt(&ore).unwrap().to_bytes(),
-            y0.encrypt(&ore).unwrap().to_bytes(),
-        ));
-        right.push((
-            x.encrypt(&ore).unwrap().to_bytes(),
-            y1.encrypt(&ore).unwrap().to_bytes(),
-        ));
+        let enc = |v: u64| ore.encrypt_plaintext(&u64_pt(v)).unwrap().into_bytes();
+        left.push((enc(x), enc(y0)));
+        right.push((enc(x), enc(y1)));
     }
     for _ in 0..SAMPLES {
         let c = class(rng);
@@ -128,7 +146,7 @@ fn bit6_compare_first_vs_last_block(runner: &mut CtRunner, rng: &mut BenchRng) {
         };
         let (a, b) = &pool[rng.random_range(0..pool_size())];
         runner.run_one(c, || {
-            black_box(OreAes128Bit6ChaCha20::compare_raw_slices(
+            black_box(OreAes128Bit6::compare_raw_slices(
                 black_box(a),
                 black_box(b),
             ))
@@ -136,29 +154,24 @@ fn bit6_compare_first_vs_last_block(runner: &mut CtRunner, rng: &mut BenchRng) {
     }
 }
 
-/// Chained string comparator over 17-character strings: first byte differs
-/// (`Left`) versus only the last byte differs (`Right`). Unpadded, so that
+/// Chained comparator, first byte differs (`Left`) versus only the last
+/// byte differs (`Right`), over `u128`s: 16 bytes, 22 blocks, the
+/// difference in block 0 or block 21. Not text: vitaminc puts a constant
+/// marker byte before every text, so no two texts differ in block 0. The
+/// comparator is the same for every target (it reads the bytes and the
+/// header, not the target), and fixed-width plaintexts go in unpadded, so
 /// the last byte is in the last block.
 fn chained_compare_first_vs_last_byte(runner: &mut CtRunner, rng: &mut BenchRng) {
     let ore = chained(Padding::None);
     let mut left = Vec::with_capacity(pool_size());
     let mut right = Vec::with_capacity(pool_size());
     for _ in 0..pool_size() {
-        let mut s = [0u8; 17];
-        for b in s.iter_mut() {
-            *b = rng.random_range(b'a'..=b'z');
-        }
-        let mut first = s;
-        first[0] ^= 0x01;
-        let mut last = s;
-        last[16] ^= 0x01;
-        let enc = |bytes: &[u8]| {
-            ore.encrypt_str(std::str::from_utf8(bytes).unwrap())
-                .unwrap()
-                .to_bytes()
-        };
-        left.push((enc(&s), enc(&first)));
-        right.push((enc(&s), enc(&last)));
+        let x: u128 = rng.random();
+        let first = x ^ (1 << 127);
+        let last = x ^ 1;
+        let enc = |x: u128| ore.encrypt_plaintext(&u128_pt(x)).unwrap().into_bytes();
+        left.push((enc(x), enc(first)));
+        right.push((enc(x), enc(last)));
     }
     for _ in 0..SAMPLES {
         let c = class(rng);
@@ -169,7 +182,7 @@ fn chained_compare_first_vs_last_byte(runner: &mut CtRunner, rng: &mut BenchRng)
         };
         let (a, b) = &pool[rng.random_range(0..pool_size())];
         runner.run_one(c, || {
-            black_box(OreAes128Bit6ChainedChaCha20::compare_raw_slices(
+            black_box(OreAes128Bit6Chained::compare_raw_slices(
                 black_box(a),
                 black_box(b),
             ))
@@ -182,8 +195,8 @@ fn chained_compare_first_vs_last_byte(runner: &mut CtRunner, rng: &mut BenchRng)
 /// measurements is the same whichever class comes next.
 fn bit6_encrypt_zero_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
     let ore = bit6();
-    let left = vec![0u64; pool_size()];
-    let right: Vec<u64> = (0..pool_size()).map(|_| rng.random::<u64>()).collect();
+    let left: Vec<OrderPlaintext> = (0..pool_size()).map(|_| u64_pt(0)).collect();
+    let right: Vec<OrderPlaintext> = (0..pool_size()).map(|_| u64_pt(rng.random())).collect();
     for _ in 0..SAMPLES {
         let c = class(rng);
         let pool = if matches!(c, Class::Left) {
@@ -191,8 +204,8 @@ fn bit6_encrypt_zero_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
         } else {
             &right
         };
-        let x = pool[rng.random_range(0..pool_size())];
-        runner.run_one(c, || black_box(black_box(x).encrypt(&ore).unwrap()));
+        let x = &pool[rng.random_range(0..pool_size())];
+        runner.run_one(c, || black_box(ore.encrypt_plaintext(black_box(x)).unwrap()));
     }
 }
 
@@ -202,8 +215,10 @@ fn bit6_encrypt_zero_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
 /// zero class's other property, that it never looks like a pointer.
 fn bit6_encrypt_const_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
     let ore = bit6();
-    let left = vec![0x1234_5678_9abc_def0u64; pool_size()];
-    let right: Vec<u64> = (0..pool_size()).map(|_| rng.random::<u64>()).collect();
+    let left: Vec<OrderPlaintext> = (0..pool_size())
+        .map(|_| u64_pt(0x1234_5678_9abc_def0))
+        .collect();
+    let right: Vec<OrderPlaintext> = (0..pool_size()).map(|_| u64_pt(rng.random())).collect();
     for _ in 0..SAMPLES {
         let c = class(rng);
         let pool = if matches!(c, Class::Left) {
@@ -211,8 +226,8 @@ fn bit6_encrypt_const_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
         } else {
             &right
         };
-        let x = pool[rng.random_range(0..pool_size())];
-        runner.run_one(c, || black_box(black_box(x).encrypt(&ore).unwrap()));
+        let x = &pool[rng.random_range(0..pool_size())];
+        runner.run_one(c, || black_box(ore.encrypt_plaintext(black_box(x)).unwrap()));
     }
 }
 
@@ -221,8 +236,10 @@ fn bit6_encrypt_const_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
 /// no random-oracle keys, hashing or right blocks.
 fn bit6_encrypt_left_const_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
     let ore = bit6();
-    let left = vec![0x1234_5678_9abc_def0u64; pool_size()];
-    let right: Vec<u64> = (0..pool_size()).map(|_| rng.random::<u64>()).collect();
+    let left: Vec<OrderPlaintext> = (0..pool_size())
+        .map(|_| u64_pt(0x1234_5678_9abc_def0))
+        .collect();
+    let right: Vec<OrderPlaintext> = (0..pool_size()).map(|_| u64_pt(rng.random())).collect();
     for _ in 0..SAMPLES {
         let c = class(rng);
         let pool = if matches!(c, Class::Left) {
@@ -230,8 +247,10 @@ fn bit6_encrypt_left_const_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) 
         } else {
             &right
         };
-        let x = pool[rng.random_range(0..pool_size())];
-        runner.run_one(c, || black_box(black_box(x).encrypt_left(&ore).unwrap()));
+        let x = &pool[rng.random_range(0..pool_size())];
+        runner.run_one(c, || {
+            black_box(ore.encrypt_query_plaintext(black_box(x)).unwrap())
+        });
     }
 }
 
@@ -388,12 +407,14 @@ fn prp_build_fixed_a_vs_fixed_b(runner: &mut CtRunner, rng: &mut BenchRng) {
 /// same question as `prp_build_fixed_a_vs_fixed_b`, end to end.
 fn bit6_encrypt_left_fixed_a_vs_fixed_b(runner: &mut CtRunner, rng: &mut BenchRng) {
     let ore = bit6();
-    let a: u64 = rng.random();
-    let b: u64 = rng.random();
+    let a = u64_pt(rng.random());
+    let b = u64_pt(rng.random());
     for _ in 0..SAMPLES {
         let c = class(rng);
-        let x = if matches!(c, Class::Left) { a } else { b };
-        runner.run_one(c, || black_box(black_box(x).encrypt_left(&ore).unwrap()));
+        let x = if matches!(c, Class::Left) { &a } else { &b };
+        runner.run_one(c, || {
+            black_box(ore.encrypt_query_plaintext(black_box(x)).unwrap())
+        });
     }
 }
 
@@ -403,12 +424,15 @@ fn bit6_encrypt_left_fixed_a_vs_fixed_b(runner: &mut CtRunner, rng: &mut BenchRn
 /// is timed.
 fn chained_encrypt_fixed_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
     let ore = chained(Padding::default());
-    let left: Vec<String> = vec!["a".repeat(17); pool_size()];
-    let right: Vec<String> = (0..pool_size())
+    let left: Vec<OrderPlaintext> = (0..pool_size())
+        .map(|_| text_pt(&"a".repeat(17)))
+        .collect();
+    let right: Vec<OrderPlaintext> = (0..pool_size())
         .map(|_| {
-            (0..17)
+            let s: String = (0..17)
                 .map(|_| char::from(rng.random_range(b'a'..=b'z')))
-                .collect()
+                .collect();
+            text_pt(&s)
         })
         .collect();
     for _ in 0..SAMPLES {
@@ -418,8 +442,8 @@ fn chained_encrypt_fixed_vs_random(runner: &mut CtRunner, rng: &mut BenchRng) {
         } else {
             &right
         };
-        let s = pool[rng.random_range(0..pool_size())].as_str();
-        runner.run_one(c, || black_box(ore.encrypt_str(black_box(s)).unwrap()));
+        let s = &pool[rng.random_range(0..pool_size())];
+        runner.run_one(c, || black_box(ore.encrypt_plaintext(black_box(s)).unwrap()));
     }
 }
 

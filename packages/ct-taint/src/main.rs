@@ -26,15 +26,23 @@
 //! Scope: the v2 encryptors only. The legacy `OreAes128` encryptor is not
 //! run: its Knuth-shuffle PRP rejection-samples and swaps at secret indices
 //! by design, and its wire format is frozen (v2 plan, Non-goals).
+//!
+//! The plaintext goes in sealed, as the schemes take it: it is encoded by
+//! vitaminc-ore from an untainted value, and its bytes are marked undefined
+//! in place, so the taint covers exactly what the encryptor reads. The
+//! encodings are vitaminc's and are not under test here (text folding is
+//! variable-time by design).
 
 use std::env;
 use std::process::exit;
 
 use crabgrind::memcheck::{mark_memory, vbits, MemState};
 use hex_literal::hex;
-use ore_rs::scheme::bit2_w6::OreAes128Bit6ChaCha20;
-use ore_rs::scheme::chained::{OreAes128Bit6Chained, OreAes128Bit6ChainedChaCha20};
-use ore_rs::{OreCipher, OreEncrypt, OreOutput};
+use ore_rs::scheme::bit2_w6::OreAes128Bit6;
+use ore_rs::scheme::chained::OreAes128Bit6Chained;
+use ore_rs::OreScheme;
+use vitaminc_ore::{order, Float, Int, OrderPlaintext, OrderTarget, Physical};
+use vitaminc_protected::{Controlled, Protected};
 
 /// Whether this run is the gate (`CT_TAINT_GATE` set), which must run under
 /// memcheck and must not pass vacuously.
@@ -131,105 +139,136 @@ fn tainted<T: Copy>(mut x: T) -> T {
     x
 }
 
-fn bit6() -> OreAes128Bit6ChaCha20 {
-    let mut k = key();
-    taint(&mut k);
-    OreAes128Bit6ChaCha20::init(&k).expect("init")
+/// A sealed plaintext whose encoded bytes are marked undefined, in place.
+/// The value is encoded untainted (the encoding is vitaminc's), then the
+/// bytes the encryptor reads are tainted, so every report is the
+/// encryptor's.
+fn tainted_plaintext(target: OrderTarget, value: Physical<'_>) -> OrderPlaintext {
+    let plaintext = order(target, None, value).expect("the value encodes");
+    let bytes = plaintext.bytes().risky_ref();
+    let marked = mark_memory(bytes.as_ptr() as *const _, bytes.len(), MemState::Undefined);
+    if gate() && marked.is_err() {
+        eprintln!("ct-taint: mark_memory failed; the gate must run under memcheck");
+        exit(3);
+    }
+    plaintext
 }
 
-/// Full Bit6 encryption of a tainted `x` through `OreEncrypt`, which runs the
-/// type's own `to_orderable_bytes` transform on the secret.
-fn bit6_typed<T: Copy + OreEncrypt<OreAes128Bit6ChaCha20>>(x: T) -> Vec<u8> {
+fn bit6() -> OreAes128Bit6 {
+    let k = tainted(key());
+    OreAes128Bit6::init(Protected::new(k)).expect("init")
+}
+
+/// Full Bit6 encryption of a tainted plaintext.
+fn bit6_full_of(target: OrderTarget, value: Physical<'_>) -> Vec<u8> {
     let ore = bit6();
-    let mut out = tainted(x).encrypt(&ore).expect("encrypt").to_bytes();
+    let mut out = ore
+        .encrypt_plaintext(&tainted_plaintext(target, value))
+        .expect("encrypt")
+        .into_bytes();
     untaint_output(&mut out);
     out
 }
 
 fn bit6_full() -> Vec<u8> {
-    bit6_typed(0x1234_5678_9abc_def0u64)
+    bit6_full_of(
+        OrderTarget::U64,
+        Physical::Int(Int::U64(0x1234_5678_9abc_def0)),
+    )
 }
 
 fn bit6_left() -> Vec<u8> {
     let ore = bit6();
-    let x = tainted(0x1234_5678_9abc_def0u64);
-    let mut out = x.encrypt_left(&ore).expect("encrypt_left").to_bytes();
+    let plaintext = tainted_plaintext(
+        OrderTarget::U64,
+        Physical::Int(Int::U64(0x1234_5678_9abc_def0)),
+    );
+    let mut out = ore
+        .encrypt_query_plaintext(&plaintext)
+        .expect("encrypt_query")
+        .into_bytes();
     untaint_output(&mut out);
     out
 }
 
 fn bit6_i64() -> Vec<u8> {
-    bit6_typed(-0x1234_5678_9abc_def0i64)
+    bit6_full_of(
+        OrderTarget::I64,
+        Physical::Int(Int::I64(-0x1234_5678_9abc_def0)),
+    )
 }
 
 fn bit6_f64() -> Vec<u8> {
-    bit6_typed(-1234.5678f64)
+    bit6_full_of(OrderTarget::F64, Physical::Float(Float::F64(-1234.5678)))
 }
 
 /// `u32` is 6 blocks, a different `N` from the 64-bit types' 11.
 fn bit6_u32() -> Vec<u8> {
-    bit6_typed(0x89ab_cdefu32)
+    bit6_full_of(OrderTarget::U32, Physical::Int(Int::U32(0x89ab_cdef)))
 }
 
-/// The 11 six-bit blocks of a u64, as a caller of the raw-block entry points
-/// would pass them.
-const RAW_BLOCKS: [u8; 11] = [4, 35, 5, 22, 15, 9, 43, 60, 55, 59, 48];
-
-fn bit6_raw() -> Vec<u8> {
-    let ore = bit6();
-    let x = tainted(RAW_BLOCKS);
-    let mut out = OreCipher::encrypt(&ore, &x).expect("encrypt").to_bytes();
-    untaint_output(&mut out);
-    out
+/// The chained cipher with the default text padding, so the text modes
+/// cover the padding path, including the trailing-NUL check. The `u128`
+/// and bytes modes use the same cipher on the unpadded path.
+fn chained() -> OreAes128Bit6Chained {
+    let k = tainted(key());
+    OreAes128Bit6Chained::init(Protected::new(k)).expect("init")
 }
 
-fn bit6_raw_left() -> Vec<u8> {
-    let ore = bit6();
-    let x = tainted(RAW_BLOCKS);
-    let mut out = OreCipher::encrypt_left(&ore, &x)
-        .expect("encrypt_left")
-        .to_bytes();
-    untaint_output(&mut out);
-    out
-}
-
-/// The plaintext string, tainted. Built with `from_utf8_unchecked` because
-/// `from_utf8`'s validation branches on every byte, which would report the
-/// harness rather than the encryptor; the bytes are ASCII.
-fn tainted_str(buf: &mut [u8; 17]) -> &str {
-    *buf = *b"alice@example.com";
-    taint(buf);
-    // SAFETY: the buffer was just filled with ASCII.
-    unsafe { std::str::from_utf8_unchecked(buf) }
-}
-
-/// The chained cipher with the default string padding, so the string modes
-/// cover the padding path, including the trailing-NUL check.
-fn chained() -> OreAes128Bit6ChainedChaCha20 {
-    let mut k = key();
-    taint(&mut k);
-    OreAes128Bit6Chained::init(&k).expect("init")
+/// The text plaintext, tainted after vitaminc's folding, so the encryptor's
+/// decomposition and padding are what is tainted.
+fn tainted_text() -> OrderPlaintext {
+    tainted_plaintext(OrderTarget::Text, Physical::Text("alice@example.com"))
 }
 
 fn chained_full() -> Vec<u8> {
     let ore = chained();
-    let mut buf = [0u8; 17];
-    let s = tainted_str(&mut buf);
-    let mut out = ore.encrypt_str(s).expect("encrypt_str").to_bytes();
+    let mut out = ore
+        .encrypt_plaintext(&tainted_text())
+        .expect("encrypt")
+        .into_bytes();
     untaint_output(&mut out);
     out
 }
 
 fn chained_left() -> Vec<u8> {
     let ore = chained();
-    let mut buf = [0u8; 17];
-    let s = tainted_str(&mut buf);
     let mut out = ore
-        .encrypt_left_str(s)
-        .expect("encrypt_left_str")
-        .to_bytes();
+        .encrypt_query_plaintext(&tainted_text())
+        .expect("encrypt_query")
+        .into_bytes();
     untaint_output(&mut out);
     out
+}
+
+/// Full chained encryption of a tainted plaintext on the unpadded path:
+/// a fixed-width target, or bytes, which the cipher's padding never
+/// touches.
+fn chained_unpadded_of(target: OrderTarget, value: Physical<'_>) -> Vec<u8> {
+    let ore = chained();
+    let mut out = ore
+        .encrypt_plaintext(&tainted_plaintext(target, value))
+        .expect("encrypt")
+        .into_bytes();
+    untaint_output(&mut out);
+    out
+}
+
+/// A `u128` is 22 blocks on the chained engine, with no padding.
+fn chained_u128() -> Vec<u8> {
+    chained_unpadded_of(
+        OrderTarget::U128,
+        Physical::Int(Int::U128(0x0123_4567_89ab_cdef_fedc_ba98_7654_3210)),
+    )
+}
+
+/// Bytes go in unpadded, behind vitaminc's marker byte; the last byte is
+/// zero, which text would refuse and bytes take.
+fn chained_bytes() -> Vec<u8> {
+    chained_unpadded_of(
+        OrderTarget::Bytes,
+        Physical::Bytes(&hex!("00ff10203040506070809000")),
+    )
 }
 
 /// Positive control: branches on a tainted byte and indexes memory with it.
@@ -252,10 +291,10 @@ const MODES: &[(&str, fn() -> Vec<u8>)] = &[
     ("bit6-encrypt-i64", bit6_i64),
     ("bit6-encrypt-f64", bit6_f64),
     ("bit6-encrypt-u32", bit6_u32),
-    ("bit6-encrypt-raw", bit6_raw),
-    ("bit6-encrypt-left-raw", bit6_raw_left),
     ("chained-encrypt", chained_full),
     ("chained-encrypt-left", chained_left),
+    ("chained-encrypt-u128", chained_u128),
+    ("chained-encrypt-bytes", chained_bytes),
     ("canary", canary),
 ];
 

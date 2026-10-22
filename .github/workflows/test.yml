@@ -57,6 +57,11 @@ jobs:
       - name: clippy (no features)
         run: cargo clippy --no-deps -p ore-rs --all-targets -- -D warnings
 
+      # clww-ore's default features include `postgres-types`, so its
+      # no-features build is a separate one.
+      - name: clippy (clww-ore, no features)
+        run: cargo clippy --no-deps -p clww-ore --all-targets --no-default-features -- -D warnings
+
       - name: format
         run: cargo fmt -- --check
 
@@ -79,6 +84,51 @@ jobs:
       - name: test (ct-bench)
         run: cargo test -p ore-rs --features ct-bench --lib ct_bench
 
+  # clww-ore's `install.sql` has its own copy of the ORE comparison, which
+  # Postgres uses for `<`, `=` and the btree operator classes. The e2e tests
+  # check it against the Rust comparators; they are `#[ignore]`d in the plain
+  # test run because they need a database.
+  e2e:
+    runs-on: ubuntu-latest
+    name: "🐘 clww-ore SQL e2e"
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: cllwtest
+          # `setup_db()` connects as `postgres` with no password.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-e2e-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: setup rust 1.88
+        uses: dtolnay/rust-toolchain@1.88.0
+
+      - name: install.sql
+        run: psql -h localhost -U postgres -d cllwtest -v ON_ERROR_STOP=1 -f packages/clww-ore/install.sql
+
+      - name: e2e
+        run: cargo test -p clww-ore --all-features --test sql_compare_test --test sql_compare_lex_test -- --ignored
+
   bench:
     runs-on: ubuntu-latest
     name: "⏱ Benchmark"
@@ -99,5 +149,7 @@ jobs:
       - name: setup rust 1.88
         uses: dtolnay/rust-toolchain@1.88.0
 
+      # ore-rs only: clww-ore's criterion suite runs locally, with
+      # `cargo bench -p clww-ore`, rather than on every PR.
       - name: "Benchmark"
-        run: cargo bench
+        run: cargo bench -p ore-rs
