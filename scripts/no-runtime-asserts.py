@@ -23,7 +23,6 @@ import sys
 DEFAULT_DIRS = [
     "packages/clww-ore/src",
     "packages/ore-rs/src",
-    "packages/orderable-bytes/src",
 ]
 
 EXEMPT_ATTR = re.compile(r"#\[\s*(cfg\(\s*(test|kani)\s*\)|test|kani::proof)\s*\]")

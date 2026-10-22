@@ -3,7 +3,6 @@ resolver = "2"
 members = [
     "packages/clww-ore",
     "packages/ore-rs",
-    "packages/orderable-bytes",
 ]
 
 [patch.crates-io]

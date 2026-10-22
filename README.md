@@ -12,7 +12,6 @@ Rust libraries for Order-Revealing Encryption (ORE), used in the [CipherStash](h
 |-------|-------------|
 | [`ore-rs`](packages/ore-rs) | Order-revealing encryption for numbers and strings, based on [Lewi and Wu (2016)](https://eprint.iacr.org/2016/612.pdf) |
 | [`clww-ore`](packages/clww-ore) | Order-revealing and order-preserving encryption from [Chenette, Lewi, Weis and Wu (2015)](https://eprint.iacr.org/2015/1125.pdf): faster and smaller than `ore-rs`, with more leakage. Formerly `cllw-ore`; not yet published under this name |
-| [`orderable-bytes`](packages/orderable-bytes) | Converts plaintext values to bytes while preserving their sort order, for use with ORE and OPE schemes |
 
 See each crate's README for usage, supported types, and feature flags.
 
