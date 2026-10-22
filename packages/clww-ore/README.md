@@ -22,15 +22,41 @@ ordered range queries on encrypted columns we prefer ORE with a custom operator 
 falling back to the OPE variant only when the database doesn't provide those. For everything else
 we use the Block scheme; see [ore.rs](https://ore.rs) for more information.
 
-## Use from vitaminc
+## Use
 
-`ClwwOre` and `ClwwOpe` implement [`vitaminc-ore`](https://docs.rs/vitaminc-ore)'s
-`OrderScheme` and `OrderQuery`, so a vitaminc order space can encrypt the sealed plaintexts it
-builds here. A caller opens a space with a target and a context
-(`scheme.target(I32).context(("orders", "quantity"))`), and every value is encoded as that
-target. Both schemes take every target at any length through the byte-slice entry points, with
-the salt the space derives (scheme, domain and the caller's context) as the CLWW salt. A CLWW
-term is its own query. Requires vitaminc-ore 0.8.
+vitaminc is the front door, as it is for ore-rs. `ClwwOre` and `ClwwOpe` implement
+[`vitaminc-ore`](https://docs.rs/vitaminc-ore)'s `OrderScheme` and `OrderQuery`: a caller opens
+a space with a target and a context, vitaminc encodes every value as that target and seals the
+bytes, and the scheme encrypts them under the salt the space derives (scheme, domain and the
+caller's context). Both schemes take every target at any length. A CLWW term is its own query.
+Requires vitaminc-ore 0.8 and Rust 1.88.
+
+```rust
+use std::cmp::Ordering;
+use clww_ore::ClwwOre;
+use vitaminc_ore::target::U64;
+use vitaminc_ore::{OrderEncrypt, OrderKeyInit};
+use vitaminc_protected::Protected;
+
+let scheme = ClwwOre::new(Protected::new([7u8; 32]));
+let totals = scheme.target(U64).context(("orders", "total"));
+let (a, b) = (totals.encrypt(10u64)?, totals.encrypt(20u64)?);
+assert_eq!(totals.compare(&a, &b), Some(Ordering::Less));
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+Terms are deterministic: one value in one space always encrypts to the same term. The ORE
+comparator runs in constant time over the terms' bytes.
+
+There is no decryption API, but the key is still a decryption key: whoever holds it can
+recompute the keystream and read any term's plaintext, and for OPE can find any value by binary
+search over encryptions. Protect it as one. A caller that needs the plaintext back stores it
+alongside the term under an authenticated cipher such as AES-GCM.
+
+The `postgres-types` feature, off by default, gives the two term types `ToSql`: the ORE term as
+`ore_cllw_8_variable_v1`, which `install.sql` creates with its comparison and btree operator
+class, and the OPE term as `ore_cllw_8_ope_variable_v1`, a type the database defines (an OPE
+term needs no comparator: byte order is its order).
 
 A `Text` or `Bytes` term shows the exact length of its value: there is no padding and no length
 limit. An ORE term is 8 bytes per plaintext byte, an OPE term the same plus 1 carry byte, so a

@@ -314,19 +314,13 @@ name = "clww-ore"
 version = "0.6.0"
 dependencies = [
  "blake3",
- "chrono",
  "criterion",
  "hex",
- "orderable-bytes 0.1.1",
- "paste",
  "postgres",
  "postgres-types",
  "quickcheck",
- "rust_decimal",
- "rust_decimal_macros",
  "subtle",
  "thiserror 1.0.61",
- "unicode-normalization",
  "vitaminc-ore",
  "vitaminc-protected",
  "zeroize",
@@ -882,26 +876,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 
 [[package]]
-name = "orderable-bytes"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "adba0469737879cabc3bdcaa6a7beb4ff7f5bb4aa5d624816c8bb9d425a7d5df"
-dependencies = [
- "chrono",
- "rust_decimal",
-]
-
-[[package]]
-name = "orderable-bytes"
-version = "0.2.1"
-dependencies = [
- "chrono",
- "quickcheck",
- "rust_decimal",
- "rust_decimal_macros",
-]
-
-[[package]]
 name = "ore-rs"
 version = "0.9.0"
 dependencies = [
@@ -951,12 +925,6 @@ dependencies = [
  "smallvec",
  "windows-link",
 ]
-
-[[package]]
-name = "paste"
-version = "1.0.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "percent-encoding"
@@ -1308,16 +1276,6 @@ dependencies = [
  "serde",
  "serde_json",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "rust_decimal_macros"
-version = "1.40.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74a5a6f027e892c7a035c6fddb50435a1fbf5a734ffc0c2a9fed4d0221440519"
-dependencies = [
- "quote",
- "syn 2.0.119",
 ]
 
 [[package]]

@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-This repository publishes the `ore-rs` and `orderable-bytes` crates.
+This repository publishes the `ore-rs` crate. It published `orderable-bytes` up to 0.2.1, which stays on crates.io but is no longer maintained: vitaminc owns the encodings now.
 
 **Security fixes are released for the latest release line of each crate.** Security reports are welcome for any version, but fixes land in the latest release — if you are on an older version, plan to upgrade to receive them.
 

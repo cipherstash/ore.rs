@@ -13,7 +13,11 @@
 //! 2. The keystream for salt `s` after a first bit `b` is the keystream for
 //!    salt `s ‖ b` from the start, so terms under the two salts are linked.
 
-use crate::{encrypt_ope_bits, encrypt_ore_bits, ClwwOpeEncrypt, ClwwOreEncrypt, Key};
+use crate::impls::{encrypt_ope_bits, encrypt_ope_bytes, encrypt_ore_bits, encrypt_ore_bytes};
+use crate::{ClwwOpe, ClwwOre, Key};
+use vitaminc_ore::target::U64;
+use vitaminc_ore::{OrderEncrypt, OrderKeyInit};
+use vitaminc_protected::Protected;
 
 const KEY: [u8; 32] = [0x5a; 32];
 const SALT: &[u8] = b"clww-ore/keystream-separation";
@@ -229,22 +233,27 @@ fn attack_1_fails_on_bit_streams() {
     }
 }
 
+/// Through the vitaminc schemes, where a `u64` is its eight big-endian
+/// bytes. Each scheme's name is also in its space's salt, which separates
+/// the terms further; the keystreams alone are checked by the tests above.
 #[test]
-fn attack_1_fails_on_integers() {
-    let key = key();
-    for salt in [None, Some(SALT)] {
-        let (bits, read) = attack_1(|v| {
-            (
-                v.encrypt_with_salt(&key, salt).unwrap().as_ref().to_vec(),
-                v.encrypt_ope_with_salt(&key, salt)
-                    .unwrap()
-                    .as_ref()
-                    .to_vec(),
-            )
-        });
-        let (fair, rate) = coin_toss(&bits, &read);
-        assert!(fair, "u64: attack 1 read {:.1}% of the bits", rate * 100.0);
-    }
+fn attack_1_fails_through_the_schemes() {
+    let (ore, ope) = (
+        ClwwOre::new(Protected::new(KEY)),
+        ClwwOpe::new(Protected::new(KEY)),
+    );
+    let (ore, ope) = (
+        ore.target(U64).context("keystream-separation"),
+        ope.target(U64).context("keystream-separation"),
+    );
+    let (bits, read) = attack_1(|v| {
+        (
+            ore.encrypt(v).unwrap().as_ref().to_vec(),
+            ope.encrypt(v).unwrap().as_ref().to_vec(),
+        )
+    });
+    let (fair, rate) = coin_toss(&bits, &read);
+    assert!(fair, "u64: attack 1 read {:.1}% of the bits", rate * 100.0);
 }
 
 #[test]
@@ -253,15 +262,12 @@ fn attack_1_fails_on_bytes() {
     for salt in [None, Some(SALT)] {
         let (bits, read) = attack_1(|v| {
             let bytes = v.to_be_bytes();
-            let bytes = bytes.as_slice();
             (
-                bytes
-                    .encrypt_with_salt(&key, salt)
+                encrypt_ore_bytes(&bytes, &key, salt)
                     .unwrap()
                     .as_ref()
                     .to_vec(),
-                bytes
-                    .encrypt_ope_with_salt(&key, salt)
+                encrypt_ope_bytes(&bytes, &key, salt)
                     .unwrap()
                     .as_ref()
                     .to_vec(),
@@ -270,7 +276,7 @@ fn attack_1_fails_on_bytes() {
         let (fair, rate) = coin_toss(&bits, &read);
         assert!(
             fair,
-            "&[u8]: attack 1 read {:.1}% of the bits",
+            "bytes: attack 1 read {:.1}% of the bits",
             rate * 100.0
         );
     }

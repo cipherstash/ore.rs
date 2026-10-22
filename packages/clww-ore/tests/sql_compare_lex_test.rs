@@ -1,7 +1,20 @@
 mod common;
-use clww_ore::{Key, OreClww8VariableV1};
+use clww_ore::OreClww8VariableV1;
 use common::*;
 use quickcheck::{quickcheck, TestResult};
+use vitaminc_ore::target::Text;
+use vitaminc_ore::OrderEncrypt;
+
+/// The ORE term of `s` in a `Text` space, or `None` for text vitaminc
+/// refuses (an unassigned code point, say).
+fn try_term(s: &str) -> Option<OreClww8VariableV1> {
+    let space = scheme().target(Text).context("sql-compare-lex");
+    space.encrypt_checked(s).ok().map(|t| t.into_raw())
+}
+
+fn term(s: &str) -> OreClww8VariableV1 {
+    try_term(s).unwrap()
+}
 
 fn sql_compare_lex(a: &OreClww8VariableV1, b: &OreClww8VariableV1) -> i32 {
     let response = setup_db()
@@ -29,9 +42,7 @@ fn sql_compare_lex_op(a: &OreClww8VariableV1, b: &OreClww8VariableV1, op: SqlOp)
 #[test]
 #[ignore = "E2E"]
 fn test_compare_string_eq() {
-    let key = Key::from([0; 32]);
-    let a = key.encrypt("cat").unwrap();
-    let b = key.encrypt("cat").unwrap();
+    let (a, b) = (term("cat"), term("cat"));
 
     assert_eq!(sql_compare_lex(&a, &b), 0);
 }
@@ -39,9 +50,7 @@ fn test_compare_string_eq() {
 #[test]
 #[ignore = "E2E"]
 fn test_compare_string_prefix() {
-    let key = Key::from([0; 32]);
-    let a = key.encrypt("cat").unwrap();
-    let b = key.encrypt("catskills").unwrap();
+    let (a, b) = (term("cat"), term("catskills"));
 
     assert_eq!(sql_compare_lex(&a, &b), -1);
 }
@@ -49,9 +58,7 @@ fn test_compare_string_prefix() {
 #[test]
 #[ignore = "E2E"]
 fn test_compare_string_prefix_lt() {
-    let key = Key::from([0; 32]);
-    let a = key.encrypt("cat").unwrap();
-    let b = key.encrypt("catskills").unwrap();
+    let (a, b) = (term("cat"), term("catskills"));
 
     assert!(sql_compare_lex_op(&a, &b, SqlOp::Lt));
     assert!(sql_compare_lex_op(&a, &b, SqlOp::Lte));
@@ -66,12 +73,10 @@ fn test_compare_string_prefix_lt() {
 quickcheck! {
     #[ignore = "e2e"]
     fn prop_compare_string_eq(x: String) -> TestResult {
-        if !x.is_ascii() {
+        let Some(a) = try_term(&x) else {
             return TestResult::discard();
-        }
-        let key = Key::from([0; 32]);
-        let a = key.encrypt(x.as_str()).unwrap();
-        let b = key.encrypt(x.as_str()).unwrap();
+        };
+        let b = term(&x);
 
         TestResult::from_bool(sql_compare_lex_op(&a, &b, SqlOp::Eq))
     }

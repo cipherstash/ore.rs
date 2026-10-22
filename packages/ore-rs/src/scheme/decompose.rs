@@ -1,7 +1,8 @@
 //! Decomposition of canonical plaintext bytes into per-block values.
 //!
 //! Plaintext canonicalisation (making a value's natural order match
-//! lexicographic byte order) lives in `orderable-bytes`. This module handles
+//! lexicographic byte order) is vitaminc's: a scheme only ever sees a sealed
+//! `OrderPlaintext`. This module handles
 //! the next step: splitting those bytes into block values `< DOMAIN` for a
 //! given [`super::width::BlockWidth`].
 //!

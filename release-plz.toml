@@ -11,6 +11,3 @@ semver_check = false
 
 [[package]]
 name = "ore-rs"
-
-[[package]]
-name = "orderable-bytes"

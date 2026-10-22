@@ -51,16 +51,15 @@ jobs:
         run: cargo clippy --no-deps --all-targets --all-features  -- -D warnings
 
       # The steps here build with `--all-features`; this one builds ore-rs
-      # with none, so code behind `cfg(feature = "vitaminc")` (or any other
-      # feature) cannot leave an unused import that only the default build
-      # sees.
+      # with none, so code behind a feature (`test-support`, `ct-bench`)
+      # cannot leave an unused import that only the default build sees.
       - name: clippy (no features)
         run: cargo clippy --no-deps -p ore-rs --all-targets -- -D warnings
 
-      # clww-ore's default features include `postgres-types`, so its
-      # no-features build is a separate one.
+      # The same for clww-ore, whose only feature is `postgres-types`, off by
+      # default.
       - name: clippy (clww-ore, no features)
-        run: cargo clippy --no-deps -p clww-ore --all-targets --no-default-features -- -D warnings
+        run: cargo clippy --no-deps -p clww-ore --all-targets -- -D warnings
 
       - name: format
         run: cargo fmt -- --check

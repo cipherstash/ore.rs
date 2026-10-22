@@ -1,18 +1,13 @@
-//! Variable-length CLWW ciphertext types and their associated machinery.
+//! The terms of the two schemes:
 //!
-//! This module owns both:
+//! - [`OreClww8VariableV1`], the term of [`crate::ClwwOre`];
+//! - [`OpeClww8VariableV1`], the term of [`crate::ClwwOpe`].
 //!
-//! - [`OreClww8VariableV1`] — Order-Revealing Encryption ciphertext for
-//!   variable-length plaintexts (strings, byte slices).
-//! - [`OpeClww8VariableV1`] — Order-Preserving Encryption ciphertext for
-//!   variable-length plaintexts (strings, byte slices).
-//!
-//! Both are encrypt-only. The actual encryption logic for `&str` / `&[u8]`
-//! lives in [`super::string`]; this module only defines the ciphertext
-//! types, their construction helpers and comparison/equality semantics.
+//! Both are encrypt-only. This module defines the types, how stored bytes
+//! become one, and how they compare; the encryption is in [`super`].
 
 use crate::Error;
-use hex::{FromHex, FromHexError};
+use hex::FromHex;
 #[cfg(feature = "postgres-types")]
 use postgres_types::ToSql;
 use std::cmp::Ordering;
@@ -20,12 +15,11 @@ use subtle::ConstantTimeEq;
 
 const BITS_PER_BYTE: usize = 8;
 
-/// Variable-length CLWW ORE ciphertext for strings and byte slices.
+/// A CLWW ORE term: the term of [`crate::ClwwOre`], for every target.
 ///
-/// This type represents an encrypted value using the CLWW Order-Revealing Encryption scheme
-/// for variable-length data types like `&str` and `&[u8]`.
-///
-/// The ciphertext length is proportional to the input length (8 bytes per input byte).
+/// One byte per plaintext bit, so 8 bytes per byte of the sealed plaintext.
+/// `Ord` is the scheme's comparator, never byte order. The Postgres type is
+/// `ore_cllw_8_variable_v1`, with the `postgres-types` feature.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "postgres-types", derive(ToSql))]
 #[cfg_attr(feature = "postgres-types", postgres(name = "ore_cllw_8_variable_v1"))]
@@ -39,20 +33,13 @@ impl AsRef<[u8]> for OreClww8VariableV1 {
     }
 }
 
-/// Deliberately **not** length-checked, unlike
-/// [`from_bytes`](OreClww8VariableV1::from_bytes) and the `TryFrom` impl: this
-/// is the wire decoder (`#[serde(with = "hex::serde")]`) for consumers whose
-/// plaintext is a *tagged bit stream* rather than whole bytes, whose
-/// ciphertexts are legitimately not a multiple of 8 bytes long. Rejecting
-/// them here would reject real stored terms. See
-/// [`from_bytes_unchecked`](OreClww8VariableV1::from_bytes_unchecked).
+/// The hex decoder (`#[serde(with = "hex::serde")]`), with the same length
+/// check as [`from_bytes`](OreClww8VariableV1::from_bytes).
 impl FromHex for OreClww8VariableV1 {
-    type Error = FromHexError;
+    type Error = Error;
 
     fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
-        Ok(Self {
-            bytes: hex::decode(hex)?,
-        })
+        Self::from_bytes(hex::decode(hex).map_err(|_| Error)?)
     }
 }
 
@@ -69,27 +56,23 @@ impl TryFrom<&[u8]> for OreClww8VariableV1 {
 impl OreClww8VariableV1 {
     /// The one length rule, shared by [`from_bytes`](Self::from_bytes) and
     /// the `TryFrom` impl: encryption emits one byte per plaintext *bit*, so
-    /// a ciphertext over whole-byte plaintext is a multiple of 8 bytes long.
-    fn is_byte_aligned_len(len: usize) -> bool {
-        len.is_multiple_of(BITS_PER_BYTE)
+    /// a ciphertext over whole-byte plaintext is a multiple of 8 bytes long,
+    /// and never empty, since no plaintext vitaminc seals is.
+    fn is_term_len(len: usize) -> bool {
+        len > 0 && len.is_multiple_of(BITS_PER_BYTE)
     }
 
-    /// Wrap bytes without the length check — for ciphertexts this crate just
-    /// produced (valid by construction) and for consumers encrypting a
-    /// *tagged bit stream* rather than whole bytes, whose ciphertexts are
-    /// legitimately not a multiple of 8 bytes long and which
-    /// [`from_bytes`](Self::from_bytes) would therefore reject.
-    pub fn from_bytes_unchecked(bytes: Vec<u8>) -> Self {
+    /// Wrap bytes without the length check, for terms this crate just made
+    /// (valid by construction) and tests.
+    pub(crate) fn from_bytes_unchecked(bytes: Vec<u8>) -> Self {
         Self { bytes }
     }
 
-    /// Rebuild a ciphertext from stored bytes, rejecting lengths no ORE
-    /// ciphertext of *whole-byte* plaintext can have. Structural only —
-    /// bytes that pass are not thereby proven to be a genuine ciphertext.
-    /// Callers holding a tagged-bit-stream ciphertext want
-    /// [`from_bytes_unchecked`](Self::from_bytes_unchecked) instead.
+    /// Rebuild a term from stored bytes, rejecting lengths no ORE term can
+    /// have. Structural only: bytes that pass are not thereby proven to be a
+    /// genuine term.
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
-        if !Self::is_byte_aligned_len(bytes.len()) {
+        if !Self::is_term_len(bytes.len()) {
             return Err(Error);
         }
         Ok(Self { bytes })
@@ -117,8 +100,8 @@ impl PartialEq for OreClww8VariableV1 {
 impl Eq for OreClww8VariableV1 {}
 
 /// Compare two outputs lexicographically in constant time.
-/// This is useful for strings where the length of the output is not necessarily the same.
-/// A shorter string is considered less than a longer string if it is a prefix of the longer string.
+/// Terms of values of different lengths have different lengths, and a
+/// shorter term that is a prefix of a longer one sorts first.
 fn compare_lex(a: &OreClww8VariableV1, b: &OreClww8VariableV1) -> Ordering {
     let a_len = a.bytes.len();
     let b_len = b.bytes.len();
@@ -141,9 +124,11 @@ fn compare_lex(a: &OreClww8VariableV1, b: &OreClww8VariableV1) -> Ordering {
 
 // --- Variable-length OPE ---
 
-/// Variable-length CLWW OPE ciphertext for strings and byte slices.
+/// A CLWW OPE term: the term of [`crate::ClwwOpe`], for every target.
 ///
-/// Ciphertexts are compared with standard lexicographic byte ordering.
+/// Terms compare in standard lexicographic byte order, so a database needs no
+/// comparator of its own. The Postgres type is `ore_cllw_8_ope_variable_v1`,
+/// with the `postgres-types` feature.
 /// Encryption uses the CLWW keystream from Section 3.2 of the paper; the
 /// plaintext bit contribution is placed at the top bit of its byte (adding
 /// `128` rather than `1`) and the resulting sum is propagated as a
@@ -175,30 +160,23 @@ impl OpeClww8VariableV1 {
     /// The one length rule, shared by [`from_bytes`](Self::from_bytes) and
     /// the `TryFrom` impl: a ciphertext over whole-byte plaintext is
     /// `8 * plaintext_bytes + 1` long (one byte per plaintext bit plus the
-    /// reserved leading carry byte).
-    fn is_byte_aligned_len(len: usize) -> bool {
-        len % BITS_PER_BYTE == 1
+    /// reserved leading carry byte), and no plaintext vitaminc seals is
+    /// empty, so the carry byte alone is not a term.
+    fn is_term_len(len: usize) -> bool {
+        len > 1 && len % BITS_PER_BYTE == 1
     }
 
-    /// Wrap bytes produced by [`crate::encrypt_ope_bits`] without the length
-    /// check — for ciphertexts this crate just produced (valid by
-    /// construction) and for consumers encrypting a *tagged bit stream*
-    /// rather than whole bytes (the `decimal`/`chrono` modules, external
-    /// consumers wiring their own tagged plaintext bit streams), whose
-    /// ciphertexts are legitimately not `8n + 1` long and which
-    /// [`from_bytes`](Self::from_bytes) would therefore reject.
-    pub fn from_bytes_unchecked(bytes: Vec<u8>) -> Self {
+    /// Wrap bytes without the length check, for terms this crate just made
+    /// (valid by construction) and tests.
+    pub(crate) fn from_bytes_unchecked(bytes: Vec<u8>) -> Self {
         Self { bytes }
     }
 
-    /// Rebuild a ciphertext from stored bytes produced by
-    /// [`crate::encrypt_ope_bits`], rejecting lengths no OPE ciphertext of
-    /// *whole-byte* plaintext can have. Structural only — bytes that pass are
-    /// not thereby proven to be a genuine ciphertext. Callers holding a
-    /// tagged-bit-stream ciphertext want
-    /// [`from_bytes_unchecked`](Self::from_bytes_unchecked) instead.
+    /// Rebuild a term from stored bytes, rejecting lengths no OPE term can
+    /// have. Structural only: bytes that pass are not thereby proven to be a
+    /// genuine term.
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
-        if !Self::is_byte_aligned_len(bytes.len()) {
+        if !Self::is_term_len(bytes.len()) {
             return Err(Error);
         }
         Ok(Self { bytes })
@@ -221,16 +199,13 @@ impl AsRef<[u8]> for OpeClww8VariableV1 {
     }
 }
 
-/// Deliberately **not** length-checked, for the same reason as the ORE impl
-/// above: it is the wire decoder for tagged-bit-stream ciphertexts, whose
-/// lengths the `8n + 1` rule does not describe.
+/// The hex decoder, with the same length check as
+/// [`from_bytes`](OpeClww8VariableV1::from_bytes).
 impl FromHex for OpeClww8VariableV1 {
-    type Error = FromHexError;
+    type Error = Error;
 
     fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
-        Ok(Self {
-            bytes: hex::decode(hex)?,
-        })
+        Self::from_bytes(hex::decode(hex).map_err(|_| Error)?)
     }
 }
 
@@ -238,20 +213,17 @@ impl FromHex for OpeClww8VariableV1 {
 mod tests {
     use super::*;
 
-    // One length rule per type, shared by `from_bytes` and `TryFrom`: over
-    // whole-byte plaintext an ORE ciphertext is a multiple of 8 bytes and an
-    // OPE ciphertext is `8 * n + 1` (the reserved leading carry byte).
-    // `from_hex` (the wire decoder) and `from_bytes_unchecked` stay permissive
-    // for tagged-bit-stream ciphertexts, which the rule does not describe.
+    // One length rule per type, shared by `from_bytes`, `TryFrom` and
+    // `from_hex`: an ORE term is a non-empty multiple of 8 bytes and an OPE
+    // term is `8 * n + 1` with `n > 0` (the reserved leading carry byte).
 
     #[test]
     fn ore_rejects_impossible_length_on_the_checked_entry_points() {
-        let short = vec![0u8; 7];
-        assert!(OreClww8VariableV1::from_bytes(short.clone()).is_err());
-        assert!(OreClww8VariableV1::try_from(short.as_slice()).is_err());
-        // `from_hex` and `from_bytes_unchecked` are the documented escape
-        // hatches for tagged-bit-stream ciphertexts, so they accept it.
-        assert!(OreClww8VariableV1::from_hex(hex::encode(&short)).is_ok());
+        for bad in [vec![], vec![0u8; 7]] {
+            assert!(OreClww8VariableV1::from_bytes(bad.clone()).is_err());
+            assert!(OreClww8VariableV1::try_from(bad.as_slice()).is_err());
+            assert!(OreClww8VariableV1::from_hex(hex::encode(&bad)).is_err());
+        }
     }
 
     #[test]
@@ -282,12 +254,22 @@ mod tests {
     #[test]
     fn ope_rejects_impossible_length_on_the_checked_entry_points() {
         // A multiple of 8 is exactly what an OPE ciphertext cannot be: the
-        // carry byte makes every valid length `8 * n + 1`.
-        let short = vec![0u8; 8];
-        assert!(OpeClww8VariableV1::from_bytes(short.clone()).is_err());
-        assert!(OpeClww8VariableV1::try_from(short.as_slice()).is_err());
-        // As for ORE: the hex wire decoder stays permissive on purpose.
-        assert!(OpeClww8VariableV1::from_hex(hex::encode(&short)).is_ok());
+        // carry byte makes every valid length `8 * n + 1`. The carry byte
+        // alone is a term of the empty plaintext, which no space seals.
+        for bad in [vec![0u8; 8], vec![0u8]] {
+            assert!(OpeClww8VariableV1::from_bytes(bad.clone()).is_err());
+            assert!(OpeClww8VariableV1::try_from(bad.as_slice()).is_err());
+            assert!(OpeClww8VariableV1::from_hex(hex::encode(&bad)).is_err());
+        }
+    }
+
+    #[test]
+    fn malformed_hex_is_refused() {
+        // A non-hex digit, and an odd number of digits.
+        for bad in ["zz", "0", "0g00000000000000"] {
+            assert!(OreClww8VariableV1::from_hex(bad).is_err(), "{bad}");
+            assert!(OpeClww8VariableV1::from_hex(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

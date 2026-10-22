@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**vitaminc is the front door**, as it is for ore-rs 0.10: `ClwwOre` and `ClwwOpe` are vitaminc
+order schemes, and the typed API is gone. vitaminc encodes every value and seals the bytes; the
+schemes encrypt them. The design and its reasons are in
+`docs/plans/2026-10-19-ore-0-10-vitaminc-front-door.md`. The bytes of a plaintext encrypt as
+they did, so raw bytes and unsigned integers keep their terms; other types now take vitaminc's
+encodings. 0.6.0 also changes every term (see Security), so terms from `cllw-ore` 0.5 need
+re-encrypting either way.
+
 ### Added
 
 - **`ClwwOre` and `ClwwOpe`, vitaminc order schemes.** Both implement vitaminc-ore 0.8's
@@ -41,6 +49,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **The typed traits.** `ClwwOreEncrypt` and `ClwwOpeEncrypt` and every impl of them
+  (integers, `bool`, floats, `&str`, `String`, `&[u8]`, byte arrays), with `Key::encrypt`
+  and `Key::encrypt_ope`. `Key` is crate-private: a scheme is keyed from a
+  `Protected<[u8; 32]>`.
+- **The fixed-width terms** `OreClww8V1<N>` and `OpeClww8V1<N>`. Every term is an
+  `OreClww8VariableV1` or an `OpeClww8VariableV1`. An unsigned integer's term is its
+  big-endian bytes' term, as it was, and the known-answer digests of those and of byte
+  slices still hold.
+- **The encodings.** `orderize_string`, and the `chrono` and `decimal` features with the
+  `orderable-bytes`, `chrono`, `rust_decimal` and `unicode-normalization` dependencies.
+  Strings, floats, signed integers, dates and decimals now take vitaminc's encodings, so
+  their terms differ from the typed ones.
+- **`encrypt_ore_bits` and `encrypt_ope_bits` are crate-private.** They took any bit
+  stream, so a caller could encrypt bytes that skipped the encoding.
+- **Unchecked term constructors.** `from_bytes_unchecked` is crate-private, and `from_hex`
+  checks the length as `from_bytes` and `TryFrom` do (an ORE term is a multiple of 8
+  bytes, an OPE term `8n + 1`, and neither is empty). Both were open for tagged bit
+  streams, which no public path makes now. `FromHex::Error` is now `clww_ore::Error`,
+  not `hex::FromHexError`: bad hex and a bad length give the same error.
 - **Decryption.** `Key::decrypt`, the `ClwwOreDecrypt` trait (for `OreClww8V1` and
   `OreClww8VariableV1`) and `OreClww8VariableV1::decrypt_to_bytes` are gone, so the
   crate has no decryption API. The key is still a decryption key: whoever holds it can
@@ -55,38 +82,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Renamed from `cllw-ore` to `clww-ore`**, the authors' initials as they are (Chenette,
   Lewi, Weis and Wu), and moved from cipherstash-suite to the ore.rs workspace with its
-  history. The version starts at 0.6.0. The Rust identifiers follow: `CllwOreEncrypt`,
-  and `CllwOpeEncrypt` are `ClwwOreEncrypt` and `ClwwOpeEncrypt` (`CllwOreDecrypt` is
-  gone, see below); `OreCllw8V1`, `OreCllw8VariableV1`, `OpeCllw8V1` and
-  `OpeCllw8VariableV1` are `OreClww8V1`, `OreClww8VariableV1`, `OpeClww8V1` and
-  `OpeClww8VariableV1`. A caller renames the dependency and the imports; nothing else
-  changes.
+  history. The version starts at 0.6.0. The term types that remain follow:
+  `OreCllw8VariableV1` and `OpeCllw8VariableV1` are `OreClww8VariableV1` and
+  `OpeClww8VariableV1`.
 - **No SQL or Postgres type changes.** The rename changes no key derivation or encoding.
-  The SQL objects in `install.sql` and `uninstall.sql` and the Postgres type names
-  the `postgres-types` feature maps to (`ore_cllw_8_v1`, `ore_cllw_8_variable_v1`,
-  `ore_cllw_8_ope_v1`, `ore_cllw_8_ope_variable_v1`) keep their spelling: they are
-  installed in databases and named by EQL, so renaming them would break every
-  installation.
-- **No public OPE for `[u8; 4]`, `[u8; 12]` or `[u8; 14]`.** Those `ClwwOpeEncrypt` impls
-  encrypted any bytes of those widths, so bytes a caller encoded by hand (little-endian
-  integers, an unflipped sign bit) encrypted without error and then sorted wrong. They are
-  crate-private now, for the `chrono` and `decimal` impls that go through them, and those
-  impls' output is unchanged. As in cipherstash-suite#2308.
-- **`encrypt_ope_bits` counts its bits.** It took the count as `n` and checked it against
-  the iterator only in debug builds, so a wrong `n` gave a ciphertext of another length in
-  release. The parameter is gone: `encrypt_ope_bits(bits, key, salt)`.
-- **`encrypt_ope_bits` and `encrypt_ore_bits` refuse a byte that is not a bit.** Each
-  takes one byte per plaintext bit, and any byte other than 0 or 1 gave terms that sort
-  wrong, with no error. Both now return `Result<Vec<u8>, Error>`, and `Err` for such a
-  stream. A valid stream encrypts as before.
+  The SQL objects in `install.sql` and `uninstall.sql` (`ore_cllw_8_v1`,
+  `ore_cllw_8_variable_v1` and their comparisons and operator classes) and the Postgres
+  type names the `postgres-types` feature maps to (`ore_cllw_8_variable_v1`,
+  `ore_cllw_8_ope_variable_v1`) keep their spelling: they are installed in databases and
+  named by EQL, so renaming them would break every installation. No Rust type maps to
+  `ore_cllw_8_v1` now that the fixed-width terms are gone; the e2e tests still check its
+  comparison, binding a term's bytes.
+- **`postgres-types` is off by default.** A caller that binds terms as Postgres
+  parameters turns it on. The e2e SQL tests declare
+  `required-features = ["postgres-types"]`, and CI runs them against Postgres.
+- **MSRV 1.88**, vitaminc's floor, declared in `Cargo.toml`.
 - **The PRF state and plaintext bits are wiped.** The keyed BLAKE3 hasher, each keystream
-  block, and `encrypt_ope_bits`' copy of the plaintext bits and its keystream before the
+  block, and the OPE encryption's copy of the plaintext bits and its keystream before the
   carry pass are zeroized on drop (blake3's `zeroize` feature is on). Both buffers grow by
   moving to a new one and wiping the old, so no buffer they outgrow is freed with its
-  contents. This changes no ciphertext: the known-answer digests of every encrypt path,
-  recorded from 0.5.1, held through it.
-- The e2e SQL tests declare `required-features = ["postgres-types"]`, so a build without
-  default features skips them.
+  contents. This changes no ciphertext: the known-answer digests, recorded from 0.5.1,
+  held through it.
 
 ## Up to 0.4.2
 
