@@ -11,3 +11,6 @@ semver_check = false
 
 [[package]]
 name = "ore-rs"
+
+[[package]]
+name = "clww-ore"

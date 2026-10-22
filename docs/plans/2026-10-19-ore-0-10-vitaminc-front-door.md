@@ -68,7 +68,7 @@ And one change to PR 482: `open` takes the target, `fn open(&self, target: Order
 
 - `git filter-repo` keeps its 98 commits of history.
 - The crate and its identifiers (`CllwOreEncrypt`, `CllwOpeEncrypt`, `OreCllw8V1`, `OpeCllw8V1`) are renamed. `clww-ore` is published fresh at 0.6.0. `cllw-ore` gets one last 0.5.2 release pointing at it and is not yanked, since stack-encrypt pins `=0.5.0`.
-- It adopts the workspace licence, subject to sign-off from whoever owns licensing. It is PolyForm Internal Use today.
+- It keeps PolyForm Internal Use, the licence `cllw-ore` was published under (decided 2026-10-22). The workspace licence ties use to keys from a CipherStash key server.
 - A second PR gives it the same treatment as ore-rs 0.10: vitaminc mandatory, orderable-bytes and the typed `CllwOreEncrypt` API gone, `OrderQuery` implemented, `postgres-types` off by default, MSRV 1.88.
 - `packages/orderable-bytes` is then removed from the workspace. Its 0.2.1 stays on crates.io for old releases.
 
