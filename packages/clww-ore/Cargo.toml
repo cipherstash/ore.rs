@@ -2,7 +2,7 @@
 name = "clww-ore"
 # The crate was `cllw-ore` up to 0.5.1 (cipherstash-suite); it is published
 # fresh under the authors' initials, Chenette, Lewi, Weis and Wu, from 0.6.0.
-version = "0.6.0"
+version = "0.7.0"
 description = "Fast, efficient Order-Revealing and Order-Preserving Encryption using CLWW schemes"
 documentation = "https://docs.rs/clww-ore"
 # PolyForm Internal Use, as `cllw-ore` was, not the workspace's licence:

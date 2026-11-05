@@ -311,7 +311,7 @@ checksum = "98cc8fbded0c607b7ba9dd60cd98df59af97e84d24e49c8557331cfc26d301ce"
 
 [[package]]
 name = "clww-ore"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "blake3",
  "criterion",
@@ -877,7 +877,7 @@ checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 
 [[package]]
 name = "ore-rs"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "aes",
  "block-modes",
