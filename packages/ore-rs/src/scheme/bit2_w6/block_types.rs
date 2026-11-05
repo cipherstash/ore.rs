@@ -12,18 +12,7 @@ pub struct RightBlock8 {
 }
 
 impl RightBlock8 {
-    /// Read bit `bit` (in `0..64`); returns `0` or `1`. A `bit` past the
-    /// block reads as `0`: the oblivious select finds no byte.
-    #[inline]
-    pub fn get_bit(&self, bit: usize) -> u8 {
-        // `bit` is the secret permuted symbol; read the byte obliviously so the
-        // access address does not depend on it. See `width::ct_select_byte`.
-        let byte = crate::scheme::width::ct_select_byte(&self.data, bit / 8);
-        crate::scheme::width::ct_bit(byte, (bit % 8) as u8)
-    }
-
-    /// The raw bitvector bytes, LSB-first within each byte — the bit order
-    /// used by [`Self::get_bit`].
+    /// The raw bitvector bytes, LSB-first within each byte.
     #[inline]
     pub(crate) fn bytes(&self) -> &[u8] {
         &self.data
@@ -33,9 +22,6 @@ impl RightBlock8 {
 impl RightBitVec for RightBlock8 {
     type Bits = [u8; 8];
 
-    fn get_bit(&self, bit: usize) -> u8 {
-        RightBlock8::get_bit(self, bit)
-    }
     fn as_mut_bits(&mut self) -> &mut [u8; 8] {
         &mut self.data
     }

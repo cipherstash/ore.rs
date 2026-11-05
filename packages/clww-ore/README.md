@@ -29,7 +29,7 @@ vitaminc is the front door, as it is for ore-rs. `ClwwOre` and `ClwwOpe` impleme
 a space with a target and a context, vitaminc encodes every value as that target and seals the
 bytes, and the scheme encrypts them under the salt the space derives (scheme, domain and the
 caller's context). Both schemes take every target at any length. A CLWW term is its own query.
-Requires vitaminc-ore 0.8 and Rust 1.88.
+Requires vitaminc-ore 0.9 and Rust 1.89.
 
 ```rust
 use std::cmp::Ordering;

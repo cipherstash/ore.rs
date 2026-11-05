@@ -28,7 +28,7 @@ impl RightBlock32 {
     }
 
     /// The raw bitvector bytes, LSB-first within each byte — the bit order
-    /// used by `set_bit` and [`Self::get_bit`].
+    /// used by `set_bit` and `get_bit`.
     #[inline]
     pub(crate) fn bytes(&self) -> &[u8] {
         &self.data
@@ -42,8 +42,11 @@ impl RightBlock32 {
 
     /// Read bit `bit` (in `0..256`); returns `0` or `1`. A `bit` past the
     /// block reads as `0`: the oblivious select finds no byte.
+    /// For the tests: the comparator reads a right block through
+    /// `width::FirstDiff::resolve`.
+    #[cfg(test)]
     #[inline]
-    pub fn get_bit(&self, bit: usize) -> u8 {
+    pub(crate) fn get_bit(&self, bit: usize) -> u8 {
         // `bit` is the secret permuted symbol; read the byte obliviously so the
         // access address does not depend on it. See `width::ct_select_byte`.
         let byte = crate::scheme::width::ct_select_byte(&self.data, bit / 8);
