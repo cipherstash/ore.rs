@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-11-05
+
+### Build
+
+- move to vitaminc 0.9.0 from crates.io
+- raise the MSRV to Rust 1.89, vitaminc 0.9's floor
+
 ## [0.6.0] - 2026-10-22
 
 **vitaminc is the front door**, as it is for ore-rs 0.10: `ClwwOre` and `ClwwOpe` are vitaminc

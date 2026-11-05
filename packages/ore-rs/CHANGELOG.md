@@ -6,6 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-05
+
+### Refactoring
+
+- read a right block's bit in the tests only, and fix the README's vitaminc pins
+
+### Build
+
+- move to vitaminc 0.9.0 from crates.io
+- raise the MSRV to Rust 1.89, vitaminc 0.9's floor
+
 ## [0.10.0] - 2026-10-22
 
 ### Documentation
