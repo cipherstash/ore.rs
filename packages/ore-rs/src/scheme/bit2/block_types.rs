@@ -42,6 +42,9 @@ impl RightBlock32 {
 
     /// Read bit `bit` (in `0..256`); returns `0` or `1`. A `bit` past the
     /// block reads as `0`: the oblivious select finds no byte.
+    // Reached only through `RightBitVec::get_bit`, which nothing calls until
+    // the width-generic comparator lands, and from the tests.
+    #[allow(dead_code)]
     #[inline]
     pub fn get_bit(&self, bit: usize) -> u8 {
         // `bit` is the secret permuted symbol; read the byte obliviously so the

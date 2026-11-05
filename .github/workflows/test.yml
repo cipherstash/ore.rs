@@ -42,8 +42,8 @@ jobs:
             target/
           key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: setup rust 1.88
-        uses: dtolnay/rust-toolchain@1.88.0
+      - name: setup rust 1.89
+        uses: dtolnay/rust-toolchain@1.89.0
         with:
           components: clippy, rustfmt
 
@@ -119,8 +119,8 @@ jobs:
             target/
           key: ${{ runner.os }}-e2e-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: setup rust 1.88
-        uses: dtolnay/rust-toolchain@1.88.0
+      - name: setup rust 1.89
+        uses: dtolnay/rust-toolchain@1.89.0
 
       - name: install.sql
         run: psql -h localhost -U postgres -d cllwtest -v ON_ERROR_STOP=1 -f packages/clww-ore/install.sql
@@ -145,8 +145,8 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: setup rust 1.88
-        uses: dtolnay/rust-toolchain@1.88.0
+      - name: setup rust 1.89
+        uses: dtolnay/rust-toolchain@1.89.0
 
       # ore-rs only: clww-ore's criterion suite runs locally, with
       # `cargo bench -p clww-ore`, rather than on every PR.

@@ -11,7 +11,7 @@ documentation = "https://docs.rs/clww-ore"
 license-file = "LICENSE"
 edition = "2021"
 # vitaminc's floor.
-rust-version = "1.88"
+rust-version = "1.89"
 repository = "https://github.com/cipherstash/ore.rs"
 homepage = "https://cipherstash.com"
 keywords = ["cryptography", "security", "databases", "encryption", "sql"]

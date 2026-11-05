@@ -34,7 +34,7 @@ vitaminc-ore = "0.8"
 vitaminc-protected = "0.8"
 ```
 
-ore-rs requires Rust 1.88 or later.
+ore-rs requires Rust 1.89 or later.
 
 ```rust
 use std::cmp::Ordering;
