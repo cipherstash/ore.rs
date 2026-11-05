@@ -179,10 +179,6 @@ impl<const R: usize> FirstDiff<R> {
 /// Per-block bitvector operations on a Right ciphertext block, one bit per
 /// value in the block domain.
 pub trait RightBitVec {
-    /// Read bit `bit`. (The width-generic comparator lands with the Bit6
-    /// scheme; the legacy comparator calls the inherent method.)
-    #[allow(dead_code)]
-    fn get_bit(&self, bit: usize) -> u8;
     /// The raw bitvector, `[u8; DOMAIN / 8]`.
     type Bits;
     /// The raw bitvector bytes, LSB-first within each byte (the same bit
@@ -193,9 +189,6 @@ pub trait RightBitVec {
 impl RightBitVec for RightBlock32 {
     type Bits = [u8; 32];
 
-    fn get_bit(&self, bit: usize) -> u8 {
-        RightBlock32::get_bit(self, bit)
-    }
     fn as_mut_bits(&mut self) -> &mut [u8; 32] {
         self.bytes_mut()
     }
