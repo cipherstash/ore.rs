@@ -41,7 +41,7 @@ jobs:
     # command; its other jobs hold no permissions.
     permissions:
       issues: write
-    uses: cipherstash/workflows/.github/workflows/claude-review.yml@8d6e5d27a63a015368e3f4d49e22c7aa7a6ef0e9 # feat/comment-command (pre-release)
+    uses: cipherstash/workflows/.github/workflows/claude-review.yml@ecf98782c143559e87a2289e68abd0d68e1b9a05 # feat/requested-reviewer (pre-release)
     with:
       routine-trigger-id: ${{ vars.CLAUDE_ROUTINE_TRIGGER_ID }}
     secrets:
