@@ -19,7 +19,7 @@ permissions: {}
 
 jobs:
   review:
-    uses: cipherstash/workflows/.github/workflows/claude-review.yml@f9079f713a1905f9fc396e7048593bebad433c66 # feat/ready-review-requests (pre-release)
+    uses: cipherstash/workflows/.github/workflows/claude-review.yml@27aea00ff520f09029a8d960d222e41e6afcccd1 # feat/ready-review-requests (pre-release)
     with:
       routine-trigger-id: ${{ vars.CLAUDE_ROUTINE_TRIGGER_ID }}
     secrets:
