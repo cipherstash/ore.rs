@@ -29,7 +29,7 @@ Both engines are the v2 schemes from 0.9.0 and their ciphertext formats are froz
 
 ```toml
 [dependencies]
-ore-rs = "0.10"
+ore-rs = "0.12"
 vitaminc-ore = "0.10"
 vitaminc-protected = "0.10"
 ```
