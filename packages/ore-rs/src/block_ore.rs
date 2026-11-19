@@ -534,10 +534,13 @@ mod tests {
         }
 
         let dates = s.target(Date).context("d");
-        let day = |d: i32| chrono::NaiveDate::from_num_days_from_ce_opt(d).expect("a date");
         let (a, b) = (
-            dates.encrypt(day(19_000)).expect("block ore"),
-            dates.encrypt(day(19_001)).expect("block ore"),
+            dates
+                .encrypt(jiff::civil::date(2022, 1, 1))
+                .expect("block ore"),
+            dates
+                .encrypt(jiff::civil::date(2022, 1, 2))
+                .expect("block ore"),
         );
         assert_eq!(dates.compare(&a, &b), Some(Ordering::Less));
     }
