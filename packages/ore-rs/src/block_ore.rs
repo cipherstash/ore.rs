@@ -534,12 +534,34 @@ mod tests {
         }
 
         let dates = s.target(Date).context("d");
-        let day = |d: i32| chrono::NaiveDate::from_num_days_from_ce_opt(d).expect("a date");
         let (a, b) = (
-            dates.encrypt(day(19_000)).expect("block ore"),
-            dates.encrypt(day(19_001)).expect("block ore"),
+            dates
+                .encrypt(jiff::civil::date(2022, 1, 1))
+                .expect("block ore"),
+            dates
+                .encrypt(jiff::civil::date(2022, 1, 2))
+                .expect("block ore"),
         );
         assert_eq!(dates.compare(&a, &b), Some(Ordering::Less));
+
+        // A date from jiff is sealed as its day count since 1970-01-01, the
+        // encoding stored terms were made with. The query is deterministic,
+        // so a change to that encoding (another epoch, say) fails here even
+        // though it would keep the order above.
+        let space = s.open(T::Date, dates.salt()).expect("a date space");
+        for (date, days) in [
+            (jiff::civil::date(1970, 1, 1), 0),
+            (jiff::civil::date(1969, 12, 31), -1),
+            (jiff::civil::date(2022, 1, 1), 18_993),
+        ] {
+            assert_eq!(
+                dates.encrypt_query(date).expect("block ore").as_bytes(),
+                BlockOre::encrypt_query(&s, &space, &crate::testing::date_pt(days))
+                    .expect("block ore")
+                    .as_bytes(),
+                "{date} is not day {days}"
+            );
+        }
     }
 
     /// A comparison dispatches on the wire header: two engines' terms
