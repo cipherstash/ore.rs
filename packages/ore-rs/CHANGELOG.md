@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-20
+
+### Testing
+
+- pin a jiff date to its day count; quick start names 0.12
+
+### Build
+
+- move to vitaminc 0.10.0 from crates.io
+
 ## [0.11.0] - 2026-11-05
 
 ### Refactoring
