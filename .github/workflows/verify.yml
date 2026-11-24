@@ -54,7 +54,7 @@ jobs:
       - name: setup rust
         uses: dtolnay/rust-toolchain@stable
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry/index/
@@ -83,7 +83,7 @@ jobs:
       - name: setup nightly (cargo-fuzz requires it)
         uses: dtolnay/rust-toolchain@nightly
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry/index/
