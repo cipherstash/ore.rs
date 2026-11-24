@@ -30,7 +30,7 @@ jobs:
             arch: aarch64
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/cache@v4
         with:
@@ -107,7 +107,7 @@ jobs:
           --health-retries 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/cache@v4
         with:
@@ -133,7 +133,7 @@ jobs:
     name: "⏱ Benchmark"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/cache@v4
         with:

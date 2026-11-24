@@ -49,7 +49,7 @@ jobs:
           - os: ubuntu-24.04-arm
             arch: aarch64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: setup rust
         uses: dtolnay/rust-toolchain@stable
@@ -78,7 +78,7 @@ jobs:
       matrix:
         target: [chained_parse, chained_compare, chained_encrypt_str, bit6_parse, bit8_parse]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: setup nightly (cargo-fuzz requires it)
         uses: dtolnay/rust-toolchain@nightly
@@ -114,7 +114,7 @@ jobs:
     # runner for GitHub's six-hour default.
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: model-checking/kani-github-action@v1.1
         with:
